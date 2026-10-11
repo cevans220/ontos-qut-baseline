@@ -344,16 +344,22 @@ class SearchManager:
         limit: int = 25,
         offset: int = 0,
         include_facets: bool = True,
+        fields: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """MCP entry point: paginated/faceted search via the active backend.
 
         Scope-based access only (no per-user permission filtering) — the MCP
         layer enforces token scopes. Returns the ``search_scoring.search_index``
         result shape regardless of backend.
+
+        ``include_facets=False`` saves the facet-computation pass when the
+        caller only wants records. ``fields=[...]`` narrows each result row to
+        the requested keys (plus ``id``) so "then fetch details" flows don't
+        pay for description/tags/owner they won't use.
         """
         return self._backend.search(
             query, type_filter=type_filter, filters=filters,
-            limit=limit, offset=offset, include_facets=include_facets,
+            limit=limit, offset=offset, include_facets=include_facets, fields=fields,
         )
 
     def _filter_by_tag(

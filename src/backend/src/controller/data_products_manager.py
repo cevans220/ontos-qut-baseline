@@ -2810,6 +2810,13 @@ class DataProductsManager(DeliveryMixin, SearchableAsset):
             "team_members": ", ".join(team_member_names),
         }
 
+        # Dedupe tag_strings while preserving insertion order. The list accumulates
+        # from multiple sources (unified tags, assigned domains, ontosOriginalDomain,
+        # concept labels) and the same string often lands twice — e.g. a tag that is
+        # also a domain name, or a native-matched domain whose name also appears in
+        # the preserved YAML string. Duplicates waste the result's tags[:5] slice.
+        tag_strings = list(dict.fromkeys(t for t in tag_strings if t))
+
         return SearchIndexItem(
             id=f"product::{product.id}",
             type="data-product",
