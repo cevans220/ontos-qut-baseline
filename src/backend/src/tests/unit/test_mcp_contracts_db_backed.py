@@ -60,9 +60,25 @@ class TestContractToolsAreDbBacked:
         assert res.success is False and "not found" in (res.error or "").lower()
 
     def test_list_includes_db_written_contract(self, db_session: Session):
+        """list_data_contracts is a thin wrapper over search_data_contracts, which
+        reads from the search index built at startup from each manager's
+        get_search_index_items(). This test proves "a contract written via the DB
+        path is findable through the MCP list tool" (#918 invariant) — the index
+        is built after the DB write so the contract is included."""
+        from src.controller.search_manager import SearchManager
+
         mgr = _contract_manager()
+        mgr._db = db_session
         created = mgr.create_from_upload(db=db_session, parsed_odcs=_odcs("Listed DB Contract"), current_user="a@b.com")
-        ctx = ToolContext(db=db_session, settings=MagicMock(), data_contracts_manager=mgr)
+
+        # SearchManager.__init__ builds the index immediately, so construction here
+        # (after the write) is what populates it.
+        search_manager = SearchManager(searchable_managers=[mgr])
+
+        ctx = ToolContext(
+            db=db_session, settings=MagicMock(),
+            data_contracts_manager=mgr, search_manager=search_manager,
+        )
         res = _run(ListDataContractsTool().execute(ctx))
         assert res.success is True
         assert created.id in {c["id"] for c in res.data["contracts"]}

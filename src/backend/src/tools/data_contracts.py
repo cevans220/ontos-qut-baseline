@@ -303,7 +303,9 @@ class SearchDataContractsTool(BaseTool):
         "ranked by relevance. Narrow with the 'domain'/'status' filters and page with "
         "'offset' instead of broadening the query. Leave 'query' empty (or '*') to list "
         "contracts; the response is always paginated and includes 'total_count', "
-        "'has_more' and 'facets' so you can refine rather than fetch everything."
+        "'has_more' and (by default) 'facets' so you can refine rather than fetch "
+        "everything. Set include_facets=false to skip the facet block on cheap list "
+        "calls, or fields=['title','status'] to narrow each row."
     )
     parameters = {
         "query": {
@@ -326,7 +328,18 @@ class SearchDataContractsTool(BaseTool):
         "offset": {
             "type": "integer",
             "description": "Number of results to skip for pagination (default: 0)."
-        }
+        },
+        "include_facets": {
+            "type": "boolean",
+            "description": "Include the global facets block (domain/status/owner/tags counts). "
+                           "Default true. Set false on cheap list calls to save tokens.",
+        },
+        "fields": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Optional allowlist of result-row keys to keep (e.g. ['title','status']). "
+                           "'id' is always included. Shrinks payload for 'then fetch details' flows.",
+        },
     }
     required_params = ["query"]
     required_scope = "contracts:read"
@@ -339,11 +352,14 @@ class SearchDataContractsTool(BaseTool):
         status: Optional[str] = None,
         limit: int = 25,
         offset: int = 0,
+        include_facets: bool = True,
+        fields: Optional[List[str]] = None,
     ) -> ToolResult:
         """Search data contracts over the shared in-memory index."""
         logger.info(
             f"[search_data_contracts] Starting - query='{query}', domain={domain}, "
-            f"status={status}, limit={limit}, offset={offset}"
+            f"status={status}, limit={limit}, offset={offset}, "
+            f"include_facets={include_facets}, fields={fields}"
         )
 
         if not ctx.search_manager:
@@ -357,6 +373,8 @@ class SearchDataContractsTool(BaseTool):
                 filters={"domain": domain, "status": status},
                 limit=limit,
                 offset=offset,
+                include_facets=include_facets,
+                fields=fields,
             )
             logger.info(
                 f"[search_data_contracts] SUCCESS: returned {data['returned']} of "
@@ -517,78 +535,55 @@ class GetDataContractsBulkTool(BaseTool):
 
 
 class ListDataContractsTool(BaseTool):
-    """List all data contracts."""
-    
+    """List all data contracts — thin wrapper over search_data_contracts."""
+
     name = "list_data_contracts"
     category = "data_contracts"
-    description = "List all data contracts with optional filtering."
+    description = (
+        "List all data contracts, optionally filtered by domain or status. This is a "
+        "thin wrapper over search_data_contracts with query='*'; prefer search_data_contracts "
+        "directly when you need relevance ranking, pagination offsets, facets, or a free-text "
+        "query. The response shape matches search_data_contracts (contracts / total_found / "
+        "has_more / offset / limit / facets)."
+    )
     parameters = {
         "domain": {
             "type": "string",
-            "description": "Optional filter by domain"
+            "description": "Optional filter by domain",
         },
         "status": {
             "type": "string",
             "enum": ["draft", "active", "deprecated"],
-            "description": "Optional filter by status"
+            "description": "Optional filter by status",
         },
         "limit": {
             "type": "integer",
-            "description": "Maximum number of contracts to return (default: 50)"
-        }
+            "description": "Maximum number of contracts to return (default: 50, max: 100)",
+        },
     }
     required_params = []
     required_scope = "contracts:read"
-    
+
     async def execute(
         self,
         ctx: ToolContext,
         domain: Optional[str] = None,
         status: Optional[str] = None,
-        limit: int = 50
+        limit: int = 50,
     ) -> ToolResult:
-        """List all data contracts."""
-        logger.info(f"[list_data_contracts] Starting - domain={domain}, status={status}, limit={limit}")
-        
-        if not ctx.data_contracts_manager:
-            logger.error(f"[list_data_contracts] FAILED: Data contracts manager not available")
-            return ToolResult(success=False, error="Data contracts manager not available")
-        
-        try:
-            # DB-backed list: the legacy in-memory manager.list_contracts() is empty in a
-            # deployed app; use the summary query used by the REST list endpoint (#918).
-            summaries = ctx.data_contracts_manager.list_contracts_from_db(
-                ctx.db, status=status, is_admin=True,
-            )
-
-            filtered = []
-            for c in summaries:
-                # Domain is filtered here by name (the DB query filters by domain_id).
-                if domain and (getattr(c, 'domain', None) or '').lower() != domain.lower():
-                    continue
-                filtered.append({
-                    "id": c.id,
-                    "name": c.name,
-                    "domain": getattr(c, 'domain', None),
-                    "status": c.status,
-                    "version": c.version,
-                    "owner_team_name": getattr(c, 'owner_team_name', None),
-                })
-                if len(filtered) >= limit:
-                    break
-
-            logger.info(f"[list_data_contracts] SUCCESS: Found {len(filtered)} contracts")
-            return ToolResult(
-                success=True,
-                data={
-                    "contracts": filtered,
-                    "total_found": len(filtered)
-                }
-            )
-
-        except Exception as e:
-            logger.error(f"[list_data_contracts] FAILED: {type(e).__name__}: {e}", exc_info=True)
-            return ToolResult(success=False, error=f"{type(e).__name__}: {str(e)}")
+        """Delegate to search_data_contracts with query='*' so list / search / get
+        collapse to a single implementation. The previous version returned a
+        thin {contracts, total_found} shape with no facets or pagination
+        metadata, forcing agents to switch tools to refine. Now the response
+        matches search_data_contracts exactly."""
+        return await SearchDataContractsTool().execute(
+            ctx,
+            query="*",
+            domain=domain,
+            status=status,
+            limit=limit,
+            offset=0,
+        )
 
 
 class DeleteDataContractTool(BaseTool):

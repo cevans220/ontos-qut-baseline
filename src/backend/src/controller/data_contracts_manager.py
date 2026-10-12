@@ -519,6 +519,12 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
             "team_members": ", ".join(team_strings),
         }
 
+        # Dedupe tag_names while preserving insertion order — same rationale as
+        # products: multiple sources (unified tags, assigned domains, …) can
+        # contribute the same string, and the result's tags[:5] slice would
+        # otherwise waste slots on duplicates.
+        tag_names = list(dict.fromkeys(t for t in tag_names if t))
+
         return SearchIndexItem(
             id=f"contract::{contract_id}",
             type="data-contract",
