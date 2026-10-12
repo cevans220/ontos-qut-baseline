@@ -170,8 +170,11 @@ class _StubSearchManager:
 
     def query_index(self, query, **kw):
         self.calls.append({"query": query, **kw})
+        # `type` + `link` arrive from the scorer because the UI global search
+        # (mixed types) needs them. The per-type MCP tools must strip both.
+        t = kw.get("type_filter") or "data-product"
         return {
-            "results": [{"id": "x", "type": "data-product", "title": "X"}],
+            "results": [{"id": "x", "type": t, "title": "X", "link": f"/{t}s/x"}],
             "total_count": 1, "returned": 1, "offset": 0, "limit": 25, "has_more": False,
             "facets": {"status": {"active": 1}}, "query": query,
         }
@@ -246,3 +249,47 @@ class TestSearchParamPassthrough:
         call = sm.calls[0]
         assert call["include_facets"] is True
         assert call["fields"] is None
+
+
+# =====================================================================
+# Per-record `type` + `link` strip on per-type MCP tools
+# =====================================================================
+
+class TestPerRecordTypeAndLinkStrip:
+    """`type` is redundant with the tool name; `link` is a UI route path.
+    Both are useful on the shared scorer output (UI global search mixes types),
+    but the per-type MCP list/search tools must drop them from every record."""
+
+    def test_search_data_products_records_omit_type_and_link(self):
+        sm = _StubSearchManager()
+        res = _run(SearchDataProductsTool().execute(_ctx(sm), query="customer"))
+        assert res.success and res.data["products"]
+        for row in res.data["products"]:
+            assert "type" not in row, f"type leaked into {row}"
+            assert "link" not in row, f"link leaked into {row}"
+
+    def test_search_data_contracts_records_omit_type_and_link(self):
+        sm = _StubSearchManager()
+        res = _run(SearchDataContractsTool().execute(_ctx(sm), query="orders"))
+        assert res.success and res.data["contracts"]
+        for row in res.data["contracts"]:
+            assert "type" not in row
+            assert "link" not in row
+
+    def test_list_data_products_inherits_strip(self):
+        """ListDataProductsTool delegates to SearchDataProductsTool, so the
+        strip applies through the wrapper too."""
+        sm = _StubSearchManager()
+        res = _run(ListDataProductsTool().execute(_ctx(sm)))
+        assert res.success and res.data["products"]
+        for row in res.data["products"]:
+            assert "type" not in row
+            assert "link" not in row
+
+    def test_list_data_contracts_inherits_strip(self):
+        sm = _StubSearchManager()
+        res = _run(ListDataContractsTool().execute(_ctx(sm)))
+        assert res.success and res.data["contracts"]
+        for row in res.data["contracts"]:
+            assert "type" not in row
+            assert "link" not in row

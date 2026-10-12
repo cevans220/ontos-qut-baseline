@@ -376,6 +376,11 @@ class SearchDataContractsTool(BaseTool):
                 include_facets=include_facets,
                 fields=fields,
             )
+            # Tool name already carries the type; `link` is a UI-only route path.
+            # Neither helps an MCP agent, so drop them from every record.
+            for r in data["results"]:
+                r.pop("type", None)
+                r.pop("link", None)
             logger.info(
                 f"[search_data_contracts] SUCCESS: returned {data['returned']} of "
                 f"{data['total_count']} matching contracts"
