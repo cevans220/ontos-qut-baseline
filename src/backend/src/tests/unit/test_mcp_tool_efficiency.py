@@ -293,3 +293,33 @@ class TestPerRecordTypeAndLinkStrip:
         for row in res.data["contracts"]:
             assert "type" not in row
             assert "link" not in row
+
+
+# =====================================================================
+# Contract search index stores raw description (no version/status prefix)
+# =====================================================================
+
+class TestContractDescriptionIsRaw:
+    """The contract index used to compose `"{version} • {status} • {usage}"` as
+    the description, duplicating structured fields and making the string harder
+    for an MCP agent to parse. Index now stores just the raw usage text —
+    version and status are already in `extra_data` and surface as separate
+    result-row keys."""
+
+    def test_contract_description_omits_version_status_prefix(self):
+        from src.controller.data_contracts_manager import DataContractsManager
+
+        mgr = DataContractsManager.__new__(DataContractsManager)
+        contract_db = SimpleNamespace(
+            id="c1", name="C", description_usage="Customer master attributes",
+            description_purpose=None, status="active", version="1.0.0",
+            owner_team_id=None, owner="",
+        )
+        item = mgr._build_search_index_item(contract_db, db=None,
+                                             preloaded_tags=[], preloaded_domains=[])
+        assert item is not None
+        assert item.description == "Customer master attributes"
+        # version + status remain available via extra_data (and surface in
+        # result rows through _RESULT_FIELDS).
+        assert item.extra_data["version"] == "1.0.0"
+        assert item.extra_data["status"] == "active"
