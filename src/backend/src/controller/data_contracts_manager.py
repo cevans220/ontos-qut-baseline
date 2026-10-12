@@ -400,14 +400,12 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
         version = getattr(contract_db_obj, 'version', None)
         status = getattr(contract_db_obj, 'status', None)
         description_usage = getattr(contract_db_obj, 'description_usage', None)
-        desc_parts: List[str] = []
-        if version:
-            desc_parts.append(str(version))
-        if status:
-            desc_parts.append(str(status))
-        if description_usage:
-            desc_parts.append(str(description_usage))
-        description = " • ".join([p for p in desc_parts if p])
+        # Keep description as the raw usage text. version + status are already
+        # surfaced as structured extra_data fields (and bubble up to the search
+        # result row via _RESULT_FIELDS) — composing them into a "1.0.0 • active
+        # • …" prefix wastes tokens for MCP agents and is harder to parse than
+        # just reading the structured fields.
+        description = str(description_usage) if description_usage else ""
 
         tag_names: List[str] = []
 
