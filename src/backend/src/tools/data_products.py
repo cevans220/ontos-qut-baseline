@@ -15,6 +15,25 @@ from src.tools.base import BaseTool, ToolContext, ToolResult
 # SearchManager.query_index() so the active backend (memory or postgres) is used.
 
 
+def _iso_or_none(dt) -> Optional[str]:
+    """ISO-serialize a datetime/date; None stays None."""
+    return dt.isoformat() if dt is not None else None
+
+
+def _original_id_from_props(custom_properties) -> Optional[str]:
+    """Return the preserved YAML id (``ontosOriginalId``) from a product's
+    customProperties, if present. Lets an agent reconcile the Ontos UUID with
+    an upstream reference without a second call."""
+    if not custom_properties:
+        return None
+    for prop in custom_properties:
+        name = getattr(prop, 'property', None) if not isinstance(prop, dict) else prop.get('property')
+        if name == 'ontosOriginalId':
+            value = getattr(prop, 'value', None) if not isinstance(prop, dict) else prop.get('value')
+            return value if value is not None else None
+    return None
+
+
 def _serialize_product(product) -> Dict[str, Any]:
     """Full-detail dict for a single data product.
 
@@ -53,6 +72,27 @@ def _serialize_product(product) -> Dict[str, Any]:
             "location": location,
         })
 
+    # Imported ODPS team: name + members with their role, so an agent can answer
+    # "who is the owner / data steward" questions. dateIn/dateOut/replacedByUsername
+    # omitted — not useful for ownership answers and inflates the payload.
+    team = None
+    product_team = getattr(product, 'team', None)
+    if product_team is not None:
+        members = []
+        for member in (getattr(product_team, 'members', None) or []):
+            if member is None:
+                continue
+            members.append({
+                "username": getattr(member, 'username', None),
+                "name": getattr(member, 'name', None),
+                "role": getattr(member, 'role', None),
+            })
+        team = {
+            "name": getattr(product_team, 'name', None),
+            "description": getattr(product_team, 'description', None),
+            "members": members,
+        }
+
     return {
         "id": product.id,
         "name": product.name,
@@ -62,8 +102,18 @@ def _serialize_product(product) -> Dict[str, Any]:
         "version": product.version,
         "owner_team_id": getattr(product, 'owner_team_id', None),
         "owner_team_name": getattr(product, 'owner_team_name', None),
+        "team": team,
         "output_ports": output_ports,
         "tenant": getattr(product, 'tenant', None),
+        # Preserved original id when adopt_ids=false (or the YAML id was invalid /
+        # colliding) — enables upstream-reference reconciliation.
+        "original_id": _original_id_from_props(getattr(product, 'customProperties', None)),
+        # Lifecycle timestamps — agents frequently want "when was this registered /
+        # last updated / published" alongside the ownership info.
+        "created_at": _iso_or_none(getattr(product, 'created_at', None)),
+        "updated_at": _iso_or_none(getattr(product, 'updated_at', None)),
+        "published_at": _iso_or_none(getattr(product, 'published_at', None)),
+        "product_created_ts": _iso_or_none(getattr(product, 'productCreatedTs', None)),
         "url": f"/data-products/{product.id}",
     }
 
@@ -368,7 +418,13 @@ class GetDataProductTool(BaseTool):
     
     name = "get_data_product"
     category = "data_products"
-    description = "Get detailed information about a specific data product by its ID."
+    description = (
+        "Get detailed information about a specific data product by its ID. "
+        "Includes the imported ODPS team metadata (members with roles) so you "
+        "can answer ownership questions, lifecycle timestamps (created / "
+        "updated / published / product_created_ts), and the preserved original "
+        "id from the source YAML when adoption was off."
+    )
     parameters = {
         "product_id": {
             "type": "string",
@@ -410,10 +466,12 @@ class GetDataProductsBulkTool(BaseTool):
     category = "data_products"
     description = (
         "Fetch full details for MULTIPLE data products by ID in a single call "
-        "(including output ports / physical table locations). Prefer this over "
-        "repeated get_data_product when you already hold a set of ids. Returns up "
-        "to 20 by default; raise 'limit' up to 100. Ids beyond the limit are not "
-        "fetched and reported via 'truncated'/'requested' so you can page."
+        "(including output ports / physical table locations, imported ODPS team "
+        "members with roles, lifecycle timestamps, and the preserved original "
+        "id from the source YAML). Prefer this over repeated get_data_product "
+        "when you already hold a set of ids. Returns up to 20 by default; raise "
+        "'limit' up to 100. Ids beyond the limit are not fetched and reported "
+        "via 'truncated'/'requested' so you can page."
     )
     parameters = {
         "product_ids": {

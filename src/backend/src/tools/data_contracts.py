@@ -13,6 +13,24 @@ from src.tools.base import BaseTool, ToolContext, ToolResult
 logger = get_logger(__name__)
 
 
+def _original_id_from_props(custom_properties) -> Optional[str]:
+    """Return the preserved YAML id (``ontosOriginalId``) from a contract's
+    customProperties. Contracts expose customProperties as a dict (not a list
+    of CustomProperty like products), so this is a direct lookup."""
+    if not custom_properties:
+        return None
+    if isinstance(custom_properties, dict):
+        value = custom_properties.get('ontosOriginalId')
+        return value if value else None
+    # Defensive: fall back to the list-of-objects shape used elsewhere.
+    for prop in custom_properties:
+        name = getattr(prop, 'property', None) if not isinstance(prop, dict) else prop.get('property')
+        if name == 'ontosOriginalId':
+            value = getattr(prop, 'value', None) if not isinstance(prop, dict) else prop.get('value')
+            return value if value else None
+    return None
+
+
 def _serialize_contract(contract) -> Dict[str, Any]:
     """Full-detail dict for a single data contract.
 
@@ -21,6 +39,20 @@ def _serialize_contract(contract) -> Dict[str, Any]:
     """
     desc = getattr(contract, 'description', None)
     desc_purpose = getattr(desc, 'purpose', None) if desc is not None else None
+
+    # ODCS team: a flat List[TeamMember] on DataContractRead (not wrapped in a
+    # Team object like products). Project username/name/role so an agent can
+    # answer ownership questions. dateIn/dateOut/replacedByUsername omitted.
+    team = []
+    for member in (getattr(contract, 'team', None) or []):
+        if member is None:
+            continue
+        team.append({
+            "username": getattr(member, 'username', None),
+            "name": getattr(member, 'name', None),
+            "role": getattr(member, 'role', None),
+        })
+
     return {
         "id": contract.id,
         "name": contract.name,
@@ -29,7 +61,16 @@ def _serialize_contract(contract) -> Dict[str, Any]:
         "status": contract.status,
         "version": contract.version,
         "owner_team_name": getattr(contract, 'owner_team_name', None),
+        "team": team,
         "data_product": getattr(contract, 'dataProduct', None),
+        # Preserved original id when adopt_ids=false (or the YAML id was invalid /
+        # colliding) — enables upstream-reference reconciliation.
+        "original_id": _original_id_from_props(getattr(contract, 'customProperties', None)),
+        # Lifecycle timestamps — DataContractRead stores these as pre-serialized
+        # ISO strings (unlike products which hold datetime objects).
+        "created_at": getattr(contract, 'created', None),
+        "updated_at": getattr(contract, 'updated', None),
+        "published_at": getattr(contract, 'published_at', None),
         "url": f"/data-contracts/{contract.id}",
     }
 
@@ -345,7 +386,13 @@ class GetDataContractTool(BaseTool):
     
     name = "get_data_contract"
     category = "data_contracts"
-    description = "Get detailed information about a specific data contract by its ID."
+    description = (
+        "Get detailed information about a specific data contract by its ID. "
+        "Includes the ODCS team members with their roles so you can answer "
+        "ownership / data-steward questions, lifecycle timestamps (created / "
+        "updated / published), and the preserved original id from the source "
+        "YAML when adoption was off."
+    )
     parameters = {
         "contract_id": {
             "type": "string",
@@ -391,11 +438,12 @@ class GetDataContractsBulkTool(BaseTool):
     name = "get_data_contracts"
     category = "data_contracts"
     description = (
-        "Fetch full details for MULTIPLE data contracts by ID in a single call. "
-        "Prefer this over repeated get_data_contract when you already hold a set "
-        "of ids. Returns up to 20 by default; raise 'limit' up to 100. Ids beyond "
-        "the limit are not fetched and reported via 'truncated'/'requested' so you "
-        "can page."
+        "Fetch full details for MULTIPLE data contracts by ID in a single call "
+        "(including the ODCS team members with their roles, lifecycle timestamps, "
+        "and the preserved original id from the source YAML). Prefer this over "
+        "repeated get_data_contract when you already hold a set of ids. Returns "
+        "up to 20 by default; raise 'limit' up to 100. Ids beyond the limit are "
+        "not fetched and reported via 'truncated'/'requested' so you can page."
     )
     parameters = {
         "contract_ids": {
