@@ -407,18 +407,26 @@ class MCPHandler:
         in-app Ask Ontos path. Raw external token agents (no forwarded token) keep
         the app service-principal client, preserving the prior behavior.
 
-        `get_obo_workspace_client` itself falls back to the SP client if the token
-        is missing, but we branch explicitly so we can audit which identity ran and
-        avoid the OBO cache path for pure token callers.
+        Fail-closed on bad forwarded tokens: if the token is present but OBO setup
+        fails (expired/invalid), raise an auth error rather than silently falling
+        back to the service principal — otherwise the caller's SQL would run with
+        SP grants, which they can't see and shouldn't have.
         """
         app = self._request.app
         if self._request.headers.get("x-forwarded-access-token"):
             try:
                 client = get_obo_workspace_client(self._request, self._settings)
-                self._identity_mode = "obo"
-                return client
-            except Exception as e:  # pragma: no cover - defensive; OBO is best-effort
-                logger.warning("OBO workspace client failed, falling back to service principal: %s", e)
+            except Exception as e:
+                logger.warning("OBO workspace client failed: %s", e)
+                raise MCPError(
+                    MCP_AUTH_FAILED,
+                    "Forwarded identity could not be verified. "
+                    "The forwarded access token was rejected (expired or invalid). "
+                    "Not falling back to the service principal — the request would run "
+                    "with grants the caller cannot see.",
+                )
+            self._identity_mode = "obo"
+            return client
         self._identity_mode = "service_principal"
         return getattr(app.state, "workspace_client", None)
 

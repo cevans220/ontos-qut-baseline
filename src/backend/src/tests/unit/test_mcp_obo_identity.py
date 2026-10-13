@@ -8,8 +8,10 @@ tests exercise that selection without the HTTP layer.
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 import src.routes.mcp_routes as mcp_routes
-from src.routes.mcp_routes import MCPHandler
+from src.routes.mcp_routes import MCP_AUTH_FAILED, MCPError, MCPHandler
 
 SP_SENTINEL = object()
 OBO_SENTINEL = object()
@@ -46,11 +48,17 @@ def test_no_forwarded_token_uses_service_principal(monkeypatch):
     assert h._identity_mode == "service_principal"
 
 
-def test_obo_failure_falls_back_to_service_principal(monkeypatch):
+def test_obo_failure_raises_mcp_error_no_fallback(monkeypatch):
+    """A forwarded token that fails OBO setup must raise, NOT silently fall
+    back to the service principal. Otherwise the caller's SQL runs with SP
+    grants they can't see — reviewer concern on #937."""
     def _boom(req, settings):
         raise RuntimeError("token rejected")
     monkeypatch.setattr(mcp_routes, "get_obo_workspace_client", _boom)
     h = _handler({"x-forwarded-access-token": "bad-token"})
-    ctx = h._create_tool_context()
-    assert ctx.workspace_client is SP_SENTINEL
-    assert h._identity_mode == "service_principal"
+    with pytest.raises(MCPError) as exc_info:
+        h._create_tool_context()
+    assert exc_info.value.code == MCP_AUTH_FAILED
+    assert "forwarded" in exc_info.value.message.lower()
+    # Identity never flips to service_principal; the raise aborts the request.
+    assert h._identity_mode != "service_principal"
