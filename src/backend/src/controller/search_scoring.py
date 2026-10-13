@@ -43,6 +43,16 @@ _FACET_FIELDS = ("domain", "status", "owner")
 # Extra_data keys surfaced on every result dict (superset of facet fields).
 _RESULT_FIELDS = ("domain", "status", "owner", "version")
 
+# Allowlist for the MCP tool `fields=[...]` projection. Keys an MCP agent may
+# legitimately ask for on a per-type search/list row (post `type`/`link` strip
+# in the per-type tools). Exposed so each tool can reject unknown names with a
+# clear error instead of returning a silently-empty row (#954 reviewer note).
+KNOWN_RESULT_FIELDS = frozenset({
+    "id", "title", "description", "tags",
+    "domain", "status", "owner", "version",
+    "relevance_score",
+})
+
 
 def tokenize(query: str) -> List[str]:
     """Lower-case and split a query into non-empty search terms."""

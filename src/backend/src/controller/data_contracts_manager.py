@@ -4195,6 +4195,17 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
             db.commit()
             db.refresh(updated)
 
+            # Keep the search index in lockstep with the status mutation so
+            # list_data_contracts / search_data_contracts can't return the stale
+            # pre-transition status (#954 review).
+            try:
+                self._update_search_index(updated, db)
+            except Exception as idx_err:
+                logger.warning(
+                    "Failed to refresh search index after contract %s status transition: %s",
+                    contract_id, idx_err,
+                )
+
             # Fire on_status_change workflow trigger
             from src.common.workflow_triggers import fire_trigger_safe
             from src.models.process_workflows import EntityType
@@ -7146,3 +7157,31 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
         if contract_api:
             return contract_api.model_dump(by_alias=True)
         return {}
+
+
+# Module-level live-manager hook used by non-manager contexts (e.g.
+# workflow_executor) that need to refresh the search index after mutating a
+# contract row directly. The live DataContractsManager instance is registered
+# at startup once the SearchManager is wired to it.
+_live_contracts_manager: Optional["DataContractsManager"] = None
+
+
+def register_live_contracts_manager(mgr: "DataContractsManager") -> None:
+    """Called once at startup after the SearchManager is wired to the manager."""
+    global _live_contracts_manager
+    _live_contracts_manager = mgr
+
+
+def reindex_contract_in_search_index(contract_db_obj, db) -> None:
+    """Push a single contract row through the search-index upsert pipeline.
+    No-op if the manager hasn't been wired yet (test / early-startup paths)."""
+    mgr = _live_contracts_manager
+    if mgr is None:
+        return
+    try:
+        mgr._update_search_index(contract_db_obj, db)
+    except Exception as exc:
+        logger.warning(
+            "Failed to reindex contract %s: %s",
+            getattr(contract_db_obj, 'id', '<?>'), exc,
+        )
