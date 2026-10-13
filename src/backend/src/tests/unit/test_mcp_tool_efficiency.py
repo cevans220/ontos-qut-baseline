@@ -299,6 +299,49 @@ class TestPerRecordTypeAndLinkStrip:
 # Contract search index stores raw description (no version/status prefix)
 # =====================================================================
 
+class TestFieldsValidation:
+    """`fields=['name']` on contracts used to return just `{id}` with no hint —
+    the row key is `title`, not `name`. Validate names up front and return a
+    helpful error so callers (and the pre-#954 row shape) learn fast (#954
+    reviewer note 3)."""
+
+    def test_search_data_products_rejects_unknown_field(self):
+        sm = _StubSearchManager()
+        res = _run(SearchDataProductsTool().execute(
+            _ctx(sm), query="customer", fields=["name", "status"],
+        ))
+        assert res.success is False
+        assert "unknown fields" in (res.error or "").lower()
+        assert "'name'" in (res.error or "") or "name" in (res.error or "")
+        # The search manager was never called — validation is pre-flight.
+        assert sm.calls == []
+
+    def test_search_data_contracts_rejects_unknown_field(self):
+        sm = _StubSearchManager()
+        res = _run(SearchDataContractsTool().execute(
+            _ctx(sm), query="orders", fields=["owner_team_name"],
+        ))
+        assert res.success is False
+        assert "unknown fields" in (res.error or "").lower()
+        assert sm.calls == []
+
+    def test_search_data_products_accepts_known_fields(self):
+        sm = _StubSearchManager()
+        res = _run(SearchDataProductsTool().execute(
+            _ctx(sm), query="customer", fields=["title", "status"],
+        ))
+        assert res.success is True
+        assert sm.calls[0]["fields"] == ["title", "status"]
+
+    def test_search_data_contracts_accepts_known_fields(self):
+        sm = _StubSearchManager()
+        res = _run(SearchDataContractsTool().execute(
+            _ctx(sm), query="orders", fields=["id", "title", "domain"],
+        ))
+        assert res.success is True
+        assert sm.calls[0]["fields"] == ["id", "title", "domain"]
+
+
 class TestContractDescriptionIsRaw:
     """The contract index used to compose `"{version} • {status} • {usage}"` as
     the description, duplicating structured fields and making the string harder

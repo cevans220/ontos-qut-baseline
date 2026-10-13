@@ -325,6 +325,22 @@ class SearchDataContractsTool(BaseTool):
             logger.warning("[search_data_contracts] FAILED: search_manager is None")
             return ToolResult(success=False, error="Search not available", data={"contracts": []})
 
+        # Reject unknown `fields` names loudly instead of silently dropping them
+        # (otherwise `fields=['name']` returns just `{id}` without hint — #954
+        # reviewer note). The row key is `title`, not `name`.
+        from src.controller.search_scoring import KNOWN_RESULT_FIELDS
+        if fields:
+            unknown = [f for f in fields if f not in KNOWN_RESULT_FIELDS]
+            if unknown:
+                return ToolResult(
+                    success=False,
+                    error=(
+                        f"unknown fields: {sorted(unknown)}. "
+                        f"known: {sorted(KNOWN_RESULT_FIELDS)}"
+                    ),
+                    data={"contracts": []},
+                )
+
         try:
             data = ctx.search_manager.query_index(
                 query,
