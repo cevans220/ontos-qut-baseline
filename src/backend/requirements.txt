@@ -1397,17 +1397,17 @@ matplotlib==3.10.8 \
     --hash=sha256:f9b587c9c7274c1613a30afabf65a272114cd6cdbe67b3406f818c79d7ab2e2a \
     --hash=sha256:fb061f596dad3a0f52b60dc6a5dec4a0c300dec41e058a7efe09256188d170b7
     # via mlflow
-mlflow==3.16.1 \
-    --hash=sha256:044bd17d49ed216d3e38a537436622154daa5197ea41c1f3dedf155cbd8f40c0 \
-    --hash=sha256:e4dfe69ceae31dfc7b8480e76ffe6a7f36752bdfac30e058e6430ade1fb5920b
+mlflow==3.17.0 \
+    --hash=sha256:3954eaa998d4dd4ac8772894293a285bb5e3a428f6f9b37cac298e787423eafd \
+    --hash=sha256:7c1566b1aca61aec58520516df085948874c7956798dd6ae8ca17560ce06b089
     # via -r src/backend/requirements.in
-mlflow-skinny==3.16.1 \
-    --hash=sha256:41ec1697710b91d001f8951bdc2d00391a277065ed82268c81706238fa2b918e \
-    --hash=sha256:7298b47942b1b0e826e02191653b8c203c3bb242fb699f8beec98e928dbec115
+mlflow-skinny==3.17.0 \
+    --hash=sha256:443c1e8cbf04edc71434754e0dae2846db91814b342c65bbc05b131c2a68b7ba \
+    --hash=sha256:e887675d9f5ab57ec70860247b1cd5682bb719f626c69979ca7c99b5439877df
     # via mlflow
-mlflow-tracing==3.16.1 \
-    --hash=sha256:315ba1ace00d43498da2ad2b2bbb751f3198d6f9cd328168dfeb49911df41925 \
-    --hash=sha256:b3ab97c7b4f919704e0cbe0653e6e9b89cf1f8a790f8bb1b4cf7f236df258e9e
+mlflow-tracing==3.17.0 \
+    --hash=sha256:6259dc0149bb681d6738c98f861f02db43c87c18e0a20a7ec9cbce1b7f386512 \
+    --hash=sha256:8e5cb21bd53720f163098fe12a54e2cc5dff19e5b811889205ef10469248ee9e
     # via mlflow
 multidict==6.7.1 \
     --hash=sha256:026d264228bcd637d4e060844e39cdc60f86c479e463d49075dedc21b18fbbe0 \
