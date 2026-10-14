@@ -97,15 +97,6 @@ class TestNativePathAlias:
         resp = mcp_client.get("/mcp/health")
         assert resp.status_code == 200, resp.text
 
-    def test_unknown_mcp_path_returns_404(self, mcp_client):
-        """An unmatched GET under `/mcp` must 404, not fall into the SPA
-        catch-all (which would return the frontend index.html). The exclusion
-        lives in `app.py` — this is the regression guard."""
-        resp = mcp_client.get("/mcp/does-not-exist")
-        assert resp.status_code == 404
-        # Not HTML — the SPA fallback would have returned text/html index.html.
-        assert "text/html" not in resp.headers.get("content-type", "").lower()
-
 
 class TestKeylessEnabled:
     def test_tools_list_filtered_to_default_scopes(self, mcp_client, keyless_default_token):

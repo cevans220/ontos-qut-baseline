@@ -418,6 +418,19 @@ class MCPHandler:
                 client = get_obo_workspace_client(self._request, self._settings)
             except Exception as e:
                 logger.warning("OBO workspace client failed: %s", e)
+                # Audit the rejection so a security investigator can trace it
+                # the same way SCOPE_VIOLATION is recorded. The exception
+                # otherwise aborts handle() before any audit row is written.
+                self._audit(
+                    action="IDENTITY_REJECTED",
+                    success=False,
+                    details={
+                        "reason": "obo_setup_failed",
+                        "error": str(e),
+                        "token_name": self._token_info.name,
+                        "session_id": self._session_id,
+                    },
+                )
                 raise MCPError(
                     MCP_AUTH_FAILED,
                     "Forwarded identity could not be verified. "
