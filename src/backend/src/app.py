@@ -228,6 +228,14 @@ async def startup_event():
         app.state.search_manager.build_index()
         for mgr in searchable_managers_instances:
             mgr.set_search_manager(app.state.search_manager)
+            # Expose the wired DataContractsManager to non-manager contexts
+            # (e.g. workflow_executor) that need to reindex after direct status
+            # writes without re-plumbing the SearchManager wiring.
+            from src.controller.data_contracts_manager import (
+                DataContractsManager, register_live_contracts_manager,
+            )
+            if isinstance(mgr, DataContractsManager):
+                register_live_contracts_manager(mgr)
         logger.info("Search index initialized and built from DB-backed managers (app.py).")
     except Exception as e:
         logger.error(f"Failed initializing or building search index in app.py: {e}", exc_info=True)
