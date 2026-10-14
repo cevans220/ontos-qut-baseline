@@ -2783,6 +2783,7 @@ class WorkflowExecutor:
             # Handle data contract deploy completion
             elif entity_type == 'data_contract' and trigger_type in ('on_request_publish', 'ON_REQUEST_PUBLISH'):
                 from src.repositories.data_contracts_repository import data_contract_repo
+                from src.controller.data_contracts_manager import reindex_contract_in_search_index
                 db_contract = data_contract_repo.get(db=self._db, id=entity_id)
                 if db_contract:
                     if succeeded:
@@ -2792,6 +2793,10 @@ class WorkflowExecutor:
                         db_contract.status = 'draft'
                         logger.info(f"Data contract {entity_id} status reverted to 'draft' after rejection")
                     self._db.commit()
+                    # Keep the search index in lockstep with the status write so
+                    # list_data_contracts / search_data_contracts can't return
+                    # the stale pre-workflow status (#954 review).
+                    reindex_contract_in_search_index(db_contract, self._db)
                     
             # Handle data product activation completion
             elif entity_type == 'data_product' and trigger_type in ('on_request_review', 'ON_REQUEST_REVIEW'):

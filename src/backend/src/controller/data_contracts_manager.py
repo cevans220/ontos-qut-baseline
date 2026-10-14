@@ -404,14 +404,12 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
         version = getattr(contract_db_obj, 'version', None)
         status = getattr(contract_db_obj, 'status', None)
         description_usage = getattr(contract_db_obj, 'description_usage', None)
-        desc_parts: List[str] = []
-        if version:
-            desc_parts.append(str(version))
-        if status:
-            desc_parts.append(str(status))
-        if description_usage:
-            desc_parts.append(str(description_usage))
-        description = " • ".join([p for p in desc_parts if p])
+        # Keep description as the raw usage text. version + status are already
+        # surfaced as structured extra_data fields (and bubble up to the search
+        # result row via _RESULT_FIELDS) — composing them into a "1.0.0 • active
+        # • …" prefix wastes tokens for MCP agents and is harder to parse than
+        # just reading the structured fields.
+        description = str(description_usage) if description_usage else ""
 
         tag_names: List[str] = []
 
@@ -518,6 +516,12 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
             "domain": primary_domain,
             "team_members": ", ".join(team_strings),
         }
+
+        # Dedupe tag_names while preserving insertion order — same rationale as
+        # products: multiple sources (unified tags, assigned domains, …) can
+        # contribute the same string, and the result's tags[:5] slice would
+        # otherwise waste slots on duplicates.
+        tag_names = list(dict.fromkeys(t for t in tag_names if t))
 
         return SearchIndexItem(
             id=f"contract::{contract_id}",
@@ -4191,6 +4195,17 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
             db.commit()
             db.refresh(updated)
 
+            # Keep the search index in lockstep with the status mutation so
+            # list_data_contracts / search_data_contracts can't return the stale
+            # pre-transition status (#954 review).
+            try:
+                self._update_search_index(updated, db)
+            except Exception as idx_err:
+                logger.warning(
+                    "Failed to refresh search index after contract %s status transition: %s",
+                    contract_id, idx_err,
+                )
+
             # Fire on_status_change workflow trigger
             from src.common.workflow_triggers import fire_trigger_safe
             from src.models.process_workflows import EntityType
@@ -7142,3 +7157,31 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
         if contract_api:
             return contract_api.model_dump(by_alias=True)
         return {}
+
+
+# Module-level live-manager hook used by non-manager contexts (e.g.
+# workflow_executor) that need to refresh the search index after mutating a
+# contract row directly. The live DataContractsManager instance is registered
+# at startup once the SearchManager is wired to it.
+_live_contracts_manager: Optional["DataContractsManager"] = None
+
+
+def register_live_contracts_manager(mgr: "DataContractsManager") -> None:
+    """Called once at startup after the SearchManager is wired to the manager."""
+    global _live_contracts_manager
+    _live_contracts_manager = mgr
+
+
+def reindex_contract_in_search_index(contract_db_obj, db) -> None:
+    """Push a single contract row through the search-index upsert pipeline.
+    No-op if the manager hasn't been wired yet (test / early-startup paths)."""
+    mgr = _live_contracts_manager
+    if mgr is None:
+        return
+    try:
+        mgr._update_search_index(contract_db_obj, db)
+    except Exception as exc:
+        logger.warning(
+            "Failed to reindex contract %s: %s",
+            getattr(contract_db_obj, 'id', '<?>'), exc,
+        )
