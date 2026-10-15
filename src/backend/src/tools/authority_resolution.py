@@ -15,6 +15,8 @@ and the scheduled ``authority_dna_recompute`` job run through.
 """
 from typing import Any
 
+from starlette.concurrency import run_in_threadpool
+
 from src.tools.base import BaseTool, ToolContext, ToolResult
 from src.controller.authority_resolution_manager import AuthorityResolutionManager
 
@@ -59,7 +61,9 @@ class ResolveAuthorityTool(BaseTool):
             "escalated": kwargs.get("escalated"),
         }
         app_ws = ctx.workspace_client
-        result = _manager.resolve(
+        # Resolves may make blocking MCP/HTTP calls; keep them off the event loop.
+        result = await run_in_threadpool(
+            _manager.resolve,
             ctx.db, ar_id, req,
             semantic_models_manager=ctx.semantic_models_manager,
             obo_ws_factory=ctx.obo_workspace_client_factory,
@@ -95,7 +99,8 @@ class FindAuthorityForConceptTool(BaseTool):
         if not concept_iri:
             return ToolResult(success=False, error="concept_iri is required")
         app_ws = ctx.workspace_client
-        result = _manager.find_authority_for_concept(
+        result = await run_in_threadpool(
+            _manager.find_authority_for_concept,
             ctx.db, concept_iri,
             context=kwargs.get("context") or {},
             domains=kwargs.get("domains") or [],

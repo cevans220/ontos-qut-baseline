@@ -939,6 +939,9 @@ def test_literal_resource_ref_round_trips_and_resolves(db_session):
         "source": "literal",
     }]
     row = authority_resource_ref_repo.list_for_relation(db_session, relation_id=rel.id)[0]
+    assert row.cached_label is None  # dry runs never write the cache
+
+    mgr.resolve(db_session, "lit-ar", {"actor_identity": "x"}, record=True, require_active=False)
     assert row.cached_label == "rsm-east@example.com"
     assert row.cached_at is not None
 
@@ -1347,7 +1350,9 @@ def test_mcp_failure_in_prerequisite_blocks_outer(db_session):
                       obo_ws_factory=lambda: object(),
                       mcp_client_factory=_mcp_factory(
                           raises=McpResolverError("MCP permission denied (403)", kind="permission")))
-    assert out["verdict"] == VERDICT_DENIED
+    # An upstream resolver outage is "can't decide", not a policy denial.
+    assert out["verdict"] == VERDICT_NO_AUTHORITY
+    assert out["reason"].startswith("blocked by prerequisite ar:upstream-mcp")
     assert out["prerequisite_chain"][0]["verdict"] == VERDICT_NO_AUTHORITY
 
 
@@ -1499,7 +1504,7 @@ def test_concept_hierarchy_hop_matches_parent_concept(db_session):
                                        related_concepts=[])
             return None
 
-        def search_concepts(self, text, limit=10):
+        def find_concept_iris_by_label(self, text, limit=20):
             return []
 
     mgr = AuthorityResolutionManager()
@@ -1549,10 +1554,8 @@ def test_concept_lookup_domain_filter_and_label_equivalence(db_session):
         def get_concept_details(self, iri):
             return None
 
-        def search_concepts(self, text, limit=10):
-            if text.lower() == "germany":
-                return [{"value": "urn:demo:market:DE", "label": "Germany"}]
-            return []
+        def find_concept_iris_by_label(self, text, limit=20):
+            return ["urn:demo:market:DE"] if text.lower() == "germany" else []
 
     db_session.add(DataDomain(id="00000000-0000-4000-8000-0000000000aa", name="Commercial Ops X", created_by="test"))
     db_session.flush()
@@ -1588,3 +1591,71 @@ async def test_find_authority_for_concept_tool(db_session):
     assert ok.success and ok.data["resolved"] == "tool-tp"
     missing = await tool.execute(ctx)
     assert not missing.success
+
+
+def test_mcp_client_build_failure_is_no_authority_not_500(db_session):
+    from src.controller.authority_resolution_manager import (
+        AuthorityResolutionManager, VERDICT_NO_AUTHORITY,
+    )
+
+    def _boom():
+        raise RuntimeError("cannot verify workspace client")
+
+    mgr = AuthorityResolutionManager()
+    _make_mcp_ar(mgr, db_session, slug="boom-gate")
+    db_session.commit()
+    out = mgr.resolve(db_session, "boom-gate", {"market": "DE"}, record=False, require_active=False,
+                      obo_ws_factory=_boom, mcp_client_factory=_mcp_factory(response={"approver": "x"}))
+    assert out["verdict"] == VERDICT_NO_AUTHORITY
+    assert "cannot verify" in out["reason"]
+
+    def _raising_client(ws, svc, deadline=None):
+        raise AttributeError("'list' object has no attribute 'get'")
+    out = mgr.resolve(db_session, "boom-gate", {"market": "DE"}, record=False, require_active=False,
+                      obo_ws_factory=lambda: object(), mcp_client_factory=_raising_client)
+    assert out["verdict"] == VERDICT_NO_AUTHORITY
+
+
+def test_mcp_cache_policy_never_caches_obo_or_dry_runs(db_session):
+    """OBO results are caller-scoped and never cached; app-SP results are cached
+    only by recorded (production) resolves, never by dry runs."""
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager, STATUS_ACTIVE
+    from src.repositories.authority_resolution_repository import authority_resource_ref_repo
+
+    mgr = AuthorityResolutionManager()
+    obo = _make_mcp_ar(mgr, db_session, slug="cache-obo")
+    sp = _make_mcp_ar(mgr, db_session, slug="cache-sp", resolver_auth="app_sp")
+    obo.status = sp.status = STATUS_ACTIVE
+    db_session.commit()
+    ws = lambda: object()  # noqa: E731
+    cached = lambda rel: authority_resource_ref_repo.list_for_relation(  # noqa: E731
+        db_session, relation_id=rel.id)[0].cached_label
+
+    mgr.resolve(db_session, "cache-obo", {"market": "DE"}, record=True, obo_ws_factory=ws,
+                mcp_client_factory=_mcp_factory(response={"approver": "secret@example.com"}))
+    assert cached(obo) is None
+
+    mgr.resolve(db_session, "cache-sp", {"market": "DE"}, record=False, app_ws_factory=ws,
+                mcp_client_factory=_mcp_factory(response={"approver": "sp@example.com"}))
+    assert cached(sp) is None
+    mgr.resolve(db_session, "cache-sp", {"market": "DE"}, record=True, app_ws_factory=ws,
+                mcp_client_factory=_mcp_factory(response={"approver": "sp@example.com"}))
+    assert cached(sp) == "sp@example.com"
+
+
+def test_find_concept_iris_by_label_exact_and_case_insensitive():
+    from types import SimpleNamespace
+    from rdflib import Dataset, Literal, URIRef
+    from rdflib.namespace import RDFS, SKOS
+    from src.controller.semantic_models_manager import SemanticModelsManager
+
+    ds = Dataset()
+    g = ds.graph(URIRef("urn:ctx:demo"))
+    g.add((URIRef("urn:demo:market:DE"), SKOS.prefLabel, Literal("DE")))
+    g.add((URIRef("urn:demo:market:DE"), RDFS.label, Literal("Germany", lang="en")))
+    g.add((URIRef("urn:demo:concept:trade"), RDFS.label, Literal("Trade DE Promotion")))
+    fake = SimpleNamespace(_graph=ds)
+    find = SemanticModelsManager.find_concept_iris_by_label
+    assert find(fake, "DE") == ["urn:demo:market:DE"]
+    assert find(fake, "germany") == ["urn:demo:market:DE"]
+    assert find(fake, 'De"; DROP') == []

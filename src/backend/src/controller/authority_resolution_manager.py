@@ -87,6 +87,8 @@ class _ResolveCtx:
     app_ws_factory: Optional[Callable[[], Any]] = None
     mcp_client_factory: Callable[..., Any] = McpHttpClient
     deadline: Optional[Deadline] = None
+    # Only recorded (production) resolves refresh cached_label.
+    write_cache: bool = False
 
 
 class AuthorityResolutionManager:
@@ -939,7 +941,12 @@ class AuthorityResolutionManager:
             entry["source"] = source
             resolved.append(entry)
             # Rows are session-attached; the decision write flushes this too.
-            if value is not None:
+            # OBO MCP results are caller-scoped data, so they are never cached
+            # where other users (or other callers' concept lookups) could see them.
+            caller_scoped = row.ref_type == "mcp_tool" and (
+                getattr(relation, "resolver_auth", None) or RESOLVER_AUTH_OBO
+            ) == RESOLVER_AUTH_OBO
+            if rctx.write_cache and value is not None and not caller_scoped:
                 row.cached_label = value
                 row.cached_at = self._now()
         return resolved
@@ -965,7 +972,10 @@ class AuthorityResolutionManager:
                 if auth == RESOLVER_AUTH_OBO else "app service principal client unavailable",
                 kind="permission",
             )
-        ws = factory()
+        try:
+            ws = factory()
+        except Exception as e:
+            raise McpResolverError(f"could not build workspace client: {e}", kind="permission")
         if ws is None:
             raise McpResolverError(f"no workspace client for resolver_auth={auth}", kind="permission")
         deadline = rctx.deadline or Deadline(RESOLVE_BUDGET_S)
@@ -983,8 +993,13 @@ class AuthorityResolutionManager:
             },
         }
         arguments = mcp_resolver.render_params(row.mcp_params or {}, template_ctx)
-        client = rctx.mcp_client_factory(ws, row.mcp_service_name, deadline=deadline)
-        raw = client.call_tool(row.mcp_tool_name, arguments)
+        try:
+            client = rctx.mcp_client_factory(ws, row.mcp_service_name, deadline=deadline)
+            raw = client.call_tool(row.mcp_tool_name, arguments)
+        except McpResolverError:
+            raise
+        except Exception as e:
+            raise McpResolverError(f"MCP call failed: {e}")
         return mcp_resolver.stringify(
             mcp_resolver.apply_result_pointer(raw, row.mcp_result_pointer),
         )
@@ -1609,6 +1624,7 @@ class AuthorityResolutionManager:
             app_ws_factory=app_ws_factory,
             mcp_client_factory=mcp_client_factory or McpHttpClient,
             deadline=Deadline(RESOLVE_BUDGET_S),
+            write_cache=record,
         )
         return self._resolve_internal(
             db, ar_ref, req, visited=set(),
@@ -1667,23 +1683,29 @@ class AuthorityResolutionManager:
                 # provenance audit trail wants to show *what the AR was
                 # pointing at* even when the chain short-circuited.
                 resolved_refs = self._materialise_refs(db, relation, req, rctx)
-                return self._finalize_resolve(
+                out = self._finalize_resolve(
                     db, relation, req, outer_verdict, blocker_reason,
                     chain, resolved_refs, record,
                 )
+                if outer_verdict == VERDICT_NO_AUTHORITY:
+                    out["resolver_failure"] = True
+                return out
 
         resolved_refs = self._materialise_refs(db, relation, req, rctx)
         mcp_failure = next(
             (r for r in resolved_refs if r["ref_type"] == "mcp_tool" and r.get("error")), None,
         )
         if mcp_failure is not None:
-            verdict = VERDICT_NO_AUTHORITY
             reason = (
                 "resolver_timeout" if mcp_failure.get("error_kind") == "timeout"
                 else f"MCP ref {mcp_failure['field_path']} failed: {mcp_failure['error']}"
             )
-        else:
-            verdict, reason = self._evaluate_decision(relation, req, resolved_refs)
+            out = self._finalize_resolve(
+                db, relation, req, VERDICT_NO_AUTHORITY, reason, chain, resolved_refs, record,
+            )
+            out["resolver_failure"] = True
+            return out
+        verdict, reason = self._evaluate_decision(relation, req, resolved_refs)
         return self._finalize_resolve(
             db, relation, req, verdict, reason, chain, resolved_refs, record,
         )
@@ -1709,7 +1731,8 @@ class AuthorityResolutionManager:
         cycle that the write-time check somehow missed is still caught here.
         Returns ``(blocked_verdict, blocker_reason, chain)``: ``blocked_verdict``
         is ``None`` when every required edge approved, ``conflict`` when the
-        blocking edge hit a cycle, else ``denied``. ``chain`` is the full walk
+        blocking edge hit a cycle, ``no_authority`` when it hit an MCP resolver
+        failure, else ``denied``. ``chain`` is the full walk
         order (always populated for the caller to persist).
         """
         chain: List[Dict[str, Any]] = []
@@ -1739,10 +1762,13 @@ class AuthorityResolutionManager:
                     f"blocked by prerequisite ar:{pre_slug} — "
                     f"{inner.get('reason') or inner['verdict']}"
                 )
-                blocked = (
-                    VERDICT_CONFLICT if inner["verdict"] == VERDICT_CONFLICT
-                    else VERDICT_DENIED
-                )
+                # A resolver (MCP) failure upstream is "can't decide", not a denial.
+                if inner["verdict"] == VERDICT_CONFLICT:
+                    blocked = VERDICT_CONFLICT
+                elif inner.get("resolver_failure"):
+                    blocked = VERDICT_NO_AUTHORITY
+                else:
+                    blocked = VERDICT_DENIED
                 return blocked, reason, chain
         return None, None, chain
 
@@ -1827,12 +1853,11 @@ class AuthorityResolutionManager:
         out = {text.casefold()}
         if semantic_models_manager is None or not text or "://" in text or text.startswith("urn:"):
             return out
+        lookup = getattr(semantic_models_manager, "find_concept_iris_by_label", None)
+        if lookup is None:
+            return out
         try:
-            for hit in semantic_models_manager.search_concepts(text, limit=10) or []:
-                label = hit.get("label") if isinstance(hit, dict) else getattr(hit, "label", None)
-                iri = hit.get("value") if isinstance(hit, dict) else getattr(hit, "value", None)
-                if iri and label and str(label).strip().casefold() == text.casefold():
-                    out.add(str(iri).casefold())
+            out.update(str(iri).casefold() for iri in lookup(text))
         except Exception as e:  # pragma: no cover - RDF read is best-effort
             logger.warning(f"Concept label lookup failed for {text!r}: {e}")
         return out

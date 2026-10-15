@@ -109,7 +109,10 @@ class McpHttpClient:
             "Accept": "application/json, text/event-stream",
             "MCP-Protocol-Version": MCP_PROTOCOL_VERSION,
         }
-        headers.update(self._ws.config.authenticate())
+        try:
+            headers.update(self._ws.config.authenticate())
+        except Exception as e:
+            raise McpResolverError(f"could not obtain credentials: {e}", kind="permission")
         if self._session_id:
             headers["Mcp-Session-Id"] = self._session_id
         return headers
@@ -138,6 +141,8 @@ class McpHttpClient:
         if sid:
             self._session_id = sid
         msg = _parse_body(resp, rid)
+        if not isinstance(msg, dict):
+            raise McpResolverError("MCP response is not a JSON-RPC object")
         if "error" in msg:
             err = msg["error"] or {}
             raise McpResolverError(f"MCP error {err.get('code')}: {err.get('message')}")
@@ -200,7 +205,7 @@ def render_params(template: Any, context: Dict[str, Any]) -> Any:
         return template
     try:
         m = re.fullmatch(r"\s*\{\{(.+?)\}\}\s*", template)
-        if m:
+        if m and "{{" not in m.group(1) and "}}" not in m.group(1):
             value = _jinja.compile_expression(m.group(1).strip(), undefined_to_none=False)(**context)
             if isinstance(value, Undefined):
                 raise McpResolverError(f"undefined variable in {template!r}", kind="config")

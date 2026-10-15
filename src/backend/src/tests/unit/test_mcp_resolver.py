@@ -149,3 +149,20 @@ def test_list_mcp_services_dedupes_and_skips_failing_parent():
     out = mcp_resolver.list_mcp_services(ws, ["schemas/system.ai", "schemas/bad.schema"])
     assert [s["short_name"] for s in out] == ["system.ai.github"]
     assert out[0]["schema"] == "system.ai"
+
+
+def test_render_params_multiple_expressions_render_as_string():
+    assert render_params({"k": "{{ a }}-{{ b }}"}, {"a": 1, "b": 2}) == {"k": "1-2"}
+
+
+def test_non_object_jsonrpc_body_and_auth_failure_raise_resolver_errors():
+    session = _FakeSession({"initialize": _Resp(body=["not", "an", "object"])})
+    with pytest.raises(McpResolverError):
+        McpHttpClient(_ws(), "mcp-services/c.s.x", session=session).list_tools()
+
+    def _no_creds():
+        raise RuntimeError("token refresh failed")
+    ws = SimpleNamespace(config=SimpleNamespace(host="https://h", authenticate=_no_creds))
+    with pytest.raises(McpResolverError) as e:
+        McpHttpClient(ws, "mcp-services/c.s.x", session=_FakeSession({})).list_tools()
+    assert e.value.kind == "permission"

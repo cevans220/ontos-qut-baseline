@@ -388,6 +388,17 @@ async def list_resource_refs(
     return manager.list_resource_refs(db, relation)
 
 
+def _authoring_ws(request: Request):
+    """(client, identity) for MCP discovery: the author's own token when forwarded,
+    else the app SP (local dev) — reported so the picker can warn that obo ARs
+    authored from this list may not be reachable for callers."""
+    from src.common.workspace_client import get_obo_workspace_client, get_workspace_client
+
+    if request.headers.get("x-forwarded-access-token"):
+        return get_obo_workspace_client(request), "caller"
+    return get_workspace_client(), "app_sp"
+
+
 _SCHEMA_PARENT_RE = re.compile(r"^[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+$")
 
 
@@ -400,8 +411,8 @@ def list_mcp_services(
     """UC MCP services visible to the caller (built-ins under ``system.ai`` plus
     any listed ``catalog.schema``) for the author's MCP-ref picker."""
     from src.common import mcp_resolver
-    from src.common.workspace_client import get_obo_workspace_client
 
+    ws, identity = _authoring_ws(request)
     parents = [mcp_resolver.BUILTIN_PARENT]
     for sch in (schemas or "").split(","):
         sch = sch.strip()
@@ -410,7 +421,7 @@ def list_mcp_services(
         if not _SCHEMA_PARENT_RE.match(sch):
             raise HTTPException(status_code=400, detail=f"Invalid schema '{sch}' — expected catalog.schema")
         parents.append(f"schemas/{sch}")
-    return mcp_resolver.list_mcp_services(get_obo_workspace_client(request), parents)
+    return {"identity": identity, "services": mcp_resolver.list_mcp_services(ws, parents)}
 
 
 @router.get("/authority/mcp-services/tools")
@@ -421,13 +432,13 @@ def list_mcp_service_tools(
 ):
     """Tools (name, description, input/output schema) exposed by one MCP service."""
     from src.common import mcp_resolver
-    from src.common.workspace_client import get_obo_workspace_client
 
     if not service_name.startswith(mcp_resolver.SERVICE_PREFIX):
         raise HTTPException(status_code=400, detail="service_name must start with 'mcp-services/'")
+    ws, identity = _authoring_ws(request)
     try:
-        client = mcp_resolver.McpHttpClient(get_obo_workspace_client(request), service_name, timeout=10.0)
-        return client.list_tools()
+        client = mcp_resolver.McpHttpClient(ws, service_name, timeout=10.0)
+        return {"identity": identity, "tools": client.list_tools()}
     except mcp_resolver.McpResolverError as e:
         status = 403 if e.kind == "permission" else 504 if e.kind == "timeout" else 502
         raise HTTPException(status_code=status, detail=str(e))

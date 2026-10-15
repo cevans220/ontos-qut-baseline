@@ -25,12 +25,13 @@ export default function McpRefEditor({ value, onChange }: Props) {
   // Tools are keyed by the service they were fetched for, so "loading" is derived.
   const [toolsFor, setToolsFor] = useState<{ service: string; tools: McpToolInfo[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [identity, setIdentity] = useState<'caller' | 'app_sp' | null>(null);
   const [paramsText, setParamsText] = useState(() => JSON.stringify(value.mcp_params ?? {}, null, 2));
   const [paramsError, setParamsError] = useState<string | null>(null);
 
   const fetchServices = async (extraSchemas: string) => {
     const qs = extraSchemas.trim() ? `?schemas=${encodeURIComponent(extraSchemas.trim())}` : '';
-    return get<McpServiceInfo[]>(`/api/authority/mcp-services${qs}`);
+    return get<{ identity: 'caller' | 'app_sp'; services: McpServiceInfo[] }>(`/api/authority/mcp-services${qs}`);
   };
 
   const refreshServices = async () => {
@@ -38,7 +39,7 @@ export default function McpRefEditor({ value, onChange }: Props) {
     const { data, error: err } = await fetchServices(schemas);
     setServicesLoading(false);
     setError(err || null);
-    if (!err) setServices(Array.isArray(data) ? data : []);
+    if (!err) { setServices(data?.services || []); setIdentity(data?.identity ?? null); }
   };
 
   useEffect(() => {
@@ -47,7 +48,7 @@ export default function McpRefEditor({ value, onChange }: Props) {
       const { data, error: err } = await fetchServices('');
       if (cancelled) return;
       setError(err || null);
-      if (!err) setServices(Array.isArray(data) ? data : []);
+      if (!err) { setServices(data?.services || []); setIdentity(data?.identity ?? null); }
     })();
     return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -57,12 +58,12 @@ export default function McpRefEditor({ value, onChange }: Props) {
     if (!serviceName) return;
     let cancelled = false;
     (async () => {
-      const { data, error: err } = await get<McpToolInfo[]>(
+      const { data, error: err } = await get<{ identity: string; tools: McpToolInfo[] }>(
         `/api/authority/mcp-services/tools?service_name=${encodeURIComponent(serviceName)}`,
       );
       if (cancelled) return;
       setError(err || null);
-      setToolsFor({ service: serviceName, tools: !err && Array.isArray(data) ? data : [] });
+      setToolsFor({ service: serviceName, tools: !err ? data?.tools || [] : [] });
     })();
     return () => { cancelled = true; };
   }, [serviceName, get]);
@@ -150,6 +151,12 @@ export default function McpRefEditor({ value, onChange }: Props) {
           className="font-mono text-xs"
         />
       </div>
+      {identity === 'app_sp' && (
+        <p className="text-xs text-amber-600">
+          No caller token was forwarded, so this list was fetched as the Ontos app service principal. Callers of an
+          OBO-authenticated AR may not have access to these services.
+        </p>
+      )}
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   );
