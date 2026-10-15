@@ -168,6 +168,33 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
       return;
     }
 
+    // Incomplete participant rows (one field filled, the other blank) used to
+    // be silently filtered out — the dialog closed with a success toast while
+    // the half-authored affirmation was dropped. Surface it instead; a fully
+    // empty row still drops silently (it's the "I added a row by accident"
+    // escape hatch).
+    for (let i = 0; i < affirmations.length; i++) {
+      const a = affirmations[i];
+      const hasPrincipal = !!a.principal.trim();
+      const hasRole = !!a.role;
+      if (hasPrincipal && !hasRole) {
+        toast({
+          title: `Participant ${i + 1}: pick a business role`,
+          description: 'Every participant with a principal must be bound to a Business Role (from Settings).',
+          variant: 'destructive',
+        });
+        return;
+      }
+      if (hasRole && !hasPrincipal) {
+        toast({
+          title: `Participant ${i + 1}: enter a principal`,
+          description: 'Every participant with a role must have an email or group identifier.',
+          variant: 'destructive',
+        });
+        return;
+      }
+    }
+
     const evidence_sources: any[] = [];
     for (const s of evidenceSources) {
       if (!s.ref.trim()) continue;
@@ -355,10 +382,19 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
             <strong>Approvers</strong> count toward the affirmation gate. <strong>Reviewers</strong> are
             interviewed during the review process to confirm the relation reflects reality. A principal can be both.
           </p>
-          {affirmations.map((a, idx) => (
+          {affirmations.map((a, idx) => {
+            // Flag the empty field on a half-authored row so the author sees
+            // *which* field is missing without having to re-read the toast.
+            const hasPrincipal = !!a.principal.trim();
+            const hasRole = !!a.role;
+            const roleMissing = hasPrincipal && !hasRole;
+            const principalMissing = hasRole && !hasPrincipal;
+            return (
             <div key={idx} className="grid grid-cols-[1fr_1.5fr_auto] gap-2 items-center">
               <NativeSelect
                 value={a.business_role_id || ''}
+                aria-invalid={roleMissing || undefined}
+                selectClassName={roleMissing ? 'border-destructive focus:ring-destructive' : undefined}
                 onChange={(e) => {
                   const br = businessRoles.find((r) => r.id === e.target.value);
                   updateAffirmation(idx, {
@@ -376,6 +412,8 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
               </NativeSelect>
               <Input
                 value={a.principal}
+                aria-invalid={principalMissing || undefined}
+                className={principalMissing ? 'border-destructive focus-visible:ring-destructive' : undefined}
                 onChange={(e) => updateAffirmation(idx, { principal: e.target.value })}
                 placeholder="principal (email or group)"
               />
@@ -401,7 +439,8 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
                 </Button>
               </div>
             </div>
-          ))}
+            );
+          })}
           <Button
             variant="outline" size="sm"
             onClick={() => setAffirmations((prev) => [...prev, { role: '', principal: '', principal_type: 'user', required: true, is_approver: true, is_reviewer: false }])}
