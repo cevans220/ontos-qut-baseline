@@ -1,7 +1,7 @@
 """API routes for the Authority Resolution feature (ARF)."""
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Body, Query
+from fastapi import APIRouter, Depends, HTTPException, Body, Query, Request
 
 from src.common.dependencies import DBSessionDep, AuditCurrentUserDep, DataAssetReviewManagerDep
 from src.common.features import FeatureAccessLevel
@@ -36,6 +36,16 @@ def _resolve_req_dict(req: ResolveRequest) -> dict:
     }
     base.update(req.params or {})
     return base
+
+
+def _semantic_models_manager(request: Request):
+    """Fish the SemanticModelsManager out of app.state when present.
+
+    Resolve calls can enrich ``ontos_entity`` refs with a semantic-graph
+    label when the manager has booted; absence is non-fatal — the resolver
+    falls back to the raw IRI.
+    """
+    return getattr(request.app.state, "semantic_models_manager", None)
 
 
 @router.get("/authority/relations")
@@ -212,16 +222,21 @@ async def affirm(
 async def resolve(
     relation_id: str,
     db: DBSessionDep,
+    request: Request,
     payload: ResolveRequest = Body(default=ResolveRequest()),
     _: bool = Depends(PermissionChecker(FEATURE_ID, FeatureAccessLevel.READ_ONLY)),
 ):
-    return manager.resolve(db, relation_id, _resolve_req_dict(payload))
+    return manager.resolve(
+        db, relation_id, _resolve_req_dict(payload),
+        semantic_models_manager=_semantic_models_manager(request),
+    )
 
 
 @router.post("/authority/relations/{relation_id}/test")
 async def test_resolve(
     relation_id: str,
     db: DBSessionDep,
+    request: Request,
     payload: ResolveRequest = Body(default=ResolveRequest()),
     _: bool = Depends(PermissionChecker(FEATURE_ID, FeatureAccessLevel.READ_ONLY)),
 ):
@@ -229,7 +244,11 @@ async def test_resolve(
     recording the decision or touching the usage counters. Used by the detail-view
     Test dialog so authors can preview verdicts before activating.
     """
-    return manager.resolve(db, relation_id, _resolve_req_dict(payload), record=False, require_active=False)
+    return manager.resolve(
+        db, relation_id, _resolve_req_dict(payload),
+        record=False, require_active=False,
+        semantic_models_manager=_semantic_models_manager(request),
+    )
 
 
 @router.get("/authority/relations/{relation_id}/decisions")
@@ -328,6 +347,113 @@ async def list_prerequisites(
     if not relation:
         raise HTTPException(status_code=404, detail="Authority Relation not found")
     return manager.list_prerequisites(db, relation)
+
+
+@router.get("/authority/relations/{relation_id}/resource-refs")
+async def list_resource_refs(
+    relation_id: str,
+    db: DBSessionDep,
+    _: bool = Depends(PermissionChecker(FEATURE_ID, FeatureAccessLevel.READ_ONLY)),
+):
+    """The AR's declared typed resource refs with each row's last cached label.
+
+    Does *not* re-materialise (so detail views stay cheap); the live
+    walk happens inside ``POST /resolve`` and ``POST /test``.
+    """
+    relation = manager.resolve_relation_ref(db, relation_id)
+    if not relation:
+        raise HTTPException(status_code=404, detail="Authority Relation not found")
+    return manager.list_resource_refs(db, relation)
+
+
+@router.get("/authority/entity-ref-candidates")
+async def entity_ref_candidates(
+    request: Request,
+    db: DBSessionDep,
+    entity_type: str = Query(..., description="Ontos entity type to search in"),
+    q: Optional[str] = Query(None, description="Case-insensitive label filter"),
+    limit: int = Query(50, ge=1, le=200),
+    _: bool = Depends(PermissionChecker(FEATURE_ID, FeatureAccessLevel.READ_ONLY)),
+):
+    """Picker feed for the ``ontos_entity`` ref type in the author dialog.
+
+    One flat shape — ``{entity_type, entity_id, label, iri?}`` — regardless
+    of the backing store, so the frontend can render a single list widget.
+    Supported types:
+
+    * ``business_concept`` — hits the semantic-models search endpoint
+      (``entity_id`` *is* the concept IRI).
+    * ``data_product`` — ``name``-prefix match over data products.
+    * ``data_domain`` — ``name``-prefix match over data domains.
+    """
+    needle = (q or "").strip().lower()
+    out: List[dict] = []
+    if entity_type == "business_concept":
+        sm = _semantic_models_manager(request)
+        if sm is None:
+            return []
+        try:
+            # ``search_concepts`` already returns ``{value, label}`` pairs
+            # (value = IRI); an empty needle is a plain limit-N listing.
+            hits = sm.search_concepts(needle, limit=limit)
+        except Exception as e:
+            logger.warning(f"Concept search failed: {e}")
+            return []
+        for h in hits or []:
+            iri = h.get("value") if isinstance(h, dict) else getattr(h, "value", None)
+            label = h.get("label") if isinstance(h, dict) else getattr(h, "label", None)
+            if not iri:
+                continue
+            out.append({
+                "entity_type": "business_concept",
+                "entity_id": iri,
+                "label": label or iri,
+                "iri": iri,
+            })
+    elif entity_type == "data_product":
+        from src.repositories.data_products_repository import data_product_repo
+        try:
+            rows = data_product_repo.get_multi(db, limit=1000)
+        except Exception as e:
+            logger.warning(f"Data-product list failed: {e}")
+            return []
+        for dp in rows or []:
+            label = getattr(dp, "name", None) or getattr(dp, "id", None) or ""
+            if needle and needle not in label.lower():
+                continue
+            out.append({
+                "entity_type": "data_product",
+                "entity_id": getattr(dp, "id", None),
+                "label": label,
+            })
+            if len(out) >= limit:
+                break
+    elif entity_type == "data_domain":
+        from src.repositories.data_domain_repository import data_domain_repo
+        try:
+            rows = data_domain_repo.get_multi_with_details(db)
+        except Exception as e:
+            logger.warning(f"Data-domain list failed: {e}")
+            return []
+        for dd in rows or []:
+            label = getattr(dd, "name", None) or getattr(dd, "id", None) or ""
+            if needle and needle not in label.lower():
+                continue
+            out.append({
+                "entity_type": "data_domain",
+                "entity_id": str(getattr(dd, "id", None)) if getattr(dd, "id", None) is not None else None,
+                "label": label,
+            })
+            if len(out) >= limit:
+                break
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported entity_type '{entity_type}' — expected "
+                   "business_concept, data_product, or data_domain.",
+        )
+    out.sort(key=lambda x: (x.get("label") or "").lower())
+    return out
 
 
 @router.get("/authority/relations/{relation_id}/criteria")

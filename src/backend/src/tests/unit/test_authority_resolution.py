@@ -897,3 +897,223 @@ def test_prerequisites_require_a_family_slug(db_session):
     # Empty prereqs on a slugless AR is a noop (not an error).
     mgr.update_relation(db_session, rel.id, AuthorityRelationUpdate(prerequisites=[]))
     db_session.commit()
+
+
+# ---------------------------------------------------------------------------
+# ARF v2: resource refs (literal + Ontos entity)
+# ---------------------------------------------------------------------------
+
+
+def test_literal_resource_ref_round_trips_and_resolves(db_session):
+    """A ``literal`` ref persists verbatim, surfaces on ``to_read_dict``, and
+    comes back in the resolve response's ``resolved_refs`` list with its
+    cached label updated."""
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.models.authority_resolution import (
+        AuthorityRelationCreate, ResourceRefInput,
+    )
+    from src.repositories.authority_resolution_repository import authority_resource_ref_repo
+
+    mgr = AuthorityResolutionManager()
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(
+        name="Literal AR", slug="lit-ar",
+        resource_refs=[ResourceRefInput(
+            field_path="actor_identity", ref_type="literal",
+            literal_value="rsm-east@example.com",
+        )],
+    ))
+    db_session.commit()
+
+    # Read side: list_resource_refs is wired through to_read_dict.
+    read = mgr.to_read_dict(db_session, rel)
+    assert len(read["resource_refs"]) == 1
+    assert read["resource_refs"][0]["field_path"] == "actor_identity"
+    assert read["resource_refs"][0]["ref_type"] == "literal"
+    assert read["resource_refs"][0]["literal_value"] == "rsm-east@example.com"
+
+    # Resolve surfaces the materialised value + updates cache.
+    out = mgr.resolve(db_session, "lit-ar", {"actor_identity": "x"},
+                       record=False, require_active=False)
+    assert out["resolved_refs"] == [{
+        "field_path": "actor_identity",
+        "ref_type": "literal",
+        "value": "rsm-east@example.com",
+        "source": "literal",
+    }]
+    row = authority_resource_ref_repo.list_for_relation(db_session, relation_id=rel.id)[0]
+    assert row.cached_label == "rsm-east@example.com"
+    assert row.cached_at is not None
+
+
+def test_ontos_entity_ref_business_concept_falls_back_to_iri(db_session):
+    """Without a SemanticModelsManager the business_concept branch still
+    produces a stable value — the IRI itself. This is the cold-start /
+    unit-test path and must never crash a resolve."""
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.models.authority_resolution import (
+        AuthorityRelationCreate, ResourceRefInput,
+    )
+
+    mgr = AuthorityResolutionManager()
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(
+        name="Concept-backed AR", slug="concept-ar",
+        resource_refs=[ResourceRefInput(
+            field_path="domain_context.market", ref_type="ontos_entity",
+            entity_type="business_concept",
+            entity_id="urn:demo:concept:germany",
+        )],
+    ))
+    db_session.commit()
+
+    out = mgr.resolve(db_session, "concept-ar", {},
+                       record=False, require_active=False)
+    assert len(out["resolved_refs"]) == 1
+    entry = out["resolved_refs"][0]
+    assert entry["field_path"] == "domain_context.market"
+    assert entry["ref_type"] == "ontos_entity"
+    assert entry["value"] == "urn:demo:concept:germany"  # IRI fallback
+    assert entry["iri"] == "urn:demo:concept:germany"
+    assert entry["source"] == "ontos_entity"
+
+
+def test_ontos_entity_ref_uses_semantic_manager_label_when_available(db_session):
+    """When a SemanticModelsManager is supplied, the ontos_entity resolver
+    prefers its ``get_concept_details(iri).label`` over the raw IRI."""
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.models.authority_resolution import (
+        AuthorityRelationCreate, ResourceRefInput,
+    )
+
+    class _FakeConcept:
+        def __init__(self, label):
+            self.label = label
+
+    class _FakeSemManager:
+        def get_concept_details(self, iri):
+            return _FakeConcept("Germany")
+
+    mgr = AuthorityResolutionManager()
+    mgr.create_relation(db_session, AuthorityRelationCreate(
+        name="Concept-labeled AR", slug="concept-labeled",
+        resource_refs=[ResourceRefInput(
+            field_path="domain_context.market", ref_type="ontos_entity",
+            entity_type="business_concept",
+            entity_id="urn:demo:concept:germany",
+        )],
+    ))
+    db_session.commit()
+
+    out = mgr.resolve(db_session, "concept-labeled", {},
+                       record=False, require_active=False,
+                       semantic_models_manager=_FakeSemManager())
+    entry = out["resolved_refs"][0]
+    assert entry["value"] == "Germany"
+    assert entry["iri"] == "urn:demo:concept:germany"
+
+
+def test_resource_refs_persist_on_decision_provenance(db_session):
+    """A recorded decision carries ``provenance.resolved_refs`` alongside the
+    chain so the audit trail can replay what the AR was pointing at."""
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.models.authority_resolution import (
+        AuthorityRelationCreate, ResourceRefInput,
+    )
+    from src.repositories.authority_resolution_repository import authority_decision_repo
+
+    mgr = AuthorityResolutionManager()
+    mgr.create_relation(db_session, AuthorityRelationCreate(
+        name="Provenance AR", slug="prov-ar",
+        resource_refs=[ResourceRefInput(
+            field_path="actor_identity", ref_type="literal",
+            literal_value="rsm-east@example.com",
+        )],
+    ))
+    db_session.commit()
+
+    out = mgr.resolve(db_session, "prov-ar", {"actor_identity": "x"},
+                       record=True, require_active=False)
+    decisions = authority_decision_repo.list_for_relation(
+        db_session, relation_id=out["relation_id"],
+    )
+    assert len(decisions) == 1
+    prov = decisions[0].provenance
+    assert prov is not None
+    assert prov.get("resolved_refs") == [{
+        "field_path": "actor_identity",
+        "ref_type": "literal",
+        "value": "rsm-east@example.com",
+        "source": "literal",
+    }]
+    # chain is absent because no prerequisites were declared.
+    assert "chain" not in prov
+
+
+def test_resource_ref_write_rejects_malformed_rows(db_session):
+    """``_replace_resource_refs`` surfaces author errors as ``ValueError``
+    (routes map these to a 400):
+
+    * unknown ``ref_type``
+    * ``literal`` without ``literal_value``
+    * ``ontos_entity`` without both ``entity_type`` and ``entity_id``
+    """
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.models.authority_resolution import (
+        AuthorityRelationCreate, AuthorityRelationUpdate, ResourceRefInput,
+    )
+
+    mgr = AuthorityResolutionManager()
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(
+        name="Bad refs AR", slug="bad-refs",
+    ))
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="ref_type"):
+        mgr.update_relation(db_session, rel.id, AuthorityRelationUpdate(
+            resource_refs=[ResourceRefInput(field_path="actor_identity", ref_type="bogus")],
+        ))
+    with pytest.raises(ValueError, match="literal_value"):
+        mgr.update_relation(db_session, rel.id, AuthorityRelationUpdate(
+            resource_refs=[ResourceRefInput(field_path="actor_identity", ref_type="literal")],
+        ))
+    with pytest.raises(ValueError, match="entity_type"):
+        mgr.update_relation(db_session, rel.id, AuthorityRelationUpdate(
+            resource_refs=[ResourceRefInput(
+                field_path="actor_identity", ref_type="ontos_entity",
+                entity_type=None, entity_id="urn:x",
+            )],
+        ))
+
+
+def test_resource_refs_are_replaced_on_update(db_session):
+    """Writing ``resource_refs`` is replace-on-write: the manager drops the
+    old rows and recreates the new set, so an author editing the field in
+    the dialog gets the shape they chose, not a cumulative union."""
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.models.authority_resolution import (
+        AuthorityRelationCreate, AuthorityRelationUpdate, ResourceRefInput,
+    )
+    from src.repositories.authority_resolution_repository import authority_resource_ref_repo
+
+    mgr = AuthorityResolutionManager()
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(
+        name="Replacement AR", slug="replace-ar",
+        resource_refs=[
+            ResourceRefInput(field_path="actor_identity", ref_type="literal", literal_value="old@example.com"),
+            ResourceRefInput(field_path="object_id", ref_type="literal", literal_value="dp-old"),
+        ],
+    ))
+    db_session.commit()
+    assert len(authority_resource_ref_repo.list_for_relation(db_session, relation_id=rel.id)) == 2
+
+    # Replace with a single new row — the two old ones must be gone.
+    mgr.update_relation(db_session, rel.id, AuthorityRelationUpdate(
+        resource_refs=[ResourceRefInput(
+            field_path="actor_identity", ref_type="literal",
+            literal_value="new@example.com",
+        )],
+    ))
+    db_session.commit()
+    rows = authority_resource_ref_repo.list_for_relation(db_session, relation_id=rel.id)
+    assert len(rows) == 1
+    assert rows[0].field_path == "actor_identity"
+    assert rows[0].literal_value == "new@example.com"

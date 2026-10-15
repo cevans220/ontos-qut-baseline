@@ -150,6 +150,7 @@ export interface AuthorityRelation {
   criteria?: AuthorityCriterion[];
   tags?: { fully_qualified_name?: string | null; assigned_value?: string | null }[];
   prerequisites?: AuthorityPrerequisite[];
+  resource_refs?: AuthorityResourceRef[];
   created_at?: string;
   updated_at?: string;
   created_by?: string | null;
@@ -217,6 +218,56 @@ export interface AuthorityPrerequisite {
   resolved_id?: string | null;   // id of the currently-active version row
 }
 
+// A typed pointer backing one of the AR's canonical fields. Mirrors
+// AuthorityResourceRefDb on the backend; MCP fields are stored but not
+// yet live (ARF v2 commit 4).
+export interface AuthorityResourceRef {
+  id?: string;
+  field_path: string;
+  ref_type: 'literal' | 'ontos_entity' | 'mcp_tool';
+  literal_value?: string | null;
+  entity_type?: string | null;    // business_concept | data_product | data_domain
+  entity_id?: string | null;      // IRI (concept) or entity UUID
+  mcp_service_name?: string | null;
+  mcp_tool_name?: string | null;
+  mcp_params?: Record<string, any> | null;
+  mcp_result_pointer?: string | null;
+  cached_label?: string | null;
+  cached_at?: string | null;
+}
+
+export interface ResourceRefInput {
+  field_path: string;
+  ref_type: 'literal' | 'ontos_entity' | 'mcp_tool';
+  literal_value?: string | null;
+  entity_type?: string | null;
+  entity_id?: string | null;
+  mcp_service_name?: string | null;
+  mcp_tool_name?: string | null;
+  mcp_params?: Record<string, any> | null;
+  mcp_result_pointer?: string | null;
+}
+
+// One row returned by GET /api/authority/entity-ref-candidates — the Ontos
+// entity picker renders a flat list regardless of entity_type.
+export interface EntityRefCandidate {
+  entity_type: string;
+  entity_id: string;
+  label: string;
+  iri?: string | null;
+}
+
+// A single ``resolved_refs`` entry on ResolveResponse: ``{field_path,
+// ref_type, value, iri?, source, error?}``.
+export interface ResolvedRefEntry {
+  field_path: string;
+  ref_type: 'literal' | 'ontos_entity' | 'mcp_tool';
+  value: string | null;
+  iri?: string | null;
+  source: string;       // literal | ontos_entity | mcp_tool | mcp_cached
+  error?: string | null;
+}
+
 export interface PrerequisiteInput {
   prerequisite_family_slug: string;
   required: boolean;
@@ -278,6 +329,7 @@ export interface ResolveResponse {
   dna_magnitude?: number | null;
   dna_direction?: string | null;
   prerequisite_chain?: PrerequisiteChainEntry[];
+  resolved_refs?: ResolvedRefEntry[];
 }
 
 export const ACTION_VOCAB = ['approve', 'escalate', 'override', 'delegate', 'veto'];

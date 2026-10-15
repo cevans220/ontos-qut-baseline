@@ -19,6 +19,7 @@ import {
   ACTION_VOCAB,
   type AuthorityRelation, type AffirmationInput,
   type PrerequisiteInput, type AuthorityRelationSlug,
+  type ResourceRefInput, type EntityRefCandidate,
 } from '@/types/authority-resolution';
 import type { BusinessRoleRead } from '@/types/business-role';
 
@@ -82,6 +83,10 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
   const [scheduleCron, setScheduleCron] = useState<string | null>(null);
   const [prerequisites, setPrerequisites] = useState<PrerequisiteInput[]>([]);
   const [slugCatalog, setSlugCatalog] = useState<AuthorityRelationSlug[]>([]);
+  const [resourceRefs, setResourceRefs] = useState<ResourceRefInput[]>([]);
+  // Picker catalog, keyed by (entity_type, search-term). The dialog debounces
+  // searches per row so the picker stays cheap even with 100s of concepts.
+  const [refCandidates, setRefCandidates] = useState<Record<string, EntityRefCandidate[]>>({});
 
   const reset = () => {
     setName(''); setSlug(''); setDescription(''); setActorRole(''); setActorIdentity('');
@@ -89,7 +94,7 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
     setCurrency(''); setMarket(''); setDnaMax('0.3'); setCriteriaRows([]);
     setEvidenceSources([]); setDomainIds([]); setPrimaryDomainId(null);
     setAffirmations(DEFAULT_AFFIRMATIONS); setTags([]); setScheduleCron(null);
-    setPrerequisites([]);
+    setPrerequisites([]); setResourceRefs([]);
   };
 
   // Load active Business Roles for the participant role picker (Settings feature).
@@ -171,6 +176,19 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
           required: p.required,
           display_order: p.display_order,
           notes: p.notes ?? null,
+        })),
+      );
+      setResourceRefs(
+        (relation.resource_refs || []).map((r) => ({
+          field_path: r.field_path,
+          ref_type: r.ref_type,
+          literal_value: r.literal_value ?? null,
+          entity_type: r.entity_type ?? null,
+          entity_id: r.entity_id ?? null,
+          mcp_service_name: r.mcp_service_name ?? null,
+          mcp_tool_name: r.mcp_tool_name ?? null,
+          mcp_params: r.mcp_params ?? null,
+          mcp_result_pointer: r.mcp_result_pointer ?? null,
         })),
       );
     } else {
@@ -257,6 +275,20 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
       prerequisites: prerequisites
         .filter((p) => p.prerequisite_family_slug.trim())
         .map((p, idx) => ({ ...p, display_order: idx })),
+      // Typed resource refs. Drop rows whose field_path is empty or whose
+      // chosen branch is incomplete; the backend validates the rest and
+      // raises a 400 the toast will surface.
+      resource_refs: resourceRefs
+        .filter((r) => r.field_path.trim())
+        .filter((r) =>
+          r.ref_type === 'literal'
+            ? (r.literal_value ?? '').length > 0
+            : r.ref_type === 'ontos_entity'
+            ? !!r.entity_type && !!r.entity_id
+            : r.ref_type === 'mcp_tool'
+            ? !!r.mcp_service_name && !!r.mcp_tool_name
+            : false,
+        ),
     };
 
     setSaving(true);
@@ -533,6 +565,143 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
             }
           >
             <Plus className="h-4 w-4 mr-1" /> Add prerequisite
+          </Button>
+
+          <div className="text-sm font-semibold text-muted-foreground pt-2">Resource refs (where field values come from)</div>
+          <p className="text-xs text-muted-foreground -mt-2">
+            Instead of a plain literal, back a canonical field (<code>actor_identity</code>,
+            <code>object_id</code>, <code>domain_context.&lt;key&gt;</code>) with a typed pointer. An
+            <strong> Ontos entity</strong> ref re-resolves against the knowledge graph at eval time so
+            the value stays current when the underlying concept, product, or domain changes.
+            <strong> MCP tool</strong> refs are stored but not yet live (coming in the next commit).
+          </p>
+          {resourceRefs.map((r, idx) => {
+            const candidateKey = `${r.entity_type || ''}::${idx}`;
+            const candidates = refCandidates[candidateKey] || [];
+            return (
+              <div key={idx} className="rounded-md border p-3 space-y-2">
+                <div className="grid grid-cols-[1fr_auto_auto] gap-2 items-center">
+                  <Input
+                    value={r.field_path}
+                    onChange={(e) =>
+                      setResourceRefs((prev) =>
+                        prev.map((x, i) => (i === idx ? { ...x, field_path: e.target.value } : x)),
+                      )
+                    }
+                    placeholder="actor_identity | object_id | domain_context.market"
+                  />
+                  <NativeSelect
+                    className="w-44"
+                    value={r.ref_type}
+                    onChange={(e) =>
+                      setResourceRefs((prev) =>
+                        prev.map((x, i) =>
+                          i === idx
+                            ? {
+                                ...x,
+                                ref_type: e.target.value as ResourceRefInput['ref_type'],
+                                // Reset branch-specific fields on type switch so stale
+                                // state doesn't travel across changes.
+                                literal_value: null,
+                                entity_type: null,
+                                entity_id: null,
+                                mcp_service_name: null,
+                                mcp_tool_name: null,
+                              }
+                            : x,
+                        ),
+                      )
+                    }
+                  >
+                    <option value="literal">Literal</option>
+                    <option value="ontos_entity">Ontos entity</option>
+                    <option value="mcp_tool" disabled>MCP tool (coming soon)</option>
+                  </NativeSelect>
+                  <Button
+                    variant="ghost" size="icon"
+                    onClick={() => setResourceRefs((prev) => prev.filter((_, i) => i !== idx))}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+                {r.ref_type === 'literal' && (
+                  <Input
+                    value={r.literal_value || ''}
+                    onChange={(e) =>
+                      setResourceRefs((prev) =>
+                        prev.map((x, i) => (i === idx ? { ...x, literal_value: e.target.value } : x)),
+                      )
+                    }
+                    placeholder="Literal value (e.g. rsm-east@example.com)"
+                  />
+                )}
+                {r.ref_type === 'ontos_entity' && (
+                  <div className="grid grid-cols-[auto_1fr] gap-2 items-center">
+                    <NativeSelect
+                      className="w-40"
+                      value={r.entity_type || ''}
+                      onChange={async (e) => {
+                        const entity_type = e.target.value || null;
+                        setResourceRefs((prev) =>
+                          prev.map((x, i) =>
+                            i === idx ? { ...x, entity_type, entity_id: null } : x,
+                          ),
+                        );
+                        if (entity_type) {
+                          const { data } = await get<EntityRefCandidate[]>(
+                            `/api/authority/entity-ref-candidates?entity_type=${entity_type}&limit=100`,
+                          );
+                          if (Array.isArray(data)) {
+                            setRefCandidates((prev) => ({
+                              ...prev,
+                              [`${entity_type}::${idx}`]: data,
+                            }));
+                          }
+                        }
+                      }}
+                    >
+                      <option value="">Pick a type…</option>
+                      <option value="business_concept">Business concept</option>
+                      <option value="data_product">Data product</option>
+                      <option value="data_domain">Data domain</option>
+                    </NativeSelect>
+                    <NativeSelect
+                      value={r.entity_id || ''}
+                      onChange={(e) =>
+                        setResourceRefs((prev) =>
+                          prev.map((x, i) => (i === idx ? { ...x, entity_id: e.target.value } : x)),
+                        )
+                      }
+                      disabled={!r.entity_type}
+                    >
+                      <option value="">
+                        {r.entity_type ? 'Pick an entity…' : 'Pick a type first…'}
+                      </option>
+                      {candidates.map((c) => (
+                        <option key={c.entity_id} value={c.entity_id}>
+                          {c.label}
+                        </option>
+                      ))}
+                      {/* Preserve the current pick when it isn't in the fetched slice. */}
+                      {r.entity_id && !candidates.some((c) => c.entity_id === r.entity_id) && (
+                        <option value={r.entity_id}>{r.entity_id}</option>
+                      )}
+                    </NativeSelect>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <Button
+            variant="outline" size="sm"
+            onClick={() =>
+              setResourceRefs((prev) => [
+                ...prev,
+                { field_path: '', ref_type: 'literal', literal_value: '' },
+              ])
+            }
+          >
+            <Plus className="h-4 w-4 mr-1" /> Add resource ref
           </Button>
 
           <div className="text-sm font-semibold text-muted-foreground pt-2">DNA-Coefficient schedule</div>

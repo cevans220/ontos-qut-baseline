@@ -138,6 +138,19 @@ class AuthorityResourceRefRepository(CRUDBase[AuthorityResourceRefDb, Dict[str, 
         )
         return db.execute(stmt).scalars().first()
 
+    def delete_for_relation(self, db: Session, *, relation_id: str) -> int:
+        """Drop every ref row owned by this AR.
+
+        The manager calls this before re-creating rows on save, giving
+        replace-on-write semantics identical to ``_replace_criteria`` /
+        ``_replace_prerequisites``. Returns the number of rows removed.
+        """
+        return (
+            db.query(AuthorityResourceRefDb)
+            .filter(AuthorityResourceRefDb.relation_id == relation_id)
+            .delete(synchronize_session=False)
+        )
+
 
 class AuthorityPrerequisiteRepository(CRUDBase[AuthorityPrerequisiteDb, Dict[str, Any], Dict[str, Any]]):
     def __init__(self):

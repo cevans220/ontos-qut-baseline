@@ -81,6 +81,25 @@ class PrerequisiteInput(BaseModel):
     notes: Optional[str] = None
 
 
+class ResourceRefInput(BaseModel):
+    """A typed pointer that backs one of an AR's canonical fields.
+
+    ``field_path`` is a JSON-pointer-ish path on the AR row (``actor_identity``,
+    ``object_id``, ``domain_context.brand``). The AR's own scalar column is
+    the cached literal; this row records where that value came from and lets
+    the resolver re-materialise it on demand.
+    """
+    field_path: str
+    ref_type: str                              # literal | ontos_entity | mcp_tool
+    literal_value: Optional[str] = None
+    entity_type: Optional[str] = None          # business_concept | data_product | data_domain | …
+    entity_id: Optional[str] = None            # IRI (for concepts) or entity UUID
+    mcp_service_name: Optional[str] = None
+    mcp_tool_name: Optional[str] = None
+    mcp_params: Optional[Dict[str, Any]] = None
+    mcp_result_pointer: Optional[str] = None
+
+
 class AuthorityRelationCreate(BaseModel):
     name: str
     description: Optional[str] = None
@@ -111,6 +130,10 @@ class AuthorityRelationCreate(BaseModel):
     # Declarative prerequisite chain — this AR requires each listed slug's
     # family active version to resolve ``approved`` before deciding.
     prerequisites: Optional[List[PrerequisiteInput]] = None
+    # Typed pointers backing the canonical fields (``actor_identity``,
+    # ``object_id``, ``domain_context.*``). Omit the field to leave the
+    # authored scalar as a plain literal.
+    resource_refs: Optional[List[ResourceRefInput]] = None
     # Polymorphic tags
     tags: Optional[List[AssignedTagCreate]] = None
 
@@ -138,6 +161,7 @@ class AuthorityRelationUpdate(BaseModel):
     affirmations: Optional[List[AffirmationInput]] = None
     criteria: Optional[List[CriterionInput]] = None
     prerequisites: Optional[List[PrerequisiteInput]] = None
+    resource_refs: Optional[List[ResourceRefInput]] = None
     tags: Optional[List[AssignedTagCreate]] = None
 
 
@@ -178,3 +202,9 @@ class ResolveResponse(BaseModel):
     # ``{slug, version, verdict, reason, required}`` — present even when the
     # outer verdict is approved so agents can see which gates were cleared.
     prerequisite_chain: List[Dict[str, Any]] = Field(default_factory=list)
+    # Typed pointers that were materialised during this resolve, one entry per
+    # ``authority_resource_refs`` row the AR declared. Each entry carries
+    # ``{field_path, ref_type, value, iri?, source}`` so agents (and the
+    # provenance audit trail) know whether a scalar came from a literal, an
+    # Ontos entity lookup, or an MCP tool call.
+    resolved_refs: List[Dict[str, Any]] = Field(default_factory=list)

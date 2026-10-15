@@ -38,6 +38,7 @@ from src.repositories.authority_resolution_repository import (
     authority_dna_run_repo,
     authority_decision_repo,
     authority_prerequisite_repo,
+    authority_resource_ref_repo,
 )
 from src.repositories.entity_domain_association_repository import entity_domain_repo
 
@@ -169,6 +170,10 @@ class AuthorityResolutionManager:
         prereqs = data.get("prerequisites")
         if prereqs is not None:
             self._replace_prerequisites(db, relation, prereqs)
+        # Typed resource refs (where canonical fields' values come from).
+        refs = data.get("resource_refs")
+        if refs is not None:
+            self._replace_resource_refs(db, rel_id, refs)
         # Polymorphic tags.
         self._set_tags(db, rel_id, getattr(payload, "tags", None), current_user)
         return relation
@@ -287,6 +292,7 @@ class AuthorityResolutionManager:
         affirmations = data.pop("affirmations", None)
         criteria = data.pop("criteria", None)
         prerequisites = data.pop("prerequisites", None)
+        resource_refs = data.pop("resource_refs", None)
 
         evidence = data.get("evidence_binding")
         if evidence is not None and hasattr(evidence, "dict"):
@@ -314,6 +320,8 @@ class AuthorityResolutionManager:
             self._replace_criteria(db, relation_id, criteria)
         if prerequisites is not None:
             self._replace_prerequisites(db, relation, prerequisites)
+        if resource_refs is not None:
+            self._replace_resource_refs(db, relation_id, resource_refs)
         # Polymorphic tags (only when the caller supplied the field).
         self._set_tags(db, relation_id, getattr(payload, "tags", None), current_user)
 
@@ -655,6 +663,222 @@ class AuthorityResolutionManager:
                 "resolved_id": target.id if target else None,
             })
         return out
+
+    # --------------------------------------------------------- resource refs
+
+    # Author-selectable ref types; ``mcp_tool`` is accepted but stays a
+    # no-op resolve until the MCP resolver lands (ARF v2 commit 4).
+    _REF_TYPES = ("literal", "ontos_entity", "mcp_tool")
+    # Ontos entity types we know how to resolve against today. The dispatch
+    # in :meth:`_resolve_ontos_entity` is a thin table so adding another
+    # type later is a two-line change.
+    _ONTOS_ENTITY_TYPES = ("business_concept", "data_product", "data_domain")
+
+    def _replace_resource_refs(
+        self, db: Session, relation_id: str, refs: List[Any],
+    ) -> None:
+        """Replace the AR's typed resource refs (delete + recreate).
+
+        Mirrors ``_replace_criteria`` / ``_replace_prerequisites``:
+        validates each row, dedupes by ``field_path`` (last writer wins),
+        and persists. The AR's own scalar columns stay untouched — ref
+        rows record *where* a value came from, not *what* it currently is.
+        Call sites: ``create_relation`` and ``update_relation``.
+        """
+        authority_resource_ref_repo.delete_for_relation(db, relation_id=relation_id)
+        normalised: Dict[str, Dict[str, Any]] = {}
+        for item in refs:
+            r = item.dict() if hasattr(item, "dict") else dict(item)
+            field_path = (r.get("field_path") or "").strip()
+            ref_type = (r.get("ref_type") or "").strip()
+            if not field_path:
+                continue
+            if ref_type not in self._REF_TYPES:
+                raise ValueError(
+                    f"Resource ref for '{field_path}' has unknown ref_type "
+                    f"'{ref_type}' — expected one of {self._REF_TYPES}."
+                )
+            if ref_type == "literal":
+                # literal_value may legitimately be an empty string, but
+                # ``None`` is treated as "no ref row" by the resolver, so
+                # catch that at the write boundary.
+                if r.get("literal_value") is None:
+                    raise ValueError(
+                        f"Literal resource ref for '{field_path}' is missing literal_value."
+                    )
+            elif ref_type == "ontos_entity":
+                entity_type = (r.get("entity_type") or "").strip()
+                entity_id = (r.get("entity_id") or "").strip()
+                if not entity_type or not entity_id:
+                    raise ValueError(
+                        f"Ontos-entity resource ref for '{field_path}' needs both "
+                        "entity_type and entity_id."
+                    )
+            # mcp_tool rows are stored verbatim (fields validated by step 4).
+            normalised[field_path] = r
+        for field_path, r in normalised.items():
+            authority_resource_ref_repo.create(db, obj_in={
+                "id": str(uuid.uuid4()),
+                "relation_id": relation_id,
+                "field_path": field_path,
+                "ref_type": r["ref_type"],
+                "literal_value": r.get("literal_value"),
+                "entity_type": r.get("entity_type"),
+                "entity_id": r.get("entity_id"),
+                "mcp_service_name": r.get("mcp_service_name"),
+                "mcp_tool_name": r.get("mcp_tool_name"),
+                "mcp_params": r.get("mcp_params"),
+                "mcp_result_pointer": r.get("mcp_result_pointer") or "$",
+            })
+
+    def _resolve_ontos_entity(
+        self,
+        db: Session,
+        *,
+        entity_type: str,
+        entity_id: str,
+        semantic_models_manager: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """Look up an Ontos entity by (type, id) and return ``{value, iri?}``.
+
+        * ``business_concept`` — ``entity_id`` *is* the concept IRI; its label
+          is read from the semantic graph when a manager is available, and
+          the raw IRI is returned verbatim as both the value *and* the IRI
+          when it isn't (unit tests, cold-start resolve).
+        * ``data_product`` / ``data_domain`` — a direct repo read; the
+          entity's ``name`` becomes the value.
+
+        Any lookup failure returns ``{value: None, iri: None, error: '…'}``
+        so the caller can decide between fallback and surfacing. Nothing
+        here raises; a dangling ref row must never crash a resolve.
+        """
+        if entity_type == "business_concept":
+            # The IRI itself is both the id and the semantic key; a label
+            # from the graph is a nice-to-have.
+            if semantic_models_manager is not None:
+                try:
+                    concept = semantic_models_manager.get_concept_details(entity_id)
+                    label = getattr(concept, "label", None) if concept else None
+                    if label:
+                        return {"value": label, "iri": entity_id}
+                except Exception as e:  # pragma: no cover - RDF read is best-effort
+                    logger.warning(f"Concept lookup failed for {entity_id}: {e}")
+            return {"value": entity_id, "iri": entity_id}
+        if entity_type == "data_product":
+            try:
+                from src.repositories.data_products_repository import data_product_repo
+                dp = data_product_repo.get(db, entity_id)
+                if dp is not None:
+                    return {"value": getattr(dp, "name", None) or entity_id, "iri": None}
+            except Exception as e:  # pragma: no cover - optional dep
+                logger.warning(f"Data product lookup failed for {entity_id}: {e}")
+            return {"value": None, "iri": None, "error": "data_product not found"}
+        if entity_type == "data_domain":
+            try:
+                from src.repositories.data_domain_repository import data_domain_repo
+                dd = data_domain_repo.get(db, entity_id)
+                if dd is not None:
+                    return {"value": getattr(dd, "name", None) or entity_id, "iri": None}
+            except Exception as e:  # pragma: no cover - optional dep
+                logger.warning(f"Data domain lookup failed for {entity_id}: {e}")
+            return {"value": None, "iri": None, "error": "data_domain not found"}
+        return {
+            "value": None, "iri": None,
+            "error": f"unsupported entity_type '{entity_type}'",
+        }
+
+    def _materialise_refs(
+        self,
+        db: Session,
+        relation: AuthorityRelationDb,
+        *,
+        semantic_models_manager: Optional[Any] = None,
+    ) -> List[Dict[str, Any]]:
+        """Walk the AR's resource refs and resolve each to a concrete value.
+
+        Returns one entry per ref row shaped
+        ``{field_path, ref_type, value, iri?, source, error?}``. The row's
+        ``cached_label`` / ``cached_at`` are updated so a later cold read
+        (list view, provenance audit) can show the last-known resolved
+        value without re-walking the graph.
+
+        ``mcp_tool`` refs are a deliberate no-op at this stage: the entry
+        is still emitted (so authors see the field is wired up) with
+        ``value=cached_label`` and ``source='mcp_cached'`` — the full MCP
+        resolver lands in commit 4.
+        """
+        rows = authority_resource_ref_repo.list_for_relation(db, relation_id=relation.id)
+        resolved: List[Dict[str, Any]] = []
+        for row in rows:
+            entry: Dict[str, Any] = {
+                "field_path": row.field_path,
+                "ref_type": row.ref_type,
+            }
+            value: Optional[str] = None
+            iri: Optional[str] = None
+            source = row.ref_type
+            if row.ref_type == "literal":
+                value = row.literal_value
+            elif row.ref_type == "ontos_entity":
+                lookup = self._resolve_ontos_entity(
+                    db,
+                    entity_type=row.entity_type or "",
+                    entity_id=row.entity_id or "",
+                    semantic_models_manager=semantic_models_manager,
+                )
+                value = lookup.get("value")
+                iri = lookup.get("iri")
+                if lookup.get("error"):
+                    entry["error"] = lookup["error"]
+            elif row.ref_type == "mcp_tool":
+                # No-op until commit 4; surface the last cache so UIs don't
+                # look empty when authoring hasn't been exercised yet.
+                value = row.cached_label
+                source = "mcp_cached"
+            entry["value"] = value
+            if iri is not None:
+                entry["iri"] = iri
+            entry["source"] = source
+            resolved.append(entry)
+            # Best-effort cache update — never block resolve on a cache write.
+            try:
+                if value is not None and value != row.cached_label:
+                    row.cached_label = value
+                    row.cached_at = self._now()
+                    db.add(row)
+            except Exception as e:  # pragma: no cover - cache write is best-effort
+                logger.warning(
+                    f"Could not update cached_label for ref {row.id}: {e}"
+                )
+        return resolved
+
+    def list_resource_refs(
+        self, db: Session, relation: AuthorityRelationDb,
+    ) -> List[Dict[str, Any]]:
+        """Flat read of the AR's declared refs for ``to_read_dict``.
+
+        Does *not* re-resolve — detail views show what the author configured
+        plus the last cached label. A live re-materialise happens inside
+        :meth:`_resolve_internal` on every ``resolve`` call.
+        """
+        rows = authority_resource_ref_repo.list_for_relation(db, relation_id=relation.id)
+        return [
+            {
+                "id": r.id,
+                "field_path": r.field_path,
+                "ref_type": r.ref_type,
+                "literal_value": r.literal_value,
+                "entity_type": r.entity_type,
+                "entity_id": r.entity_id,
+                "mcp_service_name": r.mcp_service_name,
+                "mcp_tool_name": r.mcp_tool_name,
+                "mcp_params": r.mcp_params,
+                "mcp_result_pointer": r.mcp_result_pointer,
+                "cached_label": r.cached_label,
+                "cached_at": r.cached_at,
+            }
+            for r in rows
+        ]
 
     def affirm(self, db: Session, affirmation_id: str, affirmed_by: str, notes: Optional[str] = None) -> Optional[AuthorityAffirmationDb]:
         aff = authority_affirmation_repo.get(db, affirmation_id)
@@ -1193,7 +1417,15 @@ class AuthorityResolutionManager:
                 return VERDICT_DENIED, (c.message or msg or f"Criterion '{c.code}' failed")
         return VERDICT_APPROVED, "all checks passed"
 
-    def resolve(self, db: Session, ar_ref: str, req: Dict[str, Any], record: bool = True, require_active: bool = True) -> Dict[str, Any]:
+    def resolve(
+        self,
+        db: Session,
+        ar_ref: str,
+        req: Dict[str, Any],
+        record: bool = True,
+        require_active: bool = True,
+        semantic_models_manager: Optional[Any] = None,
+    ) -> Dict[str, Any]:
         """Deterministically resolve a decision against an AR (by id or slug).
 
         Production/MCP use requires the AR to be ``active`` and records the
@@ -1204,15 +1436,21 @@ class AuthorityResolutionManager:
         (in production mode) is not active.
 
         Walks any declared ``authority_prerequisites`` depth-first before
-        evaluating the AR's own criteria; a required prerequisite that comes
-        back non-approved short-circuits the outer verdict to ``denied``
-        (``conflict`` on a cycle). The full chain is attached to the response
-        as ``prerequisite_chain`` and persisted on the decision's
-        ``provenance`` column.
+        materialising ``authority_resource_refs`` and evaluating the AR's own
+        criteria; a required prerequisite that comes back non-approved
+        short-circuits the outer verdict to ``denied`` (``conflict`` on a
+        cycle). The chain and the resolved refs are attached to the response
+        and persisted together on the decision's ``provenance`` column.
+
+        ``semantic_models_manager`` is optional — when a route supplies it,
+        ``ontos_entity`` refs targeting Business Concepts can look up a
+        label from the semantic graph; otherwise the IRI is passed through
+        verbatim (safe for unit tests and cold-start resolves).
         """
         return self._resolve_internal(
             db, ar_ref, req, visited=set(),
             record=record, require_active=require_active,
+            semantic_models_manager=semantic_models_manager,
         )
 
     def _resolve_internal(
@@ -1224,6 +1462,7 @@ class AuthorityResolutionManager:
         visited: set,
         record: bool,
         require_active: bool,
+        semantic_models_manager: Optional[Any] = None,
     ) -> Dict[str, Any]:
         # By slug this resolves to the family's active version (the stable @id
         # agents call); by UUID it pins the exact version.
@@ -1239,6 +1478,7 @@ class AuthorityResolutionManager:
                 "relation_id": relation.id if relation else None,
                 "relation_slug": relation.slug if relation else None,
                 "prerequisite_chain": [],
+                "resolved_refs": [],
             }
 
         head_slug = self._family_slug_of(db, relation)
@@ -1250,12 +1490,14 @@ class AuthorityResolutionManager:
                     db, relation, req,
                     VERDICT_CONFLICT,
                     f"cycle detected at {head_slug}",
-                    chain, record=False,
+                    chain, [], record=False,
                 )
             visited.add(head_slug)
             try:
                 blocked, blocker_reason, chain = self._walk_prerequisites(
-                    db, head_slug, req, visited, require_active=require_active,
+                    db, head_slug, req, visited,
+                    require_active=require_active,
+                    semantic_models_manager=semantic_models_manager,
                 )
             finally:
                 visited.discard(head_slug)
@@ -1264,13 +1506,24 @@ class AuthorityResolutionManager:
                     VERDICT_CONFLICT if "cycle" in (blocker_reason or "")
                     else VERDICT_DENIED
                 )
+                # A blocked outer still materialises its own refs — the
+                # provenance audit trail wants to show *what the AR was
+                # pointing at* even when the chain short-circuited.
+                resolved_refs = self._materialise_refs(
+                    db, relation,
+                    semantic_models_manager=semantic_models_manager,
+                )
                 return self._finalize_resolve(
-                    db, relation, req, outer_verdict, blocker_reason, chain, record,
+                    db, relation, req, outer_verdict, blocker_reason,
+                    chain, resolved_refs, record,
                 )
 
+        resolved_refs = self._materialise_refs(
+            db, relation, semantic_models_manager=semantic_models_manager,
+        )
         verdict, reason = self._evaluate_decision(relation, req)
         return self._finalize_resolve(
-            db, relation, req, verdict, reason, chain, record,
+            db, relation, req, verdict, reason, chain, resolved_refs, record,
         )
 
     def _walk_prerequisites(
@@ -1281,6 +1534,7 @@ class AuthorityResolutionManager:
         visited: set,
         *,
         require_active: bool,
+        semantic_models_manager: Optional[Any] = None,
     ) -> Tuple[bool, Optional[str], List[Dict[str, Any]]]:
         """Depth-first walk over the AR's declared prerequisite edges.
 
@@ -1303,6 +1557,7 @@ class AuthorityResolutionManager:
             inner = self._resolve_internal(
                 db, pre_slug, req,
                 visited=visited, record=False, require_active=require_active,
+                semantic_models_manager=semantic_models_manager,
             )
             chain.append({
                 "slug": pre_slug,
@@ -1331,8 +1586,16 @@ class AuthorityResolutionManager:
         verdict: str,
         reason: str,
         chain: List[Dict[str, Any]],
+        resolved_refs: List[Dict[str, Any]],
         record: bool,
     ) -> Dict[str, Any]:
+        provenance: Optional[Dict[str, Any]] = None
+        if chain or resolved_refs:
+            provenance = {}
+            if chain:
+                provenance["chain"] = chain
+            if resolved_refs:
+                provenance["resolved_refs"] = resolved_refs
         if record:
             authority_decision_repo.create(db, obj_in={
                 "id": str(uuid.uuid4()),
@@ -1345,7 +1608,7 @@ class AuthorityResolutionManager:
                 "request_params": req,
                 "verdict": verdict,
                 "reason": reason,
-                "provenance": {"chain": chain} if chain else None,
+                "provenance": provenance,
             })
             counters = {"usage_count": (relation.usage_count or 0) + 1}
             if verdict == VERDICT_APPROVED:
@@ -1363,6 +1626,7 @@ class AuthorityResolutionManager:
             "dna_magnitude": relation.dna_magnitude,
             "dna_direction": relation.dna_direction,
             "prerequisite_chain": chain,
+            "resolved_refs": resolved_refs,
         }
 
     # --------------------------------------------------------- read assembly
@@ -1469,6 +1733,7 @@ class AuthorityResolutionManager:
                 for c in criteria
             ],
             "prerequisites": self.list_prerequisites(db, relation),
+            "resource_refs": self.list_resource_refs(db, relation),
             "tags": tags,
             "created_at": relation.created_at,
             "updated_at": relation.updated_at,

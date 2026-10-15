@@ -596,6 +596,27 @@ export default function AuthorityRelationDetails() {
                 None — this AR decides without walking any upstream gate.
               </div>
             )}
+            <div className="pt-2 text-muted-foreground">Resource refs (typed pointers)</div>
+            {(relation.resource_refs || []).length > 0 ? (
+              <div className="space-y-1">
+                {(relation.resource_refs || []).map((r) => (
+                  <div key={r.id || r.field_path} className="text-xs flex items-center gap-2 flex-wrap">
+                    <Badge variant="outline">{r.ref_type}</Badge>
+                    <span className="font-mono">{r.field_path}</span>
+                    <span className="text-muted-foreground">
+                      {r.ref_type === 'literal' && r.literal_value ? `→ ${r.literal_value}` : ''}
+                      {r.ref_type === 'ontos_entity' && r.entity_type ? `→ ${r.entity_type}:` : ''}
+                      {r.ref_type === 'ontos_entity' && r.entity_id ? ` ${r.cached_label || r.entity_id}` : ''}
+                      {r.ref_type === 'mcp_tool' && r.mcp_service_name ? `→ ${r.mcp_service_name} / ${r.mcp_tool_name}` : ''}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-muted-foreground text-xs">
+                None — canonical fields read directly from the AR row.
+              </div>
+            )}
             <div className="pt-2"><span className="text-muted-foreground">Recompute schedule:</span> {cronLabel(relation.schedule_cron)}</div>
             <div className="pt-2 text-muted-foreground">Domains</div>
             <div className="flex flex-wrap gap-1">
@@ -760,6 +781,20 @@ function TestResolveDialog({ open, onOpenChange, relationId }: { open: boolean; 
                         {entry.version ? <span className="text-muted-foreground">v{entry.version}</span> : null}
                         {!entry.required && <Badge variant="outline" className="text-xs">optional</Badge>}
                         {entry.reason && <span className="text-muted-foreground">— {entry.reason}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {(result.resolved_refs || []).length > 0 && (
+                  <div className="pt-2 space-y-1">
+                    <div className="text-xs text-muted-foreground">Resolved resource refs</div>
+                    {(result.resolved_refs || []).map((entry, i) => (
+                      <div key={i} className="text-xs flex items-center gap-2 flex-wrap">
+                        <Badge variant="outline" className="text-xs">{entry.source}</Badge>
+                        <span className="font-mono">{entry.field_path}</span>
+                        {entry.value != null && <span>→ {entry.value}</span>}
+                        {entry.iri && <span className="text-muted-foreground">({entry.iri})</span>}
+                        {entry.error && <span className="text-destructive">— {entry.error}</span>}
                       </div>
                     ))}
                   </div>
