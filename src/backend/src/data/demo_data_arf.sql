@@ -4,7 +4,13 @@
 -- Standalone demo pack loaded via:
 --   POST /api/settings/demo-data/load?preset=arf
 --
--- Four Authority Relations covering distinct governance domains, each with:
+-- ARF v2 additions: Trade Promotion requires two prerequisite ARs (Market
+-- Compliance + Budget Delegation), carries typed domain_context resource
+-- refs, and is semantically linked to the "Trade Promotion" Business Concept
+-- (urn:demo:concept:trade-promotion) so find_authority_for_concept can
+-- locate it without a slug.
+--
+-- Four core Authority Relations covering distinct governance domains, each with:
 --   • an AR-ladder maturity level cached on the row
 --   • two authored Compliance-DSL criteria (every criterion must link to a
 --     persisted compliance policy — authority_criteria.compliance_policy_id
@@ -26,6 +32,9 @@
 --   0a0 = authority_relations
 --   0a1 = authority_affirmations
 --   0a2 = authority_criteria
+--   0a3 = authority_prerequisites
+--   0a4 = authority_resource_refs
+--   015 = entity_semantic_links
 --   0f0 = business_roles
 --   0ff = maturity_levels (AR ladder)
 -- ============================================================================
@@ -133,6 +142,22 @@ INSERT INTO compliance_policies (id, name, description, failure_message, rule, c
  'The AR has not yet been called by agents in volume.',
  'MATCH (ar:AuthorityRelation) ASSERT ar.usage_count > 10',
  'Governance', 'medium', true, NOW(), NOW())
+ON CONFLICT (id) DO NOTHING;
+
+
+-- Prerequisite-AR criteria (Market Compliance + Budget Delegation).
+INSERT INTO compliance_policies (id, name, description, failure_message, rule, category, severity, is_active, created_at, updated_at) VALUES
+('0110000e-0005-4000-8000-000000000014', 'Promotion Market Clearance',
+ 'Trade promotions may only run in markets cleared by commercial compliance.',
+ 'Promotion market is not cleared by commercial compliance.',
+ 'MATCH (p:PromotionProposal) ASSERT p.market IN [''DE'', ''AT'', ''CH'']',
+ 'Governance', 'high', true, NOW(), NOW()),
+
+('0110000f-0005-4000-8000-000000000015', 'Promotion Budget Delegation Ceiling',
+ 'Promotion budgets above the regional delegation ceiling need group finance.',
+ 'Promotion budget exceeds the regional delegation ceiling.',
+ 'MATCH (p:PromotionProposal) ASSERT p.budget_usd <= 2000000',
+ 'Governance', 'critical', true, NOW(), NOW())
 ON CONFLICT (id) DO NOTHING;
 
 
@@ -300,7 +325,51 @@ INSERT INTO authority_relations (
  '0 5 * * 1',
  3, NOW() - INTERVAL '3 days',
  47, 31, 16,
- NOW() - INTERVAL '120 days', NOW(), 'system@demo')
+ NOW() - INTERVAL '120 days', NOW(), 'system@demo'),
+-- ----------------------------------------------------------------------------
+-- AR 5: Market Compliance Clearance  (prerequisite of AR 1)
+-- ----------------------------------------------------------------------------
+('0a000005-0005-4000-8000-000000000005',
+ 'market-compliance',
+ 'Market Compliance Clearance',
+ 'Whether a commercial action may run in the target market at all. Required before any trade-promotion approval.',
+ 'active', '1.0.0', '0a000005-0005-4000-8000-000000000005', NULL, 'Market Compliance Clearance', NULL, NULL,
+ 'Commercial Compliance Lead', 'commercial.compliance@demo.local', NOW() - INTERVAL '300 days', 'approve',
+ 'data_product', NULL, '["urn:demo:channel:modern-trade"]',
+ '{"cleared_markets":"DE,AT,CH"}',
+ '{"policy_id":"COM-COMPLIANCE-2024","doc_url":"https://wiki.demo.local/commercial/market-clearance","effective_date":"2024-01-01"}',
+ NULL,
+ NULL,
+ NULL,
+ 0.0500, 'neutral',
+ '{"people": 0.0,"policy": 0.05,"structural": 0.0}',
+ NOW() - INTERVAL '1 day', 0.3000, NULL,
+ NULL,
+ 4, NOW() - INTERVAL '1 day',
+ 0, 0, 0,
+ NOW() - INTERVAL '300 days', NOW(), 'system@demo'),
+-- ----------------------------------------------------------------------------
+-- AR 6: Promotion Budget Delegation  (prerequisite of AR 1)
+-- ----------------------------------------------------------------------------
+('0a000006-0005-4000-8000-000000000006',
+ 'budget-delegation',
+ 'Promotion Budget Delegation',
+ 'Whether the promotion budget sits inside the regional finance delegation. Required before any trade-promotion approval.',
+ 'active', '1.0.0', '0a000006-0005-4000-8000-000000000006', NULL, 'Promotion Budget Delegation', NULL, NULL,
+ 'Regional Finance Controller', 'regional.finance@demo.local', NOW() - INTERVAL '300 days', 'approve',
+ 'data_product', NULL, NULL,
+ '{"ceiling_usd": 2000000}',
+ '{"policy_id":"FIN-DELEGATION-2024","doc_url":"https://wiki.demo.local/finance/delegation-of-authority","effective_date":"2024-01-01"}',
+ NULL,
+ NULL,
+ NULL,
+ 0.0700, 'neutral',
+ '{"people": 0.0,"policy": 0.07,"structural": 0.0}',
+ NOW() - INTERVAL '1 day', 0.3000, NULL,
+ NULL,
+ 4, NOW() - INTERVAL '1 day',
+ 0, 0, 0,
+ NOW() - INTERVAL '300 days', NOW(), 'system@demo')
 ON CONFLICT (id) DO NOTHING;
 
 
@@ -323,7 +392,10 @@ INSERT INTO authority_criteria (id, relation_id, compliance_policy_id, direction
 ('0a200006-0005-4000-8000-000000000006', '0a000003-0005-4000-8000-000000000003', '01100006-0005-4000-8000-000000000006', 'neutral',                   0.6, 'policy', 2, true, NOW()),
 -- AR 4: DP Decommissioning
 ('0a200007-0005-4000-8000-000000000007', '0a000004-0005-4000-8000-000000000004', '01100007-0005-4000-8000-000000000007', 'actual-exceeds-documented', 1.0, 'policy',     1, true, NOW()),
-('0a200008-0005-4000-8000-000000000008', '0a000004-0005-4000-8000-000000000004', '01100008-0005-4000-8000-000000000008', 'documented-exceeds-actual', 0.9, 'structural', 2, true, NOW())
+('0a200008-0005-4000-8000-000000000008', '0a000004-0005-4000-8000-000000000004', '01100008-0005-4000-8000-000000000008', 'documented-exceeds-actual', 0.9, 'structural', 2, true, NOW()),
+-- AR 5 / AR 6: prerequisite gates (one criterion each)
+('0a200009-0005-4000-8000-000000000009', '0a000005-0005-4000-8000-000000000005', '0110000e-0005-4000-8000-000000000014', 'neutral', 1.0, 'policy', 1, true, NOW()),
+('0a20000a-0005-4000-8000-000000000010', '0a000006-0005-4000-8000-000000000006', '0110000f-0005-4000-8000-000000000015', 'neutral', 1.0, 'policy', 1, true, NOW())
 ON CONFLICT (id) DO NOTHING;
 
 
@@ -443,7 +515,40 @@ INSERT INTO entity_domain_associations (id, domain_id, entity_id, entity_type, i
 ('03100001-0005-4000-8000-000000000001', '00000001-0005-4000-8000-000000000001', '0a000001-0005-4000-8000-000000000001', 'authority_relation', true, 'system@demo', NOW()),
 ('03100002-0005-4000-8000-000000000002', '00000002-0005-4000-8000-000000000002', '0a000002-0005-4000-8000-000000000002', 'authority_relation', true, 'system@demo', NOW()),
 ('03100003-0005-4000-8000-000000000003', '00000003-0005-4000-8000-000000000003', '0a000003-0005-4000-8000-000000000003', 'authority_relation', true, 'system@demo', NOW()),
-('03100004-0005-4000-8000-000000000004', '00000004-0005-4000-8000-000000000004', '0a000004-0005-4000-8000-000000000004', 'authority_relation', true, 'system@demo', NOW())
+('03100004-0005-4000-8000-000000000004', '00000004-0005-4000-8000-000000000004', '0a000004-0005-4000-8000-000000000004', 'authority_relation', true, 'system@demo', NOW()),
+('03100005-0005-4000-8000-000000000005', '00000001-0005-4000-8000-000000000001', '0a000005-0005-4000-8000-000000000005', 'authority_relation', true, 'system@demo', NOW()),
+('03100006-0005-4000-8000-000000000006', '00000001-0005-4000-8000-000000000001', '0a000006-0005-4000-8000-000000000006', 'authority_relation', true, 'system@demo', NOW())
+ON CONFLICT (id) DO NOTHING;
+
+
+-- ============================================================================
+-- 9. AUTHORITY PREREQUISITES (Trade Promotion requires AR 5 + AR 6)
+-- ============================================================================
+-- Edges are keyed by family slug, never by version id.
+
+INSERT INTO authority_prerequisites (id, relation_family_slug, prerequisite_family_slug, required, display_order, notes, created_at) VALUES
+('0a300001-0005-4000-8000-000000000001', 'trade-promotion-budget-approval', 'market-compliance', true, 0, 'Market must be cleared before any promotion approval.', NOW()),
+('0a300002-0005-4000-8000-000000000002', 'trade-promotion-budget-approval', 'budget-delegation', true, 1, 'Budget must sit inside the regional delegation.', NOW())
+ON CONFLICT (id) DO NOTHING;
+
+
+-- ============================================================================
+-- 10. AUTHORITY RESOURCE REFS (typed pointers behind AR 1's domain_context)
+-- ============================================================================
+
+INSERT INTO authority_resource_refs (id, relation_id, field_path, ref_type, literal_value, entity_type, entity_id, mcp_result_pointer, created_at, updated_at) VALUES
+('0a400001-0005-4000-8000-000000000001', '0a000001-0005-4000-8000-000000000001', 'domain_context.market', 'literal', 'DE', NULL, NULL, '$', NOW(), NOW()),
+('0a400002-0005-4000-8000-000000000002', '0a000001-0005-4000-8000-000000000001', 'domain_context.brand', 'ontos_entity', NULL, 'business_concept', 'urn:demo:brand:alpha-cola', '$', NOW(), NOW())
+ON CONFLICT (id) DO NOTHING;
+
+
+-- ============================================================================
+-- 11. ENTITY_SEMANTIC_LINKS (AR 1 family -> "Trade Promotion" concept)
+-- ============================================================================
+-- entity_id is the AR's version_family_id so the link survives version bumps.
+
+INSERT INTO entity_semantic_links (id, entity_id, entity_type, iri, label, created_by, created_at) VALUES
+('01500001-0005-4000-8000-000000000001', '0a000001-0005-4000-8000-000000000001', 'authority_relation', 'urn:demo:concept:trade-promotion', 'Trade Promotion', 'system@demo', NOW())
 ON CONFLICT (id) DO NOTHING;
 
 

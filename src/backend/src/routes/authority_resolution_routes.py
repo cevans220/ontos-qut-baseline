@@ -15,6 +15,7 @@ from src.models.authority_resolution import (
     StatusChangeRequest,
     AffirmRequest,
     ResolveRequest,
+    FindAuthorityForConceptRequest,
 )
 
 from src.common.logging import get_logger
@@ -231,6 +232,23 @@ async def affirm(
     if not aff:
         raise HTTPException(status_code=404, detail="Affirmation not found")
     return {"id": aff.id, "affirmed": aff.affirmed, "affirmed_by": aff.affirmed_by, "affirmed_at": aff.affirmed_at}
+
+
+@router.post("/authority/relations/resolve-by-concept")
+def resolve_by_concept(
+    db: DBSessionDep,
+    request: Request,
+    payload: FindAuthorityForConceptRequest = Body(...),
+    _: bool = Depends(PermissionChecker(FEATURE_ID, FeatureAccessLevel.READ_ONLY)),
+):
+    """Find the AR governing a Business Concept in a given context. Returns ranked
+    candidates and ``resolved`` (a family slug) only when exactly one survives."""
+    obo, app_sp = _ws_factories(request)
+    return manager.find_authority_for_concept(
+        db, payload.concept_iri, payload.context, payload.domains, payload.request,
+        semantic_models_manager=_semantic_models_manager(request),
+        obo_ws_factory=obo, app_ws_factory=app_sp,
+    )
 
 
 @router.post("/authority/relations/{relation_id}/resolve")

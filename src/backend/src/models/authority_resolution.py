@@ -193,6 +193,18 @@ class ResolveRequest(BaseModel):
     params: Dict[str, Any] = Field(default_factory=dict)
 
 
+class FindAuthorityForConceptRequest(BaseModel):
+    """Concept-based AR lookup: which active AR governs this concept here?"""
+    concept_iri: str
+    # Caller's domain context, compared against each AR's domain_context
+    # (literal values and domain_context.* resource refs), e.g. {"market": "DE"}.
+    context: Dict[str, Any] = Field(default_factory=dict)
+    # Data-domain ids or names the decision belongs to.
+    domains: List[str] = Field(default_factory=list)
+    # Decision params used to dry-run each candidate's prerequisite chain.
+    request: Dict[str, Any] = Field(default_factory=dict)
+
+
 class ResolveResponse(BaseModel):
     verdict: str                                # approved|denied|no_authority|conflict
     reason: str

@@ -1402,3 +1402,189 @@ def test_new_version_clones_resource_refs_and_resolver_auth(db_session):
     assert [(r.field_path, r.ref_type, r.mcp_tool_name) for r in refs] == [
         ("actor_identity", "mcp_tool", "get_role_holder")]
     assert v2.resolver_auth == "app_sp"
+
+
+# ---------------------------------------------------------------------------
+# ARF v2: concept-based AR lookup
+# ---------------------------------------------------------------------------
+
+TP_IRI = "urn:demo:concept:trade-promotion"
+COMMERCIAL_IRI = "urn:demo:concept:commercial-decision"
+
+
+def _link_concept(db, relation, iri):
+    import uuid as _uuid
+    from src.db_models.semantic_links import EntitySemanticLinkDb
+    db.add(EntitySemanticLinkDb(
+        id=_uuid.uuid4(), entity_id=relation.version_family_id or relation.id,
+        entity_type="authority_relation", iri=iri,
+    ))
+    db.flush()
+
+
+def _concept_ar(mgr, db, *, slug, iri=TP_IRI, context=None, active=True, **kw):
+    from src.controller.authority_resolution_manager import STATUS_ACTIVE
+    from src.models.authority_resolution import (
+        AuthorityRelationCreate, CriterionInput, PrerequisiteInput, ResourceRefInput,
+    )
+    rel = mgr.create_relation(db, AuthorityRelationCreate(
+        name=f"AR {slug}", slug=slug, domain_context=context,
+        resource_refs=[ResourceRefInput(**r) for r in kw.get("resource_refs", [])],
+        criteria=[CriterionInput(**c) for c in kw.get("criteria", [])],
+        prerequisites=[PrerequisiteInput(**p) for p in kw.get("prerequisites", [])],
+        domain_ids=kw.get("domain_ids", []),
+    ))
+    if active:
+        rel.status = STATUS_ACTIVE
+    for k in ("maturity_level_order", "dna_magnitude"):
+        if k in kw:
+            setattr(rel, k, kw[k])
+    if iri:
+        _link_concept(db, rel, iri)
+    return rel
+
+
+def test_find_authority_by_concept_returns_unique_match(db_session):
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+
+    mgr = AuthorityResolutionManager()
+    _concept_ar(mgr, db_session, slug="tp-de", context={"brand": "Alpha Cola", "market": "DE"})
+    _concept_ar(mgr, db_session, slug="tp-fr", context={"brand": "Alpha Cola", "market": "FR"})
+    _concept_ar(mgr, db_session, slug="tp-draft", active=False)
+    _concept_ar(mgr, db_session, slug="unrelated", iri="urn:demo:concept:other")
+    db_session.commit()
+
+    out = mgr.find_authority_for_concept(db_session, TP_IRI, {"brand": "alpha cola", "market": "DE"})
+    assert out["resolved"] == "tp-de"
+    slugs = [c["family_slug"] for c in out["candidates"]]
+    assert slugs == ["tp-de", "tp-fr"]  # draft + unrelated excluded, conflict ranked last
+    assert out["candidates"][0]["match_score"] == 1.0
+    assert out["candidates"][1]["context_conflicts"] == ["market"]
+
+
+def test_find_authority_by_concept_ambiguous_returns_candidates(db_session):
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+
+    mgr = AuthorityResolutionManager()
+    _concept_ar(mgr, db_session, slug="amb-a", maturity_level_order=3, dna_magnitude=0.1)
+    _concept_ar(mgr, db_session, slug="amb-b", maturity_level_order=3, dna_magnitude=0.1)
+    db_session.commit()
+
+    out = mgr.find_authority_for_concept(db_session, TP_IRI, {})
+    assert out["resolved"] is None
+    assert out["reason"] == "ambiguous"
+    assert {c["family_slug"] for c in out["candidates"]} == {"amb-a", "amb-b"}
+
+
+def test_concept_lookup_tiebreaks_on_maturity_then_dna(db_session):
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+
+    mgr = AuthorityResolutionManager()
+    _concept_ar(mgr, db_session, slug="tb-low", maturity_level_order=2, dna_magnitude=0.01)
+    _concept_ar(mgr, db_session, slug="tb-high", maturity_level_order=4, dna_magnitude=0.2)
+    _concept_ar(mgr, db_session, slug="tb-high-better", maturity_level_order=4, dna_magnitude=0.1)
+    db_session.commit()
+    assert mgr.find_authority_for_concept(db_session, TP_IRI)["resolved"] == "tb-high-better"
+
+
+def test_concept_hierarchy_hop_matches_parent_concept(db_session):
+    """An AR linked to a broader concept is found one hop out; a direct link wins."""
+    from types import SimpleNamespace
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+
+    class _Sem:
+        def get_concept_details(self, iri):
+            if iri == TP_IRI:
+                return SimpleNamespace(label="Trade Promotion", parent_concepts=[COMMERCIAL_IRI],
+                                       related_concepts=[])
+            return None
+
+        def search_concepts(self, text, limit=10):
+            return []
+
+    mgr = AuthorityResolutionManager()
+    _concept_ar(mgr, db_session, slug="broad-gate", iri=COMMERCIAL_IRI)
+    db_session.commit()
+
+    assert mgr.find_authority_for_concept(db_session, TP_IRI)["reason"] == "no_authority"
+    out = mgr.find_authority_for_concept(db_session, TP_IRI, semantic_models_manager=_Sem())
+    assert out["resolved"] == "broad-gate"
+    assert out["candidates"][0]["hops"] == 1
+    assert out["candidates"][0]["matched_via"] == COMMERCIAL_IRI
+
+    _concept_ar(mgr, db_session, slug="direct-gate")
+    db_session.commit()
+    assert mgr.find_authority_for_concept(
+        db_session, TP_IRI, semantic_models_manager=_Sem())["resolved"] == "direct-gate"
+
+
+def test_unmet_prerequisite_demotes_but_does_not_remove_candidate(db_session):
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager, STATUS_ACTIVE
+
+    mgr = AuthorityResolutionManager()
+    gate = _concept_ar(mgr, db_session, slug="cleared-markets", iri=None, criteria=[dict(
+        name="market", rule="obj.market IN ['DE']", failure_message="market not cleared")])
+    gate.status = STATUS_ACTIVE
+    _concept_ar(mgr, db_session, slug="gated-tp", maturity_level_order=5,
+                prerequisites=[dict(prerequisite_family_slug="cleared-markets")])
+    _concept_ar(mgr, db_session, slug="fallback-tp", maturity_level_order=1)
+    db_session.commit()
+
+    blocked = mgr.find_authority_for_concept(db_session, TP_IRI, request={"market": "FR"})
+    assert blocked["resolved"] == "fallback-tp"
+    assert [c["family_slug"] for c in blocked["candidates"]] == ["fallback-tp", "gated-tp"]
+    assert blocked["candidates"][1]["unmet_prerequisites"] == ["cleared-markets"]
+
+    cleared = mgr.find_authority_for_concept(db_session, TP_IRI, request={"market": "DE"})
+    assert cleared["resolved"] == "gated-tp"  # viable now; higher maturity wins
+
+
+def test_concept_lookup_domain_filter_and_label_equivalence(db_session):
+    """Requested domain narrows candidates; a caller value that is a concept's
+    label matches an AR whose ref points at that concept's IRI."""
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.db_models.data_domains import DataDomain
+
+    class _Sem:
+        def get_concept_details(self, iri):
+            return None
+
+        def search_concepts(self, text, limit=10):
+            if text.lower() == "germany":
+                return [{"value": "urn:demo:market:DE", "label": "Germany"}]
+            return []
+
+    db_session.add(DataDomain(id="00000000-0000-4000-8000-0000000000aa", name="Commercial Ops X", created_by="test"))
+    db_session.flush()
+    mgr = AuthorityResolutionManager()
+    _concept_ar(mgr, db_session, slug="dom-other")
+    _concept_ar(mgr, db_session, slug="dom-commercial",
+                domain_ids=["00000000-0000-4000-8000-0000000000aa"],
+                resource_refs=[dict(field_path="domain_context.market", ref_type="ontos_entity",
+                                    entity_type="business_concept", entity_id="urn:demo:market:DE")])
+    db_session.commit()
+
+    out = mgr.find_authority_for_concept(db_session, TP_IRI, {"market": "Germany"},
+                                         domains=["commercial ops x"], semantic_models_manager=_Sem())
+    assert out["resolved"] == "dom-commercial"
+    top = out["candidates"][0]
+    assert top["domain_overlap"] == ["Commercial Ops X"]
+    assert top["context_matches"] == ["market"]
+
+
+@pytest.mark.asyncio
+async def test_find_authority_for_concept_tool(db_session):
+    from unittest.mock import MagicMock
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.tools.authority_resolution import FindAuthorityForConceptTool
+    from src.tools.base import ToolContext
+
+    mgr = AuthorityResolutionManager()
+    _concept_ar(mgr, db_session, slug="tool-tp")
+    db_session.commit()
+    tool = FindAuthorityForConceptTool()
+    ctx = ToolContext(db=db_session, settings=MagicMock())
+    ok = await tool.execute(ctx, concept_iri=TP_IRI, context={"market": "DE"})
+    assert ok.success and ok.data["resolved"] == "tool-tp"
+    missing = await tool.execute(ctx)
+    assert not missing.success

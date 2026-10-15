@@ -165,6 +165,9 @@ def test_arf_pack_recovers_all_ar_rows():
         pytest.skip("demo_data_arf.sql not present")
     out = parse_demo_inserts(pack.read_text(encoding="utf-8"))
     by_table = {d.table: d for d in out}
-    assert len(by_table["authority_relations"].pk_values) == 4
+    assert len(by_table["authority_relations"].pk_values) == 6
     assert len(by_table["authority_affirmations"].pk_values) == 12
-    assert len(by_table["authority_criteria"].pk_values) == 8
+    assert len(by_table["authority_criteria"].pk_values) == 10
+    assert len(by_table["authority_prerequisites"].pk_values) == 2
+    assert len(by_table["authority_resource_refs"].pk_values) == 2
+    assert len(by_table["entity_semantic_links"].pk_values) == 1

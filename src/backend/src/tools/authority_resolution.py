@@ -68,6 +68,45 @@ class ResolveAuthorityTool(BaseTool):
         return ToolResult(success=True, data=result)
 
 
+class FindAuthorityForConceptTool(BaseTool):
+    name = "find_authority_for_concept"
+    description = (
+        "Find which Authority Relation (ARF) governs a decision about a Business "
+        "Concept, without knowing the AR id. Provide the concept IRI and the "
+        "decision context (e.g. brand, market, channel) and optionally the data "
+        "domain. Returns ranked candidates with match scores, domain overlap and "
+        "unmet prerequisites. 'resolved' is the AR slug to pass to "
+        "resolve_authority — set only when exactly one AR applies; otherwise "
+        "'reason' is 'ambiguous', 'prerequisites_unmet' or 'no_authority' and "
+        "you should pick from the candidates or defer to a human."
+    )
+    parameters = {
+        "concept_iri": {"type": "string", "description": "IRI of the Business Concept the decision is about."},
+        "context": {"type": "object", "description": "Decision context, e.g. {\"brand\": \"Alpha Cola\", \"market\": \"DE\"}."},
+        "domains": {"type": "array", "items": {"type": "string"}, "description": "Data domain ids or names the decision belongs to."},
+        "request": {"type": "object", "description": "Decision parameters used to dry-run each candidate's prerequisite chain."},
+    }
+    required_params = ["concept_iri"]
+    required_scope = "authority:read"
+    category = "authority"
+
+    async def execute(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
+        concept_iri = kwargs.get("concept_iri")
+        if not concept_iri:
+            return ToolResult(success=False, error="concept_iri is required")
+        app_ws = ctx.workspace_client
+        result = _manager.find_authority_for_concept(
+            ctx.db, concept_iri,
+            context=kwargs.get("context") or {},
+            domains=kwargs.get("domains") or [],
+            request=kwargs.get("request") or {},
+            semantic_models_manager=ctx.semantic_models_manager,
+            obo_ws_factory=ctx.obo_workspace_client_factory,
+            app_ws_factory=(lambda: app_ws) if app_ws is not None else None,
+        )
+        return ToolResult(success=True, data=result)
+
+
 class GetAuthorityRelationTool(BaseTool):
     name = "get_authority_relation"
     description = (

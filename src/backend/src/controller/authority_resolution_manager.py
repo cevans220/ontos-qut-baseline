@@ -1797,6 +1797,219 @@ class AuthorityResolutionManager:
             "resolved_refs": resolved_refs,
         }
 
+    # ------------------------------------------------------- concept lookup
+
+    def _concept_hops(
+        self, concept_iri: str, semantic_models_manager: Optional[Any],
+    ) -> Dict[str, int]:
+        """``{iri: hops}`` — the concept itself (0) plus its broader/related
+        concepts one hop out (1), when a semantic graph is available."""
+        hops = {concept_iri: 0}
+        if semantic_models_manager is None:
+            return hops
+        try:
+            concept = semantic_models_manager.get_concept_details(concept_iri)
+        except Exception as e:  # pragma: no cover - RDF read is best-effort
+            logger.warning(f"Concept expansion failed for {concept_iri}: {e}")
+            return hops
+        if concept is not None:
+            for iri in list(getattr(concept, "parent_concepts", []) or []) + \
+                    list(getattr(concept, "related_concepts", []) or []):
+                hops.setdefault(str(iri), 1)
+        return hops
+
+    def _caller_equivalents(
+        self, value: Any, semantic_models_manager: Optional[Any],
+    ) -> set:
+        """Casefolded strings a caller-supplied context value is equivalent to:
+        the value itself plus the IRI of any concept whose label matches it."""
+        text = str(value).strip()
+        out = {text.casefold()}
+        if semantic_models_manager is None or not text or "://" in text or text.startswith("urn:"):
+            return out
+        try:
+            for hit in semantic_models_manager.search_concepts(text, limit=10) or []:
+                label = hit.get("label") if isinstance(hit, dict) else getattr(hit, "label", None)
+                iri = hit.get("value") if isinstance(hit, dict) else getattr(hit, "value", None)
+                if iri and label and str(label).strip().casefold() == text.casefold():
+                    out.add(str(iri).casefold())
+        except Exception as e:  # pragma: no cover - RDF read is best-effort
+            logger.warning(f"Concept label lookup failed for {text!r}: {e}")
+        return out
+
+    def _ar_context_values(
+        self, db: Session, relation: AuthorityRelationDb, rctx: _ResolveCtx,
+    ) -> Dict[str, set]:
+        """Per ``domain_context`` key, the casefolded values this AR accepts:
+        the literal column value plus any ``domain_context.<key>`` ref's value and
+        IRI. MCP refs contribute their last cached label (no live call here)."""
+        values: Dict[str, set] = {}
+        for k, v in (relation.domain_context or {}).items():
+            if v is not None and not isinstance(v, (dict, list)):
+                values.setdefault(k, set()).add(str(v).strip().casefold())
+        for row in authority_resource_ref_repo.list_for_relation(db, relation_id=relation.id):
+            if not row.field_path.startswith("domain_context."):
+                continue
+            key = row.field_path.split(".", 1)[1]
+            found: List[Optional[str]] = []
+            if row.ref_type == "literal":
+                found.append(row.literal_value)
+            elif row.ref_type == "ontos_entity":
+                lookup = self._resolve_ontos_entity(
+                    db, entity_type=row.entity_type or "", entity_id=row.entity_id or "",
+                    semantic_models_manager=rctx.semantic_models_manager,
+                )
+                found += [lookup.get("value"), lookup.get("iri")]
+            else:
+                found.append(row.cached_label)
+            for f in found:
+                if f:
+                    values.setdefault(key, set()).add(str(f).strip().casefold())
+        return values
+
+    def find_authority_for_concept(
+        self,
+        db: Session,
+        concept_iri: str,
+        context: Optional[Dict[str, Any]] = None,
+        domains: Optional[List[str]] = None,
+        request: Optional[Dict[str, Any]] = None,
+        *,
+        semantic_models_manager: Optional[Any] = None,
+        obo_ws_factory: Optional[Callable[[], Any]] = None,
+        app_ws_factory: Optional[Callable[[], Any]] = None,
+        mcp_client_factory: Optional[Callable[..., Any]] = None,
+    ) -> Dict[str, Any]:
+        """Which active AR governs ``concept_iri`` in this context?
+
+        Candidates are active ARs whose version family is semantically linked
+        (``entity_semantic_links``, entity_type ``authority_relation``, entity_id
+        = ``version_family_id``) to the concept or to a concept one broader/
+        related hop away. Survivors are pruned in order: drop ARs whose
+        ``domain_context`` contradicts the caller's context; keep ARs in a
+        requested domain (if any match); keep the nearest hop; keep the highest
+        context overlap; prefer ARs whose required prerequisites pass a dry run;
+        then highest maturity, then lowest DNA divergence. ``resolved`` is set
+        only when exactly one prerequisite-viable AR survives — otherwise the
+        agent gets the ranked candidates and ``reason`` (``ambiguous`` /
+        ``prerequisites_unmet`` / ``no_authority``).
+        """
+        from src.repositories.semantic_links_repository import entity_semantic_links_repo
+
+        context = {k: v for k, v in (context or {}).items() if v not in (None, "")}
+        wanted_domains = {str(d).strip().casefold() for d in (domains or []) if str(d).strip()}
+        rctx = _ResolveCtx(
+            semantic_models_manager=semantic_models_manager,
+            obo_ws_factory=obo_ws_factory,
+            app_ws_factory=app_ws_factory,
+            mcp_client_factory=mcp_client_factory or McpHttpClient,
+            deadline=Deadline(RESOLVE_BUDGET_S),
+        )
+
+        hops_by_iri = self._concept_hops(concept_iri, semantic_models_manager)
+        family_hops: Dict[str, Tuple[int, str]] = {}
+        for iri, hop in hops_by_iri.items():
+            for link in entity_semantic_links_repo.list_for_iri(db, iri=iri):
+                if link.entity_type != ENTITY_TYPE:
+                    continue
+                prev = family_hops.get(link.entity_id)
+                if prev is None or hop < prev[0]:
+                    family_hops[link.entity_id] = (hop, iri)
+
+        caller_equiv = {k: self._caller_equivalents(v, semantic_models_manager) for k, v in context.items()}
+        req = dict(request or {})
+        candidates: List[Dict[str, Any]] = []
+        for family_id, (hop, via_iri) in family_hops.items():
+            anchor = authority_relation_repo.get(db, family_id)
+            relation = self._family_active_version(db, anchor) if anchor else None
+            if relation is None:
+                continue
+            slug = self._family_slug_of(db, relation)
+
+            ar_values = self._ar_context_values(db, relation, rctx)
+            matches, conflicts = [], []
+            for key, equiv in caller_equiv.items():
+                accepted = ar_values.get(key)
+                if not accepted:
+                    continue
+                (matches if accepted & equiv else conflicts).append(key)
+
+            assigned = entity_domain_repo.get_domains_for_entity(
+                db, entity_type=ENTITY_TYPE, entity_id=relation.id,
+            )
+            domain_overlap = [
+                getattr(d, "domain_name", None) for d in assigned
+                if {str(getattr(d, "domain_id", "")).casefold(),
+                    str(getattr(d, "domain_name", "")).casefold()} & wanted_domains
+            ]
+
+            unmet: List[str] = []
+            if slug:
+                visited = {slug}
+                _, _, chain = self._walk_prerequisites(
+                    db, slug, req, visited, require_active=True, rctx=rctx,
+                )
+                unmet = [e["slug"] for e in chain if e["required"] and e["verdict"] != VERDICT_APPROVED]
+
+            candidates.append({
+                "family_slug": slug,
+                "relation_id": relation.id,
+                "name": relation.name,
+                "version": relation.version,
+                "matched_via": via_iri,
+                "hops": hop,
+                "match_score": round(len(matches) / len(context), 4) if context else 0.0,
+                "context_matches": matches,
+                "context_conflicts": conflicts,
+                "domain_overlap": domain_overlap,
+                "unmet_prerequisites": unmet,
+                "maturity_level_order": relation.maturity_level_order,
+                "dna_magnitude": relation.dna_magnitude,
+            })
+
+        def _rank(c: Dict[str, Any]) -> Tuple:
+            return (
+                bool(c["context_conflicts"]),
+                bool(c["unmet_prerequisites"]),
+                not c["domain_overlap"],
+                c["hops"],
+                -c["match_score"],
+                -(c["maturity_level_order"] if c["maturity_level_order"] is not None else -1),
+                c["dna_magnitude"] if c["dna_magnitude"] is not None else float("inf"),
+                c["family_slug"] or c["relation_id"],
+            )
+        candidates.sort(key=_rank)
+
+        def _keep_best(rows: List[Dict[str, Any]], key: Callable[[Dict[str, Any]], Any]) -> List[Dict[str, Any]]:
+            if not rows:
+                return rows
+            best = min(key(r) for r in rows)
+            return [r for r in rows if key(r) == best]
+
+        pool = [c for c in candidates if not c["context_conflicts"]]
+        if wanted_domains and any(c["domain_overlap"] for c in pool):
+            pool = [c for c in pool if c["domain_overlap"]]
+        # Unmet prerequisites demote: a viable AR beats a nearer blocked one.
+        viable = [c for c in pool if not c["unmet_prerequisites"]]
+        pool = viable or pool
+        pool = _keep_best(pool, lambda c: c["hops"])
+        pool = _keep_best(pool, lambda c: -c["match_score"])
+        pool = _keep_best(pool, lambda c: -(c["maturity_level_order"] if c["maturity_level_order"] is not None else -1))
+        pool = _keep_best(pool, lambda c: c["dna_magnitude"] if c["dna_magnitude"] is not None else float("inf"))
+
+        if not pool:
+            return {"candidates": candidates, "resolved": None, "reason": "no_authority"}
+        if not viable:
+            return {"candidates": candidates, "resolved": None, "reason": "prerequisites_unmet"}
+        if len(pool) > 1:
+            return {"candidates": candidates, "resolved": None, "reason": "ambiguous"}
+        winner = pool[0]
+        return {
+            "candidates": candidates,
+            "resolved": winner["family_slug"] or winner["relation_id"],
+            "reason": "unique match",
+        }
+
     # --------------------------------------------------------- read assembly
 
     def to_read_dict(self, db: Session, relation: AuthorityRelationDb) -> Dict[str, Any]:

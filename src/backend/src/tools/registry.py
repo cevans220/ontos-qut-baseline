@@ -261,6 +261,7 @@ def create_default_registry() -> ToolRegistry:
     )
     from src.tools.authority_resolution import (
         ResolveAuthorityTool,
+        FindAuthorityForConceptTool,
         GetAuthorityRelationTool,
         ComputeDnaCoefficientTool,
     )
@@ -356,6 +357,7 @@ def create_default_registry() -> ToolRegistry:
     # + an explicit DNAco recompute escape hatch for apps that know the cached
     # value is stale.
     registry.register(ResolveAuthorityTool())
+    registry.register(FindAuthorityForConceptTool())
     registry.register(GetAuthorityRelationTool())
     registry.register(ComputeDnaCoefficientTool())
 

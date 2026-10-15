@@ -20,6 +20,7 @@ import RequestAuthorityActionDialog from '@/components/authority-resolution/requ
 import AuthorityRelationReview from '@/components/authority-resolution/authority-relation-review';
 import { CommentSidebar } from '@/components/comments';
 import EntityMetadataPanel from '@/components/metadata/entity-metadata-panel';
+import ArConceptLinks from '@/components/authority-resolution/ar-concept-links';
 import { MaturityInline } from '@/components/common/maturity-inline';
 import VersionNavigator from '@/components/common/version-navigator';
 import useBreadcrumbStore from '@/stores/breadcrumb-store';
@@ -576,6 +577,8 @@ export default function AuthorityRelationDetails() {
             ) : (
               <JsonBlock data={relation.evidence_binding} />
             )}
+            <div className="pt-2 text-muted-foreground">Governs Business Concepts</div>
+            <ArConceptLinks familyId={relation.version_family_id || relation.id} />
             <div className="pt-2 text-muted-foreground">Requires (prerequisite ARs)</div>
             {(relation.prerequisites || []).length > 0 ? (
               <div className="space-y-1">
