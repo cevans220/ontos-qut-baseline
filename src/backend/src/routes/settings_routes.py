@@ -460,7 +460,7 @@ async def handle_role_request_decision(
 # --- Demo Data Loading ---
 
 # Allowed presets — one self-contained SQL file per preset.
-DEMO_DATA_PRESETS = ("retail", "hls", "fsi", "mfg", "auto")
+DEMO_DATA_PRESETS = ("retail", "hls", "fsi", "mfg", "auto", "arf")
 
 
 @router.post("/settings/demo-data/load", status_code=status.HTTP_200_OK)
