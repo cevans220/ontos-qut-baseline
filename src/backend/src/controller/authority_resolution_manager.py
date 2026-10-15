@@ -80,6 +80,80 @@ def ref_key(field_path: str) -> str:
     return REF_KEY_PREFIX + re.sub(r"[^A-Za-z0-9_]", "_", field_path)
 
 
+DEFAULT_DNA_CEILING = 0.3
+_ALLOWED_STATUSES = ("draft", "active", "needs_review", "retired")
+
+# Evidence SQL runs as the app service principal, so table names and row
+# filters are restricted to a grammar that cannot reach other tables.
+_FQN_PART = r"(?:[A-Za-z0-9_\-]+|`[^`]+`)"
+_FQN_RE = re.compile(rf"^{_FQN_PART}(?:\.{_FQN_PART}){{0,2}}$")
+_FILTER_TOKEN_RE = re.compile(
+    r"\s*(?:(?P<str>'(?:[^']|'')*')|(?P<num>-?\d+(?:\.\d+)?)|(?P<op><>|!=|<=|>=|=|<|>)"
+    r"|(?P<punct>[(),])|(?P<ident>`[^`]+`|[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*))"
+)
+_FILTER_KEYWORDS = {"AND", "OR", "NOT", "IS", "NULL", "IN", "LIKE", "BETWEEN", "TRUE", "FALSE"}
+_FILTER_FORBIDDEN = {
+    "SELECT", "UNION", "FROM", "JOIN", "WITH", "INSERT", "UPDATE", "DELETE", "DROP", "CREATE",
+    "ALTER", "GRANT", "REVOKE", "MERGE", "INTO", "TABLE", "VALUES", "CALL", "EXEC", "EXECUTE",
+    "INTERSECT", "EXCEPT", "LATERAL", "USE", "SET", "SHOW", "DESCRIBE",
+}
+
+
+def validate_table_fqn(fqn: str) -> str:
+    fqn = (fqn or "").strip()
+    if not _FQN_RE.match(fqn):
+        raise ValueError(f"Evidence table '{fqn}' must be a plain catalog.schema.table name.")
+    return fqn
+
+
+def validate_row_filter(row_filter: Optional[str]) -> Optional[str]:
+    """Allow only simple predicates: columns, literals, comparison operators,
+    AND/OR/NOT/IS/NULL/IN/LIKE/BETWEEN and parentheses. No subqueries, no
+    function calls, no statement separators or comments."""
+    if row_filter is None or not str(row_filter).strip():
+        return None
+    text = str(row_filter)
+    pos, prev_ident = 0, False
+    while pos < len(text):
+        if text[pos:].strip() == "":
+            break
+        m = _FILTER_TOKEN_RE.match(text, pos)
+        if not m or m.end() == pos:
+            raise ValueError(f"Evidence row_filter has unsupported syntax near: {text[pos:pos + 20]!r}")
+        ident = m.group("ident")
+        if ident is not None and not ident.startswith("`"):
+            word = ident.upper()
+            if word in _FILTER_FORBIDDEN:
+                raise ValueError(f"Evidence row_filter may not use '{ident}'.")
+        if m.group("punct") == "(" and prev_ident:
+            raise ValueError("Evidence row_filter may not call functions.")
+        prev_ident = ident is not None and ident.upper() not in _FILTER_KEYWORDS
+        pos = m.end()
+    return text
+
+
+def _validate_evidence(binding: Optional[Dict[str, Any]], sources: Optional[List[Any]]) -> None:
+    if binding and binding.get("source_table_fqn"):
+        validate_table_fqn(binding["source_table_fqn"])
+        validate_row_filter(binding.get("row_filter"))
+    for src in sources or []:
+        s = src.dict() if hasattr(src, "dict") else dict(src or {})
+        if (s.get("type") or "delta_table") in ("delta_table", "asset") and s.get("ref"):
+            validate_table_fqn(s["ref"])
+        validate_row_filter(s.get("row_filter"))
+
+
+def principal_matches(principal: Optional[str], principal_type: Optional[str], user: Any) -> bool:
+    """Is ``user`` (UserInfo-like: email/username/user/groups) the participant?"""
+    if not principal or user is None:
+        return False
+    want = principal.strip().casefold()
+    if (principal_type or "user") == "group":
+        return any(str(g).strip().casefold() == want for g in (getattr(user, "groups", None) or []))
+    ids = {getattr(user, k, None) for k in ("email", "username", "user")}
+    return any(i and str(i).strip().casefold() == want for i in ids)
+
+
 @dataclass
 class _ResolveCtx:
     semantic_models_manager: Optional[Any] = None
@@ -150,6 +224,7 @@ class AuthorityResolutionManager:
         evidence = data.get("evidence_binding")
         if evidence is not None and hasattr(evidence, "dict"):
             evidence = evidence.dict()
+        _validate_evidence(evidence, data.get("evidence_sources"))
 
         fields = {
             "id": rel_id,
@@ -354,6 +429,7 @@ class AuthorityResolutionManager:
         evidence = data.get("evidence_binding")
         if evidence is not None and hasattr(evidence, "dict"):
             data["evidence_binding"] = evidence.dict()
+        _validate_evidence(data.get("evidence_binding"), data.get("evidence_sources"))
 
         if "resolver_auth" in data:
             data["resolver_auth"] = self._validate_resolver_auth(data["resolver_auth"])
@@ -384,6 +460,18 @@ class AuthorityResolutionManager:
         # Polymorphic tags (only when the caller supplied the field).
         self._set_tags(db, relation_id, getattr(payload, "tags", None), current_user)
 
+        # Replace helpers bulk-delete without session sync; drop the stale
+        # selectin-loaded collections so the recompute scores the new definition.
+        db.flush()
+        db.expire(relation, ["criteria", "affirmations"])
+
+        # Re-created participants start unaffirmed: an active AR can't stay active
+        # without its required affirmations.
+        if (relation.status == STATUS_ACTIVE and affirmations is not None
+                and not self.is_fully_affirmed(db, relation_id)):
+            relation = authority_relation_repo.update(db, db_obj=relation, obj_in={"status": STATUS_NEEDS_REVIEW})
+            self._log_timeline(db, relation_id, "Participants changed; status set to needs_review until re-affirmed.")
+
         # Changing an active AR triggers recompute + re-review (best-effort recompute).
         if relation.status == STATUS_ACTIVE:
             try:
@@ -393,9 +481,47 @@ class AuthorityResolutionManager:
         return relation
 
     def delete_relation(self, db: Session, relation_id: str) -> bool:
+        """Delete one AR version without breaking its family's identity.
+
+        The family anchor (``id == version_family_id``) can only go once it is the
+        last version, because semantic links key on it. A slug on a deleted
+        non-anchor row moves to the newest remaining version. Deleting the last
+        version also removes its prerequisite edges and concept links, and is
+        refused while other ARs still require its slug. Raises ``ValueError``.
+        """
         relation = authority_relation_repo.get(db, relation_id)
         if not relation:
             return False
+        family_id = getattr(relation, "version_family_id", None) or relation.id
+        others = [v for v in authority_relation_repo.get_family_versions(db, family_id=family_id)
+                  if v.id != relation.id]
+        if others:
+            if relation.id == family_id:
+                raise ValueError(
+                    "This is the first version of its family; delete the newer versions first."
+                )
+            if relation.slug:
+                slug = relation.slug
+                relation.slug = None
+                db.flush()
+                others[0].slug = slug
+                db.flush()
+        else:
+            slug = self._family_slug_of(db, relation)
+            if slug:
+                dependents = sorted({e.relation_family_slug for e in authority_prerequisite_repo.list_dependents(
+                    db, prerequisite_family_slug=slug)})
+                if dependents:
+                    raise ValueError(
+                        f"Authority Relation '{slug}' is a prerequisite of {', '.join(dependents)}; "
+                        "remove those edges first."
+                    )
+                authority_prerequisite_repo.delete_for_family(db, relation_family_slug=slug)
+            from src.db_models.semantic_links import EntitySemanticLinkDb
+            db.query(EntitySemanticLinkDb).filter(
+                EntitySemanticLinkDb.entity_type == ENTITY_TYPE,
+                EntitySemanticLinkDb.entity_id == family_id,
+            ).delete(synchronize_session=False)
         entity_domain_repo.remove_all_for_entity(db, entity_type=ENTITY_TYPE, entity_id=relation_id)
         authority_relation_repo.remove(db, id=relation_id)
         return True
@@ -617,8 +743,11 @@ class AuthorityResolutionManager:
         rule = (c.get("rule") or "").strip()
         if not rule:
             return None
-        if not rule.upper().startswith("ASSERT"):
+        if not rule.upper().startswith("ASSERT") and "ASSERT" not in rule:
             rule = "ASSERT " + rule
+        parse_error = authority_dna.rule_parse_error(rule)
+        if parse_error:
+            raise ValueError(f"Criterion rule {rule!r} does not parse: {parse_error}")
         pid = str(uuid.uuid4())
         policy = CompliancePolicyDb(
             id=pid,
@@ -1032,10 +1161,19 @@ class AuthorityResolutionManager:
             for r in rows
         ]
 
-    def affirm(self, db: Session, affirmation_id: str, affirmed_by: str, notes: Optional[str] = None) -> Optional[AuthorityAffirmationDb]:
+    def affirm(
+        self, db: Session, affirmation_id: str, affirmed_by: str,
+        notes: Optional[str] = None, user: Any = None,
+    ) -> Optional[AuthorityAffirmationDb]:
+        """Record an affirmation. Only the participant's own principal (or a
+        member of its group) may affirm; raises ``PermissionError`` otherwise."""
         aff = authority_affirmation_repo.get(db, affirmation_id)
         if not aff:
             return None
+        if not getattr(aff, "is_approver", True):
+            raise PermissionError("This participant is a reviewer, not an approver.")
+        if not principal_matches(aff.principal, aff.principal_type, user):
+            raise PermissionError("Only the named participant can record this affirmation.")
         return authority_affirmation_repo.update(db, db_obj=aff, obj_in={
             "affirmed": True, "affirmed_by": affirmed_by, "affirmed_at": self._now(), "notes": notes,
         })
@@ -1168,8 +1306,11 @@ class AuthorityResolutionManager:
             "reviews_created": reviews_created,
         }
 
-    def get_review_context(self, db: Session, relation_id: str, reviewer: str) -> Optional[Dict[str, Any]]:
-        """Build the role-specific review context for a reviewer of this AR."""
+    def get_review_context(
+        self, db: Session, relation_id: str, reviewer: str, user: Any = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Build the role-specific review context for a reviewer of this AR.
+        Raises ``PermissionError`` unless ``user`` is that reviewer."""
         relation = authority_relation_repo.get(db, relation_id)
         if not relation:
             return None
@@ -1177,6 +1318,8 @@ class AuthorityResolutionManager:
         participant = next((a for a in affs if a.principal == reviewer and getattr(a, "is_reviewer", False)), None)
         if participant is None:
             return None
+        if not principal_matches(participant.principal, participant.principal_type, user):
+            raise PermissionError("Only the named reviewer can open this review.")
         role = participant.role
         ctx: Dict[str, Any] = {
             "participant_id": participant.id,
@@ -1206,11 +1349,19 @@ class AuthorityResolutionManager:
             }
         return ctx
 
-    def submit_review(self, db: Session, participant_id: str, answers: Dict[str, Any], reviewer: Optional[str] = None) -> Optional[AuthorityAffirmationDb]:
-        """Persist a reviewer's elicited answers and mark their review complete."""
+    def submit_review(
+        self, db: Session, participant_id: str, answers: Dict[str, Any],
+        reviewer: Optional[str] = None, user: Any = None,
+    ) -> Optional[AuthorityAffirmationDb]:
+        """Persist a reviewer's elicited answers and mark their review complete.
+        Raises ``PermissionError`` unless ``user`` is that reviewer."""
         participant = authority_affirmation_repo.get(db, participant_id)
         if not participant:
             return None
+        if not getattr(participant, "is_reviewer", False):
+            raise PermissionError("This participant is not a reviewer.")
+        if not principal_matches(participant.principal, participant.principal_type, user):
+            raise PermissionError("Only the named reviewer can submit this review.")
         return authority_affirmation_repo.update(db, db_obj=participant, obj_in={
             "review_answers": answers,
             "review_status": "completed",
@@ -1350,6 +1501,8 @@ class AuthorityResolutionManager:
                 # the legacy single ``evidence_binding``); rows are keyed by the
                 # canonical request fields the criteria rules reference.
                 rows = self._collect_evidence(relation)
+            if not rows:
+                raise ValueError("No evidence rows were read; the DNA-Coefficient cannot be measured.")
             result = authority_dna.compute_dnaco(self._load_criteria(relation), rows)
 
             # Combine the evidence-based dimensions with the definition-based
@@ -1397,7 +1550,7 @@ class AuthorityResolutionManager:
             }
             # An active AR whose divergence exceeded its ceiling is auto-flagged.
             auto_flagged = False
-            if relation.status == STATUS_ACTIVE and overall > (relation.dna_max_threshold or 0.3):
+            if relation.status == STATUS_ACTIVE and overall > self._ceiling(relation):
                 agg["status"] = STATUS_NEEDS_REVIEW
                 auto_flagged = True
             authority_relation_repo.update(db, db_obj=relation, obj_in=agg)
@@ -1487,33 +1640,38 @@ class AuthorityResolutionManager:
             cm = src.get("column_map") or {}
             raw = self._read_evidence_rows({"source_table_fqn": src["table_fqn"], "row_filter": src.get("row_filter")})
             for r in raw:
-                row = {k: r.get(cm[k]) for k in self._CANONICAL_ELEMENTS if k in cm}
+                # Keep the source's own columns (rules may reference them directly)
+                # and overlay each column_map alias -> source column.
+                row = dict(r)
+                for alias, col in cm.items():
+                    row[alias] = r.get(col)
                 combined.append(authority_dna.normalize_row(row))
         return combined
 
     def _read_evidence_rows(self, binding: Dict[str, Any], limit: int = 500) -> List[Dict[str, Any]]:
-        """Best-effort read of the bound UC Delta table via the SQL warehouse.
+        """Read the bound UC Delta table via the SQL warehouse.
 
-        Isolated and defensive: any failure returns an empty sample rather than
-        breaking the run (the manager surfaces the failure via the run status).
+        Raises on any failure (no warehouse, missing table, permission denied,
+        invalid filter) so ``compute_dnaco`` records a failed run instead of a
+        fabricated 0.0 from an empty sample.
         """
         table = (binding or {}).get("source_table_fqn")
         if not table:
             return []
-        try:
-            from src.common.config import get_settings
-            from src.common.workspace_client import get_workspace_client
+        table = validate_table_fqn(table)
+        row_filter = validate_row_filter((binding or {}).get("row_filter"))
+        from src.common.config import get_settings
+        from src.common.workspace_client import get_workspace_client
 
-            settings = get_settings()
-            warehouse_id = (
-                getattr(settings, "DATABRICKS_WAREHOUSE_ID", None)
-                or getattr(settings, "DATABRICKS_SQL_WAREHOUSE_ID", None)
-            )
-            if not warehouse_id:
-                logger.warning("No SQL warehouse configured; cannot read AR evidence table.")
-                return []
+        settings = get_settings()
+        warehouse_id = (
+            getattr(settings, "DATABRICKS_WAREHOUSE_ID", None)
+            or getattr(settings, "DATABRICKS_SQL_WAREHOUSE_ID", None)
+        )
+        if not warehouse_id:
+            raise RuntimeError("No SQL warehouse configured; cannot read AR evidence.")
+        try:
             ws = get_workspace_client(settings)
-            row_filter = (binding or {}).get("row_filter")
             where = f" WHERE {row_filter}" if row_filter else ""
             stmt = f"SELECT * FROM {table}{where} LIMIT {int(limit)}"
             resp = ws.statement_execution.execute_statement(
@@ -1526,24 +1684,30 @@ class AuthorityResolutionManager:
             columns = [c.name for c in manifest.schema.columns]
             return [dict(zip(columns, r)) for r in result.data_array]
         except Exception as e:  # pragma: no cover - depends on live warehouse
-            logger.warning(f"Evidence read failed for table '{table}': {e}")
-            return []
+            raise RuntimeError(f"Evidence read failed for table '{table}': {e}") from e
 
     # ------------------------------------------------------------- lifecycle
+
+    @staticmethod
+    def _ceiling(relation: AuthorityRelationDb) -> float:
+        t = relation.dna_max_threshold
+        return DEFAULT_DNA_CEILING if t is None else t
 
     def set_status(self, db: Session, relation_id: str, status: str) -> Tuple[Optional[AuthorityRelationDb], Optional[str]]:
         """Transition an AR's status. Returns (relation, error_message)."""
         relation = authority_relation_repo.get(db, relation_id)
         if not relation:
             return None, "not_found"
+        if status not in _ALLOWED_STATUSES:
+            return relation, f"Unknown status '{status}' — expected one of {_ALLOWED_STATUSES}."
         if status == STATUS_ACTIVE:
             # Activation gate: DNAco measured & within ceiling, AND fully affirmed.
             if relation.dna_magnitude is None:
                 return relation, "DNA-Coefficient has not been measured yet."
-            if relation.dna_magnitude > (relation.dna_max_threshold or 0.3):
+            if relation.dna_magnitude > self._ceiling(relation):
                 return relation, (
                     f"DNA-Coefficient {relation.dna_magnitude} exceeds the maximum "
-                    f"{relation.dna_max_threshold}."
+                    f"{self._ceiling(relation)}."
                 )
             if not self.is_fully_affirmed(db, relation_id):
                 return relation, "All required affirmations must be completed before activation."
@@ -1570,6 +1734,10 @@ class AuthorityResolutionManager:
                 obj[ref_key(r["field_path"]) + "_iri"] = r["iri"]
         norm = authority_dna.normalize_row(obj)
         for c in self._load_criteria(relation):
+            parse_error = authority_dna.rule_parse_error(c.rule)
+            if parse_error:
+                # Fail closed, and say it's the AR's configuration, not the request.
+                return VERDICT_CONFLICT, f"Criterion '{c.code}' has a malformed rule: {parse_error}"
             try:
                 passed, msg = evaluate_rule_on_object(c.rule, norm)
             except Exception as e:  # pragma: no cover - malformed author rule

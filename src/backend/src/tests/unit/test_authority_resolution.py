@@ -297,7 +297,7 @@ def test_structural_dimension_scores_incompleteness(db_session):
         affirmations=[AffirmationInput(role="Governance Lead", principal="g@x.com", is_approver=True, is_reviewer=False)],
     ))
     db_session.commit()
-    run = mgr.compute_dnaco(db_session, rel.id, rows=[])   # empty evidence sample
+    run = mgr.compute_dnaco(db_session, rel.id, rows=[{"actor_identity": "x"}])  # one clean row
     db_session.commit()
     assert run.per_dimension_scores["structural"] == 0.2   # only justification_chain missing
     assert run.per_dimension_scores["people"] == 0.0       # no divergent rows
@@ -464,7 +464,7 @@ def test_authority_maturity_feature_integration(db_session):
         evidence_sources=[EvidenceSource(type="delta_table", ref="c.s.t", column_map={"actor_identity": "a"})],
     ))
     db_session.commit()
-    mgr.compute_dnaco(db_session, rel2.id, rows=[])  # measured (empty sample -> magnitude 0.0)
+    mgr.compute_dnaco(db_session, rel2.id, rows=[{"actor_identity": "a", "value": 0.0}])  # measured, no divergence
     db_session.commit()
     rep2 = evaluator.evaluate(db_session, entity_type="AuthorityRelation", entity_id=rel2.id, persist=False)
     # object + evidence + measured + within ceiling, but not affirmed -> L3 DNA-Measured
@@ -533,7 +533,7 @@ async def test_compute_dna_coefficient_tool_resolves_slug_and_handles_not_found(
         name="DNAco-tool AR by slug", slug="dnaco-tool-slug",
     ))
     db_session.commit()
-    monkeypatch.setattr(artools._manager, "_collect_evidence", lambda _rel: [])
+    monkeypatch.setattr(artools._manager, "_collect_evidence", lambda _rel: [{"actor_identity": "a", "value": 0.0}])
 
     tool = ComputeDnaCoefficientTool()
     ctx = ToolContext(db=db_session, settings=MagicMock())
@@ -1659,3 +1659,236 @@ def test_find_concept_iris_by_label_exact_and_case_insensitive():
     assert find(fake, "DE") == ["urn:demo:market:DE"]
     assert find(fake, "germany") == ["urn:demo:market:DE"]
     assert find(fake, 'De"; DROP') == []
+
+
+
+# ---------------------------------------------------------------------------
+# Review pass 3: activation integrity, evidence safety, lifecycle
+# ---------------------------------------------------------------------------
+
+
+def _user(email, groups=None):
+    from types import SimpleNamespace
+    return SimpleNamespace(email=email, username=email, user=email, groups=groups or [])
+
+
+def test_affirm_requires_the_named_principal(db_session):
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.models.authority_resolution import AuthorityRelationCreate, AffirmationInput
+
+    mgr = AuthorityResolutionManager()
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(name="Affirm AR", affirmations=[
+        AffirmationInput(role="Approver", principal="Alice@x.com"),
+        AffirmationInput(role="Board", principal="board-group", principal_type="group"),
+    ]))
+    db_session.commit()
+    by_principal = {a["principal"]: a for a in mgr.to_read_dict(db_session, rel)["affirmations"]}
+    alice, board = by_principal["Alice@x.com"], by_principal["board-group"]
+    with pytest.raises(PermissionError):
+        mgr.affirm(db_session, alice["id"], affirmed_by="mallory@x.com", user=_user("mallory@x.com"))
+    with pytest.raises(PermissionError):
+        mgr.affirm(db_session, board["id"], affirmed_by="mallory@x.com", user=_user("mallory@x.com"))
+    assert mgr.affirm(db_session, alice["id"], affirmed_by="alice@x.com", user=_user("alice@x.com")).affirmed
+    assert mgr.affirm(db_session, board["id"], affirmed_by="bob@x.com",
+                      user=_user("bob@x.com", groups=["Board-Group"])).affirmed
+
+
+def test_review_context_and_submit_require_the_named_reviewer(db_session):
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.models.authority_resolution import AuthorityRelationCreate, AffirmationInput
+
+    mgr = AuthorityResolutionManager()
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(name="Review AR", affirmations=[
+        AffirmationInput(role="business", principal="rev@x.com", is_approver=False, is_reviewer=True),
+    ]))
+    db_session.commit()
+    with pytest.raises(PermissionError):
+        mgr.get_review_context(db_session, rel.id, "rev@x.com", user=_user("other@x.com"))
+    ctx = mgr.get_review_context(db_session, rel.id, "rev@x.com", user=_user("rev@x.com"))
+    with pytest.raises(PermissionError):
+        mgr.submit_review(db_session, ctx["participant_id"], {"q": "a"}, user=_user("other@x.com"))
+    assert mgr.submit_review(db_session, ctx["participant_id"], {"q": "a"},
+                             user=_user("rev@x.com")).review_status == "completed"
+
+
+def test_empty_evidence_sample_fails_the_run_and_leaves_dna_unmeasured(db_session):
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.models.authority_resolution import AuthorityRelationCreate
+    from src.repositories.authority_resolution_repository import authority_dna_run_repo
+
+    mgr = AuthorityResolutionManager()
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(name="No evidence AR"))
+    db_session.commit()
+    with pytest.raises(ValueError, match="No evidence rows"):
+        mgr.compute_dnaco(db_session, rel.id, rows=[])
+    runs = authority_dna_run_repo.list_for_relation(db_session, relation_id=rel.id)
+    assert runs[0].status == "failed"
+    assert rel.dna_magnitude is None
+    _, err = mgr.set_status(db_session, rel.id, "active")
+    assert "not been measured" in err
+
+
+def test_collect_evidence_keeps_raw_columns_and_applies_aliases(monkeypatch):
+    from types import SimpleNamespace
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+
+    mgr = AuthorityResolutionManager()
+    monkeypatch.setattr(mgr, "_read_evidence_rows", lambda binding: [{"approver": "a@x", "budget_usd": 5}])
+    rel = SimpleNamespace(evidence_sources=[{"type": "delta_table", "ref": "c.s.t",
+                                             "column_map": {"actor_identity": "approver"}}],
+                          evidence_binding=None)
+    rows = mgr._collect_evidence(rel)
+    assert rows[0]["actor_identity"] == "a@x"
+    assert rows[0]["budget_usd"] == 5
+
+
+def test_zero_dna_ceiling_is_respected(db_session):
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.models.authority_resolution import AuthorityRelationCreate, AffirmationInput
+
+    mgr = AuthorityResolutionManager()
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(
+        name="Zero tolerance", dna_max_threshold=0.0,
+        affirmations=[AffirmationInput(role="Approver", principal="a@x.com")]))
+    db_session.commit()
+    aff = mgr.to_read_dict(db_session, rel)["affirmations"][0]
+    mgr.affirm(db_session, aff["id"], affirmed_by="a@x.com", user=_user("a@x.com"))
+    rel.dna_magnitude = 0.1
+    _, err = mgr.set_status(db_session, rel.id, "active")
+    assert err and "exceeds the maximum 0.0" in err
+
+
+def test_set_status_rejects_unknown_status(db_session):
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.models.authority_resolution import AuthorityRelationCreate
+
+    mgr = AuthorityResolutionManager()
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(name="Status AR"))
+    _, err = mgr.set_status(db_session, rel.id, "activ")
+    assert err and "Unknown status" in err
+    assert rel.status == "draft"
+
+
+def test_replacing_participants_on_active_ar_requires_reaffirmation(db_session):
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager, STATUS_ACTIVE
+    from src.models.authority_resolution import (
+        AuthorityRelationCreate, AuthorityRelationUpdate, AffirmationInput,
+    )
+
+    mgr = AuthorityResolutionManager()
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(name="Reaffirm AR"))
+    rel.status = STATUS_ACTIVE
+    db_session.commit()
+    updated = mgr.update_relation(db_session, rel.id, AuthorityRelationUpdate(
+        affirmations=[AffirmationInput(role="Approver", principal="new@x.com")]))
+    assert updated.status == "needs_review"
+
+
+def test_update_recompute_scores_the_new_criteria(db_session, monkeypatch):
+    """After a criteria replace, the recompute must not use the stale collection."""
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager, STATUS_ACTIVE
+    from src.models.authority_resolution import (
+        AuthorityRelationCreate, AuthorityRelationUpdate, CriterionInput, AffirmationInput,
+    )
+
+    mgr = AuthorityResolutionManager()
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(
+        name="Stale AR", dna_max_threshold=0.5,
+        criteria=[CriterionInput(name="loose", rule="obj.value <= 100")],
+        affirmations=[AffirmationInput(role="Approver", principal="a@x.com")]))
+    db_session.commit()
+    _ = list(rel.criteria)  # load the collection
+    rel.status = STATUS_ACTIVE
+    db_session.commit()
+    monkeypatch.setattr(mgr, "_collect_evidence", lambda _rel: [{"actor_identity": "a", "value": 50}])
+    updated = mgr.update_relation(db_session, rel.id, AuthorityRelationUpdate(
+        criteria=[CriterionInput(name="strict", rule="obj.value <= 10", failure_message="over")]))
+    assert updated.status == "needs_review"  # the strict rule diverges on every row
+
+
+@pytest.mark.parametrize("bad", [
+    "1=1 UNION SELECT * FROM secrets.hr.salaries",
+    "x = 1; DROP TABLE t",
+    "x = 1 -- comment",
+    "read_files('/Volumes/x') IS NOT NULL",
+    "x IN (SELECT y FROM other)",
+])
+def test_row_filter_rejects_injection(bad):
+    from src.controller.authority_resolution_manager import validate_row_filter
+    with pytest.raises(ValueError):
+        validate_row_filter(bad)
+
+
+def test_row_filter_and_fqn_accept_simple_predicates():
+    from src.controller.authority_resolution_manager import validate_row_filter, validate_table_fqn
+    assert validate_row_filter("region = 'EMEA' AND (amount >= 10 OR flag IS NULL) AND k IN ('a', 'b')")
+    assert validate_table_fqn("demo.commercial.promotion_approvals")
+    with pytest.raises(ValueError):
+        validate_table_fqn("t; DROP TABLE x")
+
+
+def test_evidence_with_bad_filter_rejected_at_write_time(db_session):
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.models.authority_resolution import AuthorityRelationCreate, EvidenceSource
+
+    with pytest.raises(ValueError):
+        AuthorityResolutionManager().create_relation(db_session, AuthorityRelationCreate(
+            name="Inject AR", evidence_sources=[EvidenceSource(
+                ref="c.s.t", row_filter="1=1 UNION SELECT * FROM x")]))
+
+
+def test_delete_protects_family_anchor_moves_slug_and_cleans_up(db_session):
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.repositories.authority_resolution_repository import authority_prerequisite_repo
+
+    mgr = AuthorityResolutionManager()
+    v1 = _make_ar(mgr, db_session, slug="del-fam", name="Del v1")
+    v2 = mgr.create_new_version(db_session, v1.id, "2.0.0")
+    db_session.commit()
+    with pytest.raises(ValueError, match="first version"):
+        mgr.delete_relation(db_session, v1.id)
+
+    # A slug on a non-anchor row moves to a remaining sibling.
+    v1.slug = None
+    db_session.flush()
+    v2.slug = "del-fam"
+    db_session.commit()
+    assert mgr.delete_relation(db_session, v2.id)
+    assert v1.slug == "del-fam"
+
+    # Last version: refused while depended on; afterwards edges + links are gone.
+    dep = _make_ar(mgr, db_session, slug="del-dep", name="Dependent",
+                   prerequisites=[dict(prerequisite_family_slug="del-fam")])
+    _link_concept(db_session, v1, TP_IRI)
+    db_session.commit()
+    with pytest.raises(ValueError, match="prerequisite of del-dep"):
+        mgr.delete_relation(db_session, v1.id)
+    mgr.delete_relation(db_session, dep.id)
+    assert mgr.delete_relation(db_session, v1.id)
+    assert authority_prerequisite_repo.list_dependents(db_session, prerequisite_family_slug="del-fam") == []
+    assert mgr.find_authority_for_concept(db_session, TP_IRI)["candidates"] == []
+
+
+def test_malformed_rule_rejected_on_write_and_conflict_at_resolve(db_session):
+    import uuid as _uuid
+    from src.common import authority_resolution_dna as dna
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager, VERDICT_CONFLICT
+    from src.db_models.authority_resolution import AuthorityCriterionDb
+    from src.db_models.compliance import CompliancePolicyDb
+
+    mgr = AuthorityResolutionManager()
+    with pytest.raises(ValueError, match="does not parse"):
+        _make_ar(mgr, db_session, slug="bad-rule", name="Bad", criteria=[dict(name="b", rule="obj.value <=")])
+
+    rel = _make_ar(mgr, db_session, slug="legacy-bad", name="Legacy bad")
+    pid = str(_uuid.uuid4())
+    db_session.add(CompliancePolicyDb(id=pid, slug=f"p-{pid[:8]}", name="broken", rule="ASSERT obj.value <=",
+                                      category="Authority Decision", severity="high", is_active=True))
+    db_session.add(AuthorityCriterionDb(id=str(_uuid.uuid4()), relation_id=rel.id, compliance_policy_id=pid,
+                                        direction="neutral", weight=1.0, display_order=0, enabled=True))
+    db_session.commit()
+    out = mgr.resolve(db_session, "legacy-bad", {"value": 1}, record=False, require_active=False)
+    assert out["verdict"] == VERDICT_CONFLICT
+    crit = dna.Criterion(code="broken", rule="ASSERT obj.value <=", message=None, direction="neutral",
+                         weight=1.0, dimension="people")
+    assert dna.evaluate_row([crit], {"value": 1}).diverged is False

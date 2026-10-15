@@ -132,7 +132,11 @@ async def delete_relation(
     db: DBSessionDep,
     _: bool = Depends(PermissionChecker(FEATURE_ID, FeatureAccessLevel.READ_WRITE)),
 ):
-    if not manager.delete_relation(db, relation_id):
+    try:
+        deleted = manager.delete_relation(db, relation_id)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    if not deleted:
         raise HTTPException(status_code=404, detail="Authority Relation not found")
     return {"deleted": True, "id": relation_id}
 
@@ -195,6 +199,8 @@ async def compute_dnaco(
     try:
         run = manager.compute_dnaco(db, relation_id)
     except Exception as e:
+        # Persist the failed run row before the error rolls the request back.
+        db.commit()
         raise HTTPException(status_code=502, detail=f"DNA-Coefficient computation failed: {e}")
     if not run:
         raise HTTPException(status_code=404, detail="Authority Relation not found")
@@ -228,7 +234,10 @@ async def affirm(
     _: bool = Depends(PermissionChecker(FEATURE_ID, FeatureAccessLevel.READ_WRITE)),
 ):
     username = current_user.username if current_user else "unknown"
-    aff = manager.affirm(db, affirmation_id, affirmed_by=username, notes=payload.notes)
+    try:
+        aff = manager.affirm(db, affirmation_id, affirmed_by=username, notes=payload.notes, user=current_user)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     if not aff:
         raise HTTPException(status_code=404, detail="Affirmation not found")
     return {"id": aff.id, "affirmed": aff.affirmed, "affirmed_by": aff.affirmed_by, "affirmed_at": aff.affirmed_at}
@@ -599,10 +608,14 @@ async def review_tracking(
 async def review_context(
     relation_id: str,
     db: DBSessionDep,
+    current_user: AuditCurrentUserDep,
     reviewer: str = Query(..., description="Reviewer principal (email/group)"),
     _: bool = Depends(PermissionChecker(FEATURE_ID, FeatureAccessLevel.READ_ONLY)),
 ):
-    ctx = manager.get_review_context(db, relation_id, reviewer)
+    try:
+        ctx = manager.get_review_context(db, relation_id, reviewer, user=current_user)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     if ctx is None:
         raise HTTPException(status_code=404, detail="No review found for this reviewer on this Authority Relation")
     return ctx
@@ -618,7 +631,10 @@ async def submit_review(
 ):
     reviewer = current_user.username if current_user else None
     answers = payload.get("answers", payload) if isinstance(payload, dict) else {}
-    participant = manager.submit_review(db, participant_id, answers=answers, reviewer=reviewer)
+    try:
+        participant = manager.submit_review(db, participant_id, answers=answers, reviewer=reviewer, user=current_user)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     if not participant:
         raise HTTPException(status_code=404, detail="Review participant not found")
     return {"id": participant.id, "review_status": participant.review_status}

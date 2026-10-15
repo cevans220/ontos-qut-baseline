@@ -163,6 +163,21 @@ def _direction_sign(direction: Optional[str]) -> int:
 # Core evaluation                                                             #
 # --------------------------------------------------------------------------- #
 
+def rule_parse_error(rule: Optional[str]) -> Optional[str]:
+    """Why ``rule`` can't be parsed, or None. ``evaluate_rule_on_object`` folds
+    parse errors into an ordinary failure, so callers check this first to tell
+    a malformed rule (configuration error) from a failing one (policy result)."""
+    from src.common.compliance_dsl import Lexer, Parser
+
+    if not rule or "ASSERT" not in rule:
+        return "rule must contain an ASSERT clause"
+    try:
+        Parser(Lexer(rule.split("ASSERT", 1)[1].strip()).tokenize()).parse_expression()
+    except Exception as e:
+        return str(e) or type(e).__name__
+    return None
+
+
 def evaluate_row(criteria: List[Criterion], row: Dict[str, Any]) -> RowDivergence:
     """Decide whether a single evidence row diverges, by running each criterion's
     rule against it: a criterion that **fails** is a divergence, contributing its
@@ -173,11 +188,10 @@ def evaluate_row(criteria: List[Criterion], row: Dict[str, Any]) -> RowDivergenc
     signed = 0
     dim_weights: Dict[str, float] = {}
     for c in criteria:
-        try:
-            passed, _ = evaluate_rule_on_object(c.rule, norm)
-        except Exception:
+        if rule_parse_error(c.rule):
             # A malformed rule must not fabricate divergence.
-            passed = True
+            continue
+        passed, _ = evaluate_rule_on_object(c.rule, norm)
         if not passed:
             reasons.append(c.code)
             w = c.weight if c.weight is not None else 1.0
