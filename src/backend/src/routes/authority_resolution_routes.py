@@ -58,7 +58,13 @@ async def create_relation(
     _: bool = Depends(PermissionChecker(FEATURE_ID, FeatureAccessLevel.READ_WRITE)),
 ):
     username = current_user.username if current_user else None
-    relation = manager.create_relation(db, payload, current_user=username)
+    try:
+        relation = manager.create_relation(db, payload, current_user=username)
+    except ValueError as e:
+        # Author-visible validation errors from the manager (prerequisite
+        # cycles, missing-slug + prereqs set, etc.) — surface as 400 so the
+        # dialog can toast the specific message.
+        raise HTTPException(status_code=400, detail=str(e))
     return manager.to_read_dict(db, relation)
 
 
@@ -85,7 +91,10 @@ async def update_relation(
     _: bool = Depends(PermissionChecker(FEATURE_ID, FeatureAccessLevel.READ_WRITE)),
 ):
     username = current_user.username if current_user else None
-    relation = manager.update_relation(db, relation_id, payload, current_user=username)
+    try:
+        relation = manager.update_relation(db, relation_id, payload, current_user=username)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not relation:
         raise HTTPException(status_code=404, detail="Authority Relation not found")
     return manager.to_read_dict(db, relation)
@@ -276,6 +285,49 @@ async def start_review(
     if result is None:
         raise HTTPException(status_code=404, detail="Authority Relation not found")
     return result
+
+
+@router.get("/authority/relation-slugs")
+async def list_relation_slugs(
+    db: DBSessionDep,
+    _: bool = Depends(PermissionChecker(FEATURE_ID, FeatureAccessLevel.READ_ONLY)),
+):
+    """Family-level slugs the Requires picker consumes.
+
+    One row per version family that carries a slug (slugs are per-row and
+    unique, so each slug belongs to exactly one family). Shape stays tight:
+    the picker only needs ``family_slug`` + a label.
+    """
+    # Collapse to one representative per family (same semantics the list view uses)
+    # and keep only the ones that actually carry a family slug.
+    rows = manager.list_relations(db)
+    out: List[dict] = []
+    for r in rows:
+        family_slug = manager._family_slug_of(db, r)
+        if not family_slug:
+            continue
+        out.append({
+            "family_slug": family_slug,
+            "name": r.name,
+            "status": r.status,
+            "version": r.version,
+        })
+    out.sort(key=lambda x: x["name"].lower())
+    return out
+
+
+@router.get("/authority/relations/{relation_id}/prerequisites")
+async def list_prerequisites(
+    relation_id: str,
+    db: DBSessionDep,
+    _: bool = Depends(PermissionChecker(FEATURE_ID, FeatureAccessLevel.READ_ONLY)),
+):
+    """The AR's declared prerequisite edges (each resolved to the active
+    family version for display)."""
+    relation = manager.resolve_relation_ref(db, relation_id)
+    if not relation:
+        raise HTTPException(status_code=404, detail="Authority Relation not found")
+    return manager.list_prerequisites(db, relation)
 
 
 @router.get("/authority/relations/{relation_id}/criteria")

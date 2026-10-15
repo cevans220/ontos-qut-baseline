@@ -37,6 +37,7 @@ from src.repositories.authority_resolution_repository import (
     authority_criterion_repo,
     authority_dna_run_repo,
     authority_decision_repo,
+    authority_prerequisite_repo,
 )
 from src.repositories.entity_domain_association_repository import entity_domain_repo
 
@@ -164,6 +165,10 @@ class AuthorityResolutionManager:
         self._replace_affirmations(db, rel_id, data.get("affirmations") or [])
         # Author-configurable decision criteria (Compliance Checks).
         self._replace_criteria(db, rel_id, data.get("criteria") or [])
+        # Prerequisite chain (per-family-slug edges).
+        prereqs = data.get("prerequisites")
+        if prereqs is not None:
+            self._replace_prerequisites(db, relation, prereqs)
         # Polymorphic tags.
         self._set_tags(db, rel_id, getattr(payload, "tags", None), current_user)
         return relation
@@ -196,6 +201,25 @@ class AuthorityResolutionManager:
         for v in versions:
             if v.status == STATUS_ACTIVE:
                 return v
+        return None
+
+    def _family_slug_of(
+        self, db: Session, relation: AuthorityRelationDb
+    ) -> Optional[str]:
+        """The family-level slug for this AR.
+
+        The slug is the stable, family-level ``@id`` an agent uses, but it
+        physically lives on one version row (new versions start with no slug
+        of their own). Scan sibling versions when the current row has none
+        so prerequisite walks, concept lookups and read-dict output stay
+        consistent across version bumps.
+        """
+        if relation.slug:
+            return relation.slug
+        fam_id = getattr(relation, "version_family_id", None) or relation.id
+        for v in authority_relation_repo.get_family_versions(db, family_id=fam_id):
+            if v.slug:
+                return v.slug
         return None
 
     def resolve_relation_ref(
@@ -262,6 +286,7 @@ class AuthorityResolutionManager:
         primary_domain_id = data.pop("primary_domain_id", None)
         affirmations = data.pop("affirmations", None)
         criteria = data.pop("criteria", None)
+        prerequisites = data.pop("prerequisites", None)
 
         evidence = data.get("evidence_binding")
         if evidence is not None and hasattr(evidence, "dict"):
@@ -287,6 +312,8 @@ class AuthorityResolutionManager:
             self._replace_affirmations(db, relation_id, affirmations)
         if criteria is not None:
             self._replace_criteria(db, relation_id, criteria)
+        if prerequisites is not None:
+            self._replace_prerequisites(db, relation, prerequisites)
         # Polymorphic tags (only when the caller supplied the field).
         self._set_tags(db, relation_id, getattr(payload, "tags", None), current_user)
 
@@ -523,6 +550,111 @@ class AuthorityResolutionManager:
         db.add(policy)
         db.flush()
         return pid
+
+    # --------------------------------------------------------- prerequisites
+
+    def _cycle_would_close(
+        self, db: Session, head_slug: str, candidate_prereq_slug: str,
+    ) -> bool:
+        """Would adding (``head_slug`` → ``candidate_prereq_slug``) close a cycle?
+
+        Walks the candidate upstream slug's transitive prerequisites via
+        ``list_for_family``; if ``head_slug`` appears in that closure the new
+        edge would form a cycle. Called on save so authors never land an
+        edge the resolve-time detector would have to abort on.
+        """
+        if head_slug == candidate_prereq_slug:
+            return True
+        seen = {candidate_prereq_slug}
+        stack = [candidate_prereq_slug]
+        while stack:
+            s = stack.pop()
+            for e in authority_prerequisite_repo.list_for_family(
+                db, relation_family_slug=s,
+            ):
+                if e.prerequisite_family_slug == head_slug:
+                    return True
+                if e.prerequisite_family_slug not in seen:
+                    seen.add(e.prerequisite_family_slug)
+                    stack.append(e.prerequisite_family_slug)
+        return False
+
+    def _replace_prerequisites(
+        self, db: Session, relation: AuthorityRelationDb, prerequisites: List[Any],
+    ) -> None:
+        """Replace the AR's declared prerequisite chain.
+
+        Edges are keyed by family slug (per the pin — agents never see
+        version UUIDs), so the AR must carry a slug for this to be meaningful.
+        Rejects self-loops and any edge whose upstream family already depends
+        on ``head`` through its own transitive prerequisites.
+        """
+        head_slug = self._family_slug_of(db, relation)
+        if head_slug is None:
+            if prerequisites:
+                raise ValueError(
+                    "Authority Relation needs a slug before prerequisites can be set "
+                    "— edges are keyed by the stable family-level @id."
+                )
+            return
+        # Deduplicate by candidate slug (last writer wins its required/order).
+        normalised: Dict[str, Dict[str, Any]] = {}
+        for idx, item in enumerate(prerequisites):
+            p = item.dict() if hasattr(item, "dict") else dict(item)
+            slug = (p.get("prerequisite_family_slug") or "").strip()
+            if not slug:
+                continue
+            if slug == head_slug:
+                raise ValueError(
+                    f"An Authority Relation cannot require itself ({slug})."
+                )
+            if self._cycle_would_close(db, head_slug, slug):
+                raise ValueError(
+                    f"Adding '{slug}' as a prerequisite of '{head_slug}' would close a cycle."
+                )
+            normalised[slug] = {
+                "required": bool(p.get("required", True)),
+                "display_order": int(p.get("display_order", idx)),
+                "notes": p.get("notes"),
+            }
+        authority_prerequisite_repo.delete_for_family(
+            db, relation_family_slug=head_slug,
+        )
+        for slug, cfg in normalised.items():
+            authority_prerequisite_repo.create(db, obj_in={
+                "id": str(uuid.uuid4()),
+                "relation_family_slug": head_slug,
+                "prerequisite_family_slug": slug,
+                "required": cfg["required"],
+                "display_order": cfg["display_order"],
+                "notes": cfg["notes"],
+            })
+
+    def list_prerequisites(
+        self, db: Session, relation: AuthorityRelationDb,
+    ) -> List[Dict[str, Any]]:
+        """The AR's declared prerequisites with each upstream slug resolved
+        for display (name + status of the active family version)."""
+        head_slug = self._family_slug_of(db, relation)
+        if head_slug is None:
+            return []
+        edges = authority_prerequisite_repo.list_for_family(
+            db, relation_family_slug=head_slug,
+        )
+        out: List[Dict[str, Any]] = []
+        for e in edges:
+            target = self.resolve_relation_ref(db, e.prerequisite_family_slug)
+            out.append({
+                "prerequisite_family_slug": e.prerequisite_family_slug,
+                "required": e.required,
+                "display_order": e.display_order,
+                "notes": e.notes,
+                "name": target.name if target else None,
+                "status": target.status if target else None,
+                "version": target.version if target else None,
+                "resolved_id": target.id if target else None,
+            })
+        return out
 
     def affirm(self, db: Session, affirmation_id: str, affirmed_by: str, notes: Optional[str] = None) -> Optional[AuthorityAffirmationDb]:
         aff = authority_affirmation_repo.get(db, affirmation_id)
@@ -1070,7 +1202,29 @@ class AuthorityResolutionManager:
         can preview the verdict for a draft/needs_review AR without affecting the
         usage counters. Returns ``no_authority`` when the AR does not exist, or
         (in production mode) is not active.
+
+        Walks any declared ``authority_prerequisites`` depth-first before
+        evaluating the AR's own criteria; a required prerequisite that comes
+        back non-approved short-circuits the outer verdict to ``denied``
+        (``conflict`` on a cycle). The full chain is attached to the response
+        as ``prerequisite_chain`` and persisted on the decision's
+        ``provenance`` column.
         """
+        return self._resolve_internal(
+            db, ar_ref, req, visited=set(),
+            record=record, require_active=require_active,
+        )
+
+    def _resolve_internal(
+        self,
+        db: Session,
+        ar_ref: str,
+        req: Dict[str, Any],
+        *,
+        visited: set,
+        record: bool,
+        require_active: bool,
+    ) -> Dict[str, Any]:
         # By slug this resolves to the family's active version (the stable @id
         # agents call); by UUID it pins the exact version.
         relation = self.resolve_relation_ref(db, ar_ref)
@@ -1084,10 +1238,101 @@ class AuthorityResolutionManager:
                 "reason": reason,
                 "relation_id": relation.id if relation else None,
                 "relation_slug": relation.slug if relation else None,
+                "prerequisite_chain": [],
             }
 
-        verdict, reason = self._evaluate_decision(relation, req)
+        head_slug = self._family_slug_of(db, relation)
+        chain: List[Dict[str, Any]] = []
+        if head_slug is not None:
+            # Entry-time cycle guard: the walker added our head when it recursed in.
+            if head_slug in visited:
+                return self._finalize_resolve(
+                    db, relation, req,
+                    VERDICT_CONFLICT,
+                    f"cycle detected at {head_slug}",
+                    chain, record=False,
+                )
+            visited.add(head_slug)
+            try:
+                blocked, blocker_reason, chain = self._walk_prerequisites(
+                    db, head_slug, req, visited, require_active=require_active,
+                )
+            finally:
+                visited.discard(head_slug)
+            if blocked:
+                outer_verdict = (
+                    VERDICT_CONFLICT if "cycle" in (blocker_reason or "")
+                    else VERDICT_DENIED
+                )
+                return self._finalize_resolve(
+                    db, relation, req, outer_verdict, blocker_reason, chain, record,
+                )
 
+        verdict, reason = self._evaluate_decision(relation, req)
+        return self._finalize_resolve(
+            db, relation, req, verdict, reason, chain, record,
+        )
+
+    def _walk_prerequisites(
+        self,
+        db: Session,
+        head_slug: str,
+        req: Dict[str, Any],
+        visited: set,
+        *,
+        require_active: bool,
+    ) -> Tuple[bool, Optional[str], List[Dict[str, Any]]]:
+        """Depth-first walk over the AR's declared prerequisite edges.
+
+        Each edge is recursed through :meth:`_resolve_internal` with
+        ``record=False`` — inner decisions never count on the upstream AR's
+        usage metrics — and inherits the outer call's ``require_active``:
+        production walks demand each upstream AR be active, while the
+        detail-view **Test** dry-run previews the chain against draft rows.
+        The ``visited`` set carries family slugs currently on the stack so a
+        cycle that the write-time check somehow missed is still caught here.
+        Returns ``(blocked, blocker_reason, chain)`` where ``chain`` is the
+        full walk order (always populated for the caller to persist).
+        """
+        chain: List[Dict[str, Any]] = []
+        edges = authority_prerequisite_repo.list_for_family(
+            db, relation_family_slug=head_slug,
+        )
+        for e in edges:
+            pre_slug = e.prerequisite_family_slug
+            inner = self._resolve_internal(
+                db, pre_slug, req,
+                visited=visited, record=False, require_active=require_active,
+            )
+            chain.append({
+                "slug": pre_slug,
+                "version": inner.get("relation_version"),
+                "verdict": inner["verdict"],
+                "reason": inner.get("reason"),
+                "required": e.required,
+            })
+            # Carry the inner's own chain forward so provenance records the full walk.
+            inner_chain = inner.get("prerequisite_chain") or []
+            if inner_chain:
+                chain.extend(inner_chain)
+            if e.required and inner["verdict"] != VERDICT_APPROVED:
+                reason = (
+                    f"blocked by prerequisite ar:{pre_slug} — "
+                    f"{inner.get('reason') or inner['verdict']}"
+                )
+                return True, reason, chain
+        return False, None, chain
+
+    def _finalize_resolve(
+        self,
+        db: Session,
+        relation: AuthorityRelationDb,
+        req: Dict[str, Any],
+        verdict: str,
+        reason: str,
+        chain: List[Dict[str, Any]],
+        record: bool,
+    ) -> Dict[str, Any]:
         if record:
             authority_decision_repo.create(db, obj_in={
                 "id": str(uuid.uuid4()),
@@ -1100,6 +1345,7 @@ class AuthorityResolutionManager:
                 "request_params": req,
                 "verdict": verdict,
                 "reason": reason,
+                "provenance": {"chain": chain} if chain else None,
             })
             counters = {"usage_count": (relation.usage_count or 0) + 1}
             if verdict == VERDICT_APPROVED:
@@ -1116,6 +1362,7 @@ class AuthorityResolutionManager:
             "relation_version": relation.version,
             "dna_magnitude": relation.dna_magnitude,
             "dna_direction": relation.dna_direction,
+            "prerequisite_chain": chain,
         }
 
     # --------------------------------------------------------- read assembly
@@ -1221,6 +1468,7 @@ class AuthorityResolutionManager:
                 }
                 for c in criteria
             ],
+            "prerequisites": self.list_prerequisites(db, relation),
             "tags": tags,
             "created_at": relation.created_at,
             "updated_at": relation.updated_at,

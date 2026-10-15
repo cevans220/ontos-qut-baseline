@@ -149,6 +149,7 @@ export interface AuthorityRelation {
   affirmations?: AuthorityAffirmation[];
   criteria?: AuthorityCriterion[];
   tags?: { fully_qualified_name?: string | null; assigned_value?: string | null }[];
+  prerequisites?: AuthorityPrerequisite[];
   created_at?: string;
   updated_at?: string;
   created_by?: string | null;
@@ -205,6 +206,39 @@ export interface AuthorityDecision {
   created_at?: string | null;
 }
 
+export interface AuthorityPrerequisite {
+  prerequisite_family_slug: string;
+  required: boolean;
+  display_order: number;
+  notes?: string | null;
+  name?: string | null;          // resolved display name of the upstream AR
+  status?: string | null;        // active | draft | needs_review | retired
+  version?: string | null;
+  resolved_id?: string | null;   // id of the currently-active version row
+}
+
+export interface PrerequisiteInput {
+  prerequisite_family_slug: string;
+  required: boolean;
+  display_order: number;
+  notes?: string | null;
+}
+
+export interface AuthorityRelationSlug {
+  family_slug: string;
+  name: string;
+  status: string;
+  version: string;
+}
+
+export interface PrerequisiteChainEntry {
+  slug: string;
+  version?: string | null;
+  verdict: string;
+  reason?: string | null;
+  required: boolean;
+}
+
 export interface AffirmationInput {
   role: string;
   business_role_id?: string | null;
@@ -243,6 +277,7 @@ export interface ResolveResponse {
   relation_version?: string | null;
   dna_magnitude?: number | null;
   dna_direction?: string | null;
+  prerequisite_chain?: PrerequisiteChainEntry[];
 }
 
 export const ACTION_VOCAB = ['approve', 'escalate', 'override', 'delegate', 'veto'];

@@ -684,3 +684,216 @@ def test_resolver_auth_defaults_to_obo(db_session):
     rel = mgr.create_relation(db_session, AuthorityRelationCreate(name="Auth-flag AR"))
     db_session.commit()
     assert rel.resolver_auth == "obo"
+
+
+# ---------------------------------------------------------------------------
+# ARF v2: prerequisite chain evaluator
+# ---------------------------------------------------------------------------
+
+
+def _make_ar(mgr, db, *, slug, name, criteria=None, prerequisites=None):
+    """Helper for prereq tests — slug is mandatory because edges are keyed by it."""
+    from src.models.authority_resolution import (
+        AuthorityRelationCreate, CriterionInput, PrerequisiteInput,
+    )
+    return mgr.create_relation(db, AuthorityRelationCreate(
+        name=name, slug=slug,
+        criteria=[CriterionInput(**c) for c in (criteria or [])],
+        prerequisites=[PrerequisiteInput(**p) for p in (prerequisites or [])],
+    ))
+
+
+def test_resolve_blocked_by_failing_prerequisite(db_session):
+    """A required prerequisite that returns a non-approved verdict short-circuits
+    the outer AR to ``denied`` with reason ``blocked by prerequisite ar:<slug>``.
+    The full chain is attached to the response so the agent can see which gate
+    rejected them, and the decision row's ``provenance`` records the walk."""
+    from src.controller.authority_resolution_manager import (
+        AuthorityResolutionManager, VERDICT_APPROVED, VERDICT_DENIED,
+    )
+    from src.repositories.authority_resolution_repository import authority_decision_repo
+
+    mgr = AuthorityResolutionManager()
+    # Upstream gate: denies anyone not on the allow-list.
+    _make_ar(mgr, db_session, slug="market-compliance", name="Market compliance",
+             criteria=[dict(name="allow", rule="obj.actor_identity IN ['approved-rsm']",
+                             failure_message="actor not approved for this market")])
+    # Downstream: trivially approves on its own, but requires market-compliance.
+    _make_ar(mgr, db_session, slug="trade-promo", name="Trade promotion",
+             prerequisites=[dict(prerequisite_family_slug="market-compliance")])
+    db_session.commit()
+
+    # Signer not on the market allow-list → outer is blocked, verdict = denied,
+    # chain carries the upstream failure.
+    out = mgr.resolve(db_session, "trade-promo",
+                       {"actor_identity": "intruder"},
+                       record=True, require_active=False)
+    assert out["verdict"] == VERDICT_DENIED
+    assert out["reason"].startswith("blocked by prerequisite ar:market-compliance")
+    chain = out["prerequisite_chain"]
+    assert len(chain) == 1
+    assert chain[0]["slug"] == "market-compliance"
+    assert chain[0]["verdict"] == VERDICT_DENIED
+    assert chain[0]["required"] is True
+
+    # Signer on the allow-list → upstream clears, outer approves.
+    out = mgr.resolve(db_session, "trade-promo",
+                       {"actor_identity": "approved-rsm"},
+                       record=True, require_active=False)
+    assert out["verdict"] == VERDICT_APPROVED
+    assert out["prerequisite_chain"][0]["verdict"] == VERDICT_APPROVED
+
+    # Provenance landed on the persisted decisions.
+    decisions = authority_decision_repo.list_for_relation(
+        db_session, relation_id=out["relation_id"],
+    )
+    # Both runs recorded; the blocked one has the chain, the approved one too.
+    assert any(d.provenance and d.provenance.get("chain") for d in decisions)
+
+
+def test_optional_prerequisite_adds_warning_not_block(db_session):
+    """A ``required=False`` prerequisite surfaces in the chain for the agent to
+    see, but does not block the outer verdict when it fails."""
+    from src.controller.authority_resolution_manager import (
+        AuthorityResolutionManager, VERDICT_APPROVED, VERDICT_DENIED,
+    )
+
+    mgr = AuthorityResolutionManager()
+    _make_ar(mgr, db_session, slug="advisory-check", name="Advisory",
+             criteria=[dict(name="allow", rule="obj.actor_identity = 'nobody'",
+                             failure_message="advisory failed")])
+    _make_ar(mgr, db_session, slug="main-gate", name="Main gate",
+             prerequisites=[dict(prerequisite_family_slug="advisory-check", required=False)])
+    db_session.commit()
+
+    out = mgr.resolve(db_session, "main-gate",
+                       {"actor_identity": "anyone"},
+                       record=False, require_active=False)
+    assert out["verdict"] == VERDICT_APPROVED
+    assert len(out["prerequisite_chain"]) == 1
+    entry = out["prerequisite_chain"][0]
+    assert entry["slug"] == "advisory-check"
+    assert entry["verdict"] == VERDICT_DENIED
+    assert entry["required"] is False
+
+
+def test_prerequisite_slug_resolves_to_active_version(db_session):
+    """Edges store the family slug, so a prereq version bump + reactivation
+    automatically redirects downstream resolves to the new active version
+    without rewriting the edge."""
+    from src.controller.authority_resolution_manager import (
+        AuthorityResolutionManager, STATUS_ACTIVE, VERDICT_DENIED,
+    )
+
+    mgr = AuthorityResolutionManager()
+    v1 = _make_ar(mgr, db_session, slug="pre-slug", name="Prereq v1",
+                   criteria=[dict(name="v1", rule="obj.value <= 10",
+                                   failure_message="over cap (v1)")])
+    _make_ar(mgr, db_session, slug="dep-slug", name="Dependent",
+             prerequisites=[dict(prerequisite_family_slug="pre-slug")])
+    v1.status = STATUS_ACTIVE
+    db_session.commit()
+
+    # Baseline: resolves against v1's rule (cap = 10).
+    first = mgr.resolve(db_session, "dep-slug", {"value": 20},
+                         record=False, require_active=False)
+    assert first["prerequisite_chain"][0]["version"] == "1.0.0"
+    assert first["verdict"] == VERDICT_DENIED
+
+    # Bump to v2 with a tighter rule and activate it; v1 goes draft (anchor keeps slug).
+    v2 = mgr.create_new_version(db_session, v1.id, "2.0.0")
+    db_session.commit()
+    # Re-author v2's criteria to a stricter cap.
+    from src.models.authority_resolution import AuthorityRelationUpdate, CriterionInput
+    mgr.update_relation(db_session, v2.id, AuthorityRelationUpdate(
+        criteria=[CriterionInput(name="v2", rule="obj.value <= 5",
+                                   failure_message="over cap (v2)")],
+    ))
+    v1.status = "draft"
+    v2.status = STATUS_ACTIVE
+    db_session.commit()
+
+    second = mgr.resolve(db_session, "dep-slug", {"value": 7},
+                          record=False, require_active=False)
+    # v2 is active; the chain now reports v2's version string.
+    assert second["prerequisite_chain"][0]["version"] == "2.0.0"
+    assert second["verdict"] == VERDICT_DENIED
+    assert "over cap (v2)" in second["reason"]
+
+
+def test_cycle_in_prerequisite_chain_returns_conflict(db_session):
+    """The write-time check normally rejects cycles, but a hand-crafted edge
+    (bypassing the manager) is still caught by the resolve-time cycle guard,
+    which returns ``conflict`` on the outer verdict."""
+    import uuid as _uuid
+    from src.controller.authority_resolution_manager import (
+        AuthorityResolutionManager, VERDICT_CONFLICT,
+    )
+    from src.db_models.authority_resolution import AuthorityPrerequisiteDb
+
+    mgr = AuthorityResolutionManager()
+    _make_ar(mgr, db_session, slug="a", name="A")
+    _make_ar(mgr, db_session, slug="b", name="B",
+             prerequisites=[dict(prerequisite_family_slug="a")])
+    # Hand-craft the reverse edge so the write-time check doesn't see it.
+    db_session.add(AuthorityPrerequisiteDb(
+        id=str(_uuid.uuid4()),
+        relation_family_slug="a",
+        prerequisite_family_slug="b",
+    ))
+    db_session.commit()
+
+    out = mgr.resolve(db_session, "b", {"actor_identity": "x"},
+                       record=False, require_active=False)
+    assert out["verdict"] == VERDICT_CONFLICT
+    assert "cycle" in out["reason"].lower()
+
+
+def test_write_rejects_cycle_in_prerequisites(db_session):
+    """``_replace_prerequisites`` rejects an edge whose upstream family's
+    transitive prereqs already contain the head slug."""
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.models.authority_resolution import AuthorityRelationUpdate, PrerequisiteInput
+
+    mgr = AuthorityResolutionManager()
+    # A requires B.
+    _make_ar(mgr, db_session, slug="x", name="X")
+    y = _make_ar(mgr, db_session, slug="y", name="Y",
+                  prerequisites=[dict(prerequisite_family_slug="x")])
+    db_session.commit()
+
+    # Now try to make X require Y → closes a cycle.
+    x = mgr.get_relation_by_slug(db_session, "x")
+    with pytest.raises(ValueError, match="cycle"):
+        mgr.update_relation(db_session, x.id, AuthorityRelationUpdate(
+            prerequisites=[PrerequisiteInput(prerequisite_family_slug="y")],
+        ))
+    # And attempting to make a family require itself.
+    with pytest.raises(ValueError, match="cannot require itself"):
+        mgr.update_relation(db_session, y.id, AuthorityRelationUpdate(
+            prerequisites=[PrerequisiteInput(prerequisite_family_slug="y")],
+        ))
+
+
+def test_prerequisites_require_a_family_slug(db_session):
+    """``_replace_prerequisites`` rejects when the AR has no slug yet —
+    edges can't anchor to an identity that doesn't exist. An empty list
+    is still accepted (noop)."""
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.models.authority_resolution import (
+        AuthorityRelationCreate, PrerequisiteInput, AuthorityRelationUpdate,
+    )
+
+    mgr = AuthorityResolutionManager()
+    _make_ar(mgr, db_session, slug="existing", name="Existing")
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(name="Slugless AR"))
+    db_session.commit()
+    assert rel.slug is None
+
+    with pytest.raises(ValueError, match="slug"):
+        mgr.update_relation(db_session, rel.id, AuthorityRelationUpdate(
+            prerequisites=[PrerequisiteInput(prerequisite_family_slug="existing")],
+        ))
+    # Empty prereqs on a slugless AR is a noop (not an error).
+    mgr.update_relation(db_session, rel.id, AuthorityRelationUpdate(prerequisites=[]))
+    db_session.commit()

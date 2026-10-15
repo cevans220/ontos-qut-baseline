@@ -157,6 +157,21 @@ class AuthorityPrerequisiteRepository(CRUDBase[AuthorityPrerequisiteDb, Dict[str
         )
         return list(db.execute(stmt).scalars().all())
 
+    def delete_for_family(
+        self, db: Session, *, relation_family_slug: str,
+    ) -> int:
+        """Drop every prerequisite edge rooted at this family slug.
+
+        The manager calls this before re-creating edges on save, giving
+        replace-on-write semantics identical to ``_replace_affirmations``
+        / ``_replace_criteria``. Returns the number of rows removed.
+        """
+        return (
+            db.query(AuthorityPrerequisiteDb)
+            .filter(AuthorityPrerequisiteDb.relation_family_slug == relation_family_slug)
+            .delete(synchronize_session=False)
+        )
+
     def list_dependents(
         self, db: Session, *, prerequisite_family_slug: str,
     ) -> List[AuthorityPrerequisiteDb]:

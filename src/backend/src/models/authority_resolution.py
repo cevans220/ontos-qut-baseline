@@ -67,6 +67,20 @@ class CriterionInput(BaseModel):
     enabled: bool = True
 
 
+class PrerequisiteInput(BaseModel):
+    """One ``requires_prior_authority`` edge keyed by the upstream AR's family slug.
+
+    Edges are per-family slug (never version UUIDs) so a published AR survives
+    version bumps of its prerequisites; the resolver walks each slug to the
+    family's active version at eval time. ``required=False`` edges are advisory
+    — they appear in the response chain but do not block.
+    """
+    prerequisite_family_slug: str
+    required: bool = True
+    display_order: int = 0
+    notes: Optional[str] = None
+
+
 class AuthorityRelationCreate(BaseModel):
     name: str
     description: Optional[str] = None
@@ -94,6 +108,9 @@ class AuthorityRelationCreate(BaseModel):
     affirmations: List[AffirmationInput] = Field(default_factory=list)
     # Author-configurable decision criteria (Compliance Checks)
     criteria: List[CriterionInput] = Field(default_factory=list)
+    # Declarative prerequisite chain — this AR requires each listed slug's
+    # family active version to resolve ``approved`` before deciding.
+    prerequisites: Optional[List[PrerequisiteInput]] = None
     # Polymorphic tags
     tags: Optional[List[AssignedTagCreate]] = None
 
@@ -120,6 +137,7 @@ class AuthorityRelationUpdate(BaseModel):
     primary_domain_id: Optional[str] = None
     affirmations: Optional[List[AffirmationInput]] = None
     criteria: Optional[List[CriterionInput]] = None
+    prerequisites: Optional[List[PrerequisiteInput]] = None
     tags: Optional[List[AssignedTagCreate]] = None
 
 
@@ -156,3 +174,7 @@ class ResolveResponse(BaseModel):
     relation_version: Optional[str] = None
     dna_magnitude: Optional[float] = None
     dna_direction: Optional[str] = None
+    # The prerequisite chain walked for this decision. Each entry is
+    # ``{slug, version, verdict, reason, required}`` — present even when the
+    # outer verdict is approved so agents can see which gates were cleared.
+    prerequisite_chain: List[Dict[str, Any]] = Field(default_factory=list)

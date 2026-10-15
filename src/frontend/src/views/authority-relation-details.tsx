@@ -576,6 +576,26 @@ export default function AuthorityRelationDetails() {
             ) : (
               <JsonBlock data={relation.evidence_binding} />
             )}
+            <div className="pt-2 text-muted-foreground">Requires (prerequisite ARs)</div>
+            {(relation.prerequisites || []).length > 0 ? (
+              <div className="space-y-1">
+                {(relation.prerequisites || []).map((p) => (
+                  <div key={p.prerequisite_family_slug} className="text-xs flex items-center gap-2">
+                    <Badge variant={p.required ? 'default' : 'outline'}>
+                      {p.required ? 'required' : 'optional'}
+                    </Badge>
+                    <span className="font-mono">{p.prerequisite_family_slug}</span>
+                    <span className="text-muted-foreground">
+                      {p.name ? `· ${p.name}` : ''} {p.status ? `(${p.status})` : ''}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-muted-foreground text-xs">
+                None — this AR decides without walking any upstream gate.
+              </div>
+            )}
             <div className="pt-2"><span className="text-muted-foreground">Recompute schedule:</span> {cronLabel(relation.schedule_cron)}</div>
             <div className="pt-2 text-muted-foreground">Domains</div>
             <div className="flex flex-wrap gap-1">
@@ -725,6 +745,25 @@ function TestResolveDialog({ open, onOpenChange, relationId }: { open: boolean; 
               <AlertDescription>
                 <Badge variant={verdictColor as any} className="mr-2">{result.verdict}</Badge>
                 {result.reason}
+                {(result.prerequisite_chain || []).length > 0 && (
+                  <div className="pt-2 space-y-1">
+                    <div className="text-xs text-muted-foreground">Prerequisite chain</div>
+                    {(result.prerequisite_chain || []).map((entry, i) => (
+                      <div key={i} className="text-xs flex items-center gap-2">
+                        <Badge
+                          variant={entry.verdict === 'approved' ? 'default' : 'destructive'}
+                          className="text-xs"
+                        >
+                          {entry.verdict}
+                        </Badge>
+                        <span className="font-mono">{entry.slug}</span>
+                        {entry.version ? <span className="text-muted-foreground">v{entry.version}</span> : null}
+                        {!entry.required && <Badge variant="outline" className="text-xs">optional</Badge>}
+                        {entry.reason && <span className="text-muted-foreground">— {entry.reason}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </AlertDescription>
             </Alert>
           )}

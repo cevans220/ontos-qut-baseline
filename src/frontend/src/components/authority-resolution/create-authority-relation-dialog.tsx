@@ -18,6 +18,7 @@ import { Plus, Trash2, Loader2 } from 'lucide-react';
 import {
   ACTION_VOCAB,
   type AuthorityRelation, type AffirmationInput,
+  type PrerequisiteInput, type AuthorityRelationSlug,
 } from '@/types/authority-resolution';
 import type { BusinessRoleRead } from '@/types/business-role';
 
@@ -79,6 +80,8 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
   const [affirmations, setAffirmations] = useState<AffirmationInput[]>(DEFAULT_AFFIRMATIONS);
   const [tags, setTags] = useState<(string | AssignedTag)[]>([]);
   const [scheduleCron, setScheduleCron] = useState<string | null>(null);
+  const [prerequisites, setPrerequisites] = useState<PrerequisiteInput[]>([]);
+  const [slugCatalog, setSlugCatalog] = useState<AuthorityRelationSlug[]>([]);
 
   const reset = () => {
     setName(''); setSlug(''); setDescription(''); setActorRole(''); setActorIdentity('');
@@ -86,6 +89,7 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
     setCurrency(''); setMarket(''); setDnaMax('0.3'); setCriteriaRows([]);
     setEvidenceSources([]); setDomainIds([]); setPrimaryDomainId(null);
     setAffirmations(DEFAULT_AFFIRMATIONS); setTags([]); setScheduleCron(null);
+    setPrerequisites([]);
   };
 
   // Load active Business Roles for the participant role picker (Settings feature).
@@ -94,6 +98,15 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
     (async () => {
       const { data } = await get<BusinessRoleRead[]>('/api/business-roles?role_status=active');
       if (Array.isArray(data)) setBusinessRoles(data.filter((r) => r.status === 'active'));
+    })();
+  }, [open, get]);
+
+  // Load the catalog of AR family slugs for the Requires picker.
+  useEffect(() => {
+    if (!open) return;
+    (async () => {
+      const { data } = await get<AuthorityRelationSlug[]>('/api/authority/relation-slugs');
+      if (Array.isArray(data)) setSlugCatalog(data);
     })();
   }, [open, get]);
 
@@ -152,6 +165,14 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
       );
       setTags((relation.tags || []).map((t) => t.fully_qualified_name).filter(Boolean) as string[]);
       setScheduleCron(relation.schedule_cron ?? null);
+      setPrerequisites(
+        (relation.prerequisites || []).map((p) => ({
+          prerequisite_family_slug: p.prerequisite_family_slug,
+          required: p.required,
+          display_order: p.display_order,
+          notes: p.notes ?? null,
+        })),
+      );
     } else {
       reset();
     }
@@ -233,6 +254,9 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
       affirmations: affirmations.filter((a) => a.principal.trim() && a.role),
       tags: tags.map((t) => ({ tag_fqn: typeof t === 'string' ? t : t.fully_qualified_name })),
       schedule_cron: scheduleCron,
+      prerequisites: prerequisites
+        .filter((p) => p.prerequisite_family_slug.trim())
+        .map((p, idx) => ({ ...p, display_order: idx })),
     };
 
     setSaving(true);
@@ -446,6 +470,69 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
             onClick={() => setAffirmations((prev) => [...prev, { role: '', principal: '', principal_type: 'user', required: true, is_approver: true, is_reviewer: false }])}
           >
             <Plus className="h-4 w-4 mr-1" /> Add participant
+          </Button>
+
+          <div className="text-sm font-semibold text-muted-foreground pt-2">Requires (prerequisite ARs)</div>
+          <p className="text-xs text-muted-foreground -mt-2">
+            Each listed Authority Relation must resolve <strong>approved</strong> before this one
+            decides. Keyed by the family slug (not the version) so this AR keeps working when a
+            prerequisite is version-bumped. Save requires this AR to carry a slug of its own.
+          </p>
+          {prerequisites.map((p, idx) => {
+            // Avoid offering the current AR (edit mode) or any already-picked slug.
+            const takenSlugs = new Set(prerequisites.filter((_, j) => j !== idx).map((q) => q.prerequisite_family_slug));
+            const selfSlug = relation?.family_slug || relation?.slug || slug.trim();
+            if (selfSlug) takenSlugs.add(selfSlug);
+            return (
+              <div key={idx} className="grid grid-cols-[1.5fr_auto_1fr_auto] gap-2 items-center">
+                <NativeSelect
+                  value={p.prerequisite_family_slug}
+                  onChange={(e) =>
+                    setPrerequisites((prev) => prev.map((x, i) => (i === idx ? { ...x, prerequisite_family_slug: e.target.value } : x)))
+                  }
+                >
+                  <option value="">Select a prerequisite AR…</option>
+                  {slugCatalog
+                    .filter((s) => !takenSlugs.has(s.family_slug) || s.family_slug === p.prerequisite_family_slug)
+                    .map((s) => (
+                      <option key={s.family_slug} value={s.family_slug}>
+                        {s.name} ({s.family_slug}) — {s.status}
+                      </option>
+                    ))}
+                </NativeSelect>
+                <label className="flex items-center gap-1 text-xs whitespace-nowrap">
+                  <input
+                    type="checkbox"
+                    checked={p.required}
+                    onChange={(e) =>
+                      setPrerequisites((prev) => prev.map((x, i) => (i === idx ? { ...x, required: e.target.checked } : x)))
+                    }
+                  />
+                  required
+                </label>
+                <Input
+                  value={p.notes || ''}
+                  onChange={(e) =>
+                    setPrerequisites((prev) => prev.map((x, i) => (i === idx ? { ...x, notes: e.target.value } : x)))
+                  }
+                  placeholder="Optional note"
+                />
+                <Button variant="ghost" size="icon" onClick={() => setPrerequisites((prev) => prev.filter((_, i) => i !== idx))}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            );
+          })}
+          <Button
+            variant="outline" size="sm"
+            onClick={() =>
+              setPrerequisites((prev) => [
+                ...prev,
+                { prerequisite_family_slug: '', required: true, display_order: prev.length, notes: null },
+              ])
+            }
+          >
+            <Plus className="h-4 w-4 mr-1" /> Add prerequisite
           </Button>
 
           <div className="text-sm font-semibold text-muted-foreground pt-2">DNA-Coefficient schedule</div>
