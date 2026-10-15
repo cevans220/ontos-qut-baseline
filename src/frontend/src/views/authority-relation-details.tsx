@@ -596,7 +596,14 @@ export default function AuthorityRelationDetails() {
                 None — this AR decides without walking any upstream gate.
               </div>
             )}
-            <div className="pt-2 text-muted-foreground">Resource refs (typed pointers)</div>
+            <div className="pt-2 text-muted-foreground">
+              Resource refs (typed pointers)
+              {(relation.resource_refs || []).some((r) => r.ref_type === 'mcp_tool') && (
+                <Badge variant={relation.resolver_auth === 'app_sp' ? 'destructive' : 'outline'} className="ml-2">
+                  MCP auth: {relation.resolver_auth === 'app_sp' ? 'app service principal' : 'caller (OBO)'}
+                </Badge>
+              )}
+            </div>
             {(relation.resource_refs || []).length > 0 ? (
               <div className="space-y-1">
                 {(relation.resource_refs || []).map((r) => (
@@ -794,7 +801,11 @@ function TestResolveDialog({ open, onOpenChange, relationId }: { open: boolean; 
                         <span className="font-mono">{entry.field_path}</span>
                         {entry.value != null && <span>→ {entry.value}</span>}
                         {entry.iri && <span className="text-muted-foreground">({entry.iri})</span>}
-                        {entry.error && <span className="text-destructive">— {entry.error}</span>}
+                        {entry.error && (
+                          <span className="text-destructive">
+                            — {entry.error_kind ? `${entry.error_kind}: ` : ''}{entry.error}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>

@@ -9,6 +9,7 @@ import DomainMultiSelector from '@/components/ui/domain-multi-selector';
 import TagSelector from '@/components/ui/tag-selector';
 import type { AssignedTag } from '@/components/ui/tag-chip';
 import ScheduleSelect from '@/components/authority-resolution/schedule-select';
+import McpRefEditor from '@/components/authority-resolution/mcp-ref-editor';
 import CriteriaBuilder, {
   rowsFromCriteria, rowsToPayload, type CriterionRow,
 } from '@/components/authority-resolution/criteria-builder';
@@ -19,7 +20,7 @@ import {
   ACTION_VOCAB,
   type AuthorityRelation, type AffirmationInput,
   type PrerequisiteInput, type AuthorityRelationSlug,
-  type ResourceRefInput, type EntityRefCandidate,
+  type ResourceRefInput, type EntityRefCandidate, type ResolverAuth,
 } from '@/types/authority-resolution';
 import type { BusinessRoleRead } from '@/types/business-role';
 
@@ -84,6 +85,7 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
   const [prerequisites, setPrerequisites] = useState<PrerequisiteInput[]>([]);
   const [slugCatalog, setSlugCatalog] = useState<AuthorityRelationSlug[]>([]);
   const [resourceRefs, setResourceRefs] = useState<ResourceRefInput[]>([]);
+  const [resolverAuth, setResolverAuth] = useState<ResolverAuth>('obo');
   // Picker catalog, keyed by (entity_type, search-term). The dialog debounces
   // searches per row so the picker stays cheap even with 100s of concepts.
   const [refCandidates, setRefCandidates] = useState<Record<string, EntityRefCandidate[]>>({});
@@ -94,7 +96,7 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
     setCurrency(''); setMarket(''); setDnaMax('0.3'); setCriteriaRows([]);
     setEvidenceSources([]); setDomainIds([]); setPrimaryDomainId(null);
     setAffirmations(DEFAULT_AFFIRMATIONS); setTags([]); setScheduleCron(null);
-    setPrerequisites([]); setResourceRefs([]);
+    setPrerequisites([]); setResourceRefs([]); setResolverAuth('obo');
   };
 
   // Load active Business Roles for the participant role picker (Settings feature).
@@ -170,6 +172,7 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
       );
       setTags((relation.tags || []).map((t) => t.fully_qualified_name).filter(Boolean) as string[]);
       setScheduleCron(relation.schedule_cron ?? null);
+      setResolverAuth(relation.resolver_auth ?? 'obo');
       setPrerequisites(
         (relation.prerequisites || []).map((p) => ({
           prerequisite_family_slug: p.prerequisite_family_slug,
@@ -272,6 +275,7 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
       affirmations: affirmations.filter((a) => a.principal.trim() && a.role),
       tags: tags.map((t) => ({ tag_fqn: typeof t === 'string' ? t : t.fully_qualified_name })),
       schedule_cron: scheduleCron,
+      resolver_auth: resolverAuth,
       prerequisites: prerequisites
         .filter((p) => p.prerequisite_family_slug.trim())
         .map((p, idx) => ({ ...p, display_order: idx })),
@@ -573,7 +577,9 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
             <code>object_id</code>, <code>domain_context.&lt;key&gt;</code>) with a typed pointer. An
             <strong> Ontos entity</strong> ref re-resolves against the knowledge graph at eval time so
             the value stays current when the underlying concept, product, or domain changes.
-            <strong> MCP tool</strong> refs are stored but not yet live (coming in the next commit).
+            <strong> MCP tool</strong> refs call a Unity Catalog MCP service at decision time; criteria can
+            compare against the resolved value as <code>obj.ref_&lt;field_path&gt;</code> (dots become
+            underscores, e.g. <code>obj.ref_actor_identity</code>).
           </p>
           {resourceRefs.map((r, idx) => {
             const candidateKey = `${r.entity_type || ''}::${idx}`;
@@ -617,7 +623,7 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
                   >
                     <option value="literal">Literal</option>
                     <option value="ontos_entity">Ontos entity</option>
-                    <option value="mcp_tool" disabled>MCP tool (coming soon)</option>
+                    <option value="mcp_tool">MCP tool</option>
                   </NativeSelect>
                   <Button
                     variant="ghost" size="icon"
@@ -635,6 +641,14 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
                       )
                     }
                     placeholder="Literal value (e.g. rsm-east@example.com)"
+                  />
+                )}
+                {r.ref_type === 'mcp_tool' && (
+                  <McpRefEditor
+                    value={r}
+                    onChange={(patch) =>
+                      setResourceRefs((prev) => prev.map((x, i) => (i === idx ? { ...x, ...patch } : x)))
+                    }
                   />
                 )}
                 {r.ref_type === 'ontos_entity' && (
@@ -705,6 +719,24 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
           >
             <Plus className="h-4 w-4 mr-1" /> Add resource ref
           </Button>
+          {resourceRefs.some((r) => r.ref_type === 'mcp_tool') && (
+            <div className="space-y-1">
+              <Label>MCP resolver credentials</Label>
+              <NativeSelect
+                className="max-w-sm"
+                value={resolverAuth}
+                onChange={(e) => setResolverAuth(e.target.value as ResolverAuth)}
+              >
+                <option value="obo">Calling user / agent (OBO) — default</option>
+                <option value="app_sp">Ontos app service principal</option>
+              </NativeSelect>
+              <p className="text-xs text-muted-foreground">
+                {resolverAuth === 'obo'
+                  ? 'MCP tools run with the caller\'s own permissions; a caller without a forwarded token gets no_authority.'
+                  : 'MCP tools run as the Ontos app service principal for every caller — the result no longer depends on who is asking. Only use this when the tool must see data callers cannot.'}
+              </p>
+            </div>
+          )}
 
           <div className="text-sm font-semibold text-muted-foreground pt-2">DNA-Coefficient schedule</div>
           <ScheduleSelect value={scheduleCron} onChange={setScheduleCron} />

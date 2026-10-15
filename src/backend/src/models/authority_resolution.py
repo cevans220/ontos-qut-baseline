@@ -120,6 +120,8 @@ class AuthorityRelationCreate(BaseModel):
     dna_max_threshold: float = 0.3
     dna_scoring_config: Optional[Dict[str, Any]] = None
     schedule_cron: Optional[str] = None
+    # Credentials for this AR's mcp_tool refs: ``obo`` (caller's token) or ``app_sp``.
+    resolver_auth: Optional[str] = None
     # Multi-domain assignment
     domain_ids: List[str] = Field(default_factory=list)
     primary_domain_id: Optional[str] = None
@@ -156,6 +158,7 @@ class AuthorityRelationUpdate(BaseModel):
     dna_max_threshold: Optional[float] = None
     dna_scoring_config: Optional[Dict[str, Any]] = None
     schedule_cron: Optional[str] = None
+    resolver_auth: Optional[str] = None
     domain_ids: Optional[List[str]] = None
     primary_domain_id: Optional[str] = None
     affirmations: Optional[List[AffirmationInput]] = None

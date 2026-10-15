@@ -1,4 +1,5 @@
 """API routes for the Authority Resolution feature (ARF)."""
+import re
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Body, Query, Request
@@ -36,6 +37,20 @@ def _resolve_req_dict(req: ResolveRequest) -> dict:
     }
     base.update(req.params or {})
     return base
+
+
+def _ws_factories(request: Request):
+    """Lazy (obo, app_sp) WorkspaceClient factories for mcp_tool refs.
+
+    The OBO factory is ``None`` when the caller carried no forwarded token, so
+    an ``obo`` AR fails closed instead of silently running as the app SP.
+    """
+    from src.common.workspace_client import get_obo_workspace_client, get_workspace_client
+
+    obo = None
+    if request.headers.get("x-forwarded-access-token"):
+        obo = lambda: get_obo_workspace_client(request)  # noqa: E731
+    return obo, (lambda: get_workspace_client())
 
 
 def _semantic_models_manager(request: Request):
@@ -219,21 +234,23 @@ async def affirm(
 
 
 @router.post("/authority/relations/{relation_id}/resolve")
-async def resolve(
+def resolve(
     relation_id: str,
     db: DBSessionDep,
     request: Request,
     payload: ResolveRequest = Body(default=ResolveRequest()),
     _: bool = Depends(PermissionChecker(FEATURE_ID, FeatureAccessLevel.READ_ONLY)),
 ):
+    obo, app_sp = _ws_factories(request)
     return manager.resolve(
         db, relation_id, _resolve_req_dict(payload),
         semantic_models_manager=_semantic_models_manager(request),
+        obo_ws_factory=obo, app_ws_factory=app_sp,
     )
 
 
 @router.post("/authority/relations/{relation_id}/test")
-async def test_resolve(
+def test_resolve(
     relation_id: str,
     db: DBSessionDep,
     request: Request,
@@ -244,10 +261,12 @@ async def test_resolve(
     recording the decision or touching the usage counters. Used by the detail-view
     Test dialog so authors can preview verdicts before activating.
     """
+    obo, app_sp = _ws_factories(request)
     return manager.resolve(
         db, relation_id, _resolve_req_dict(payload),
         record=False, require_active=False,
         semantic_models_manager=_semantic_models_manager(request),
+        obo_ws_factory=obo, app_ws_factory=app_sp,
     )
 
 
@@ -349,6 +368,51 @@ async def list_resource_refs(
     if not relation:
         raise HTTPException(status_code=404, detail="Authority Relation not found")
     return manager.list_resource_refs(db, relation)
+
+
+_SCHEMA_PARENT_RE = re.compile(r"^[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+$")
+
+
+@router.get("/authority/mcp-services")
+def list_mcp_services(
+    request: Request,
+    schemas: Optional[str] = Query(None, description="CSV of catalog.schema to search besides system.ai"),
+    _: bool = Depends(PermissionChecker(FEATURE_ID, FeatureAccessLevel.READ_WRITE)),
+):
+    """UC MCP services visible to the caller (built-ins under ``system.ai`` plus
+    any listed ``catalog.schema``) for the author's MCP-ref picker."""
+    from src.common import mcp_resolver
+    from src.common.workspace_client import get_obo_workspace_client
+
+    parents = [mcp_resolver.BUILTIN_PARENT]
+    for sch in (schemas or "").split(","):
+        sch = sch.strip()
+        if not sch:
+            continue
+        if not _SCHEMA_PARENT_RE.match(sch):
+            raise HTTPException(status_code=400, detail=f"Invalid schema '{sch}' — expected catalog.schema")
+        parents.append(f"schemas/{sch}")
+    return mcp_resolver.list_mcp_services(get_obo_workspace_client(request), parents)
+
+
+@router.get("/authority/mcp-services/tools")
+def list_mcp_service_tools(
+    request: Request,
+    service_name: str = Query(..., description="Full service name, mcp-services/<catalog>.<schema>.<name>"),
+    _: bool = Depends(PermissionChecker(FEATURE_ID, FeatureAccessLevel.READ_WRITE)),
+):
+    """Tools (name, description, input/output schema) exposed by one MCP service."""
+    from src.common import mcp_resolver
+    from src.common.workspace_client import get_obo_workspace_client
+
+    if not service_name.startswith(mcp_resolver.SERVICE_PREFIX):
+        raise HTTPException(status_code=400, detail="service_name must start with 'mcp-services/'")
+    try:
+        client = mcp_resolver.McpHttpClient(get_obo_workspace_client(request), service_name, timeout=10.0)
+        return client.list_tools()
+    except mcp_resolver.McpResolverError as e:
+        status = 403 if e.kind == "permission" else 504 if e.kind == "timeout" else 502
+        raise HTTPException(status_code=status, detail=str(e))
 
 
 @router.get("/authority/entity-ref-candidates")

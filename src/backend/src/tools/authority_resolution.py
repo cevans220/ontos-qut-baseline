@@ -29,7 +29,9 @@ class ResolveAuthorityTool(BaseTool):
         "decision parameters (who is signing off, the action, the value, whether "
         "a co-sign is present, whether it was escalated). Returns a deterministic "
         "verdict: 'approved', 'denied' (with a reason), or 'no_authority' when no "
-        "active Authority Relation matches — in which case defer to a human."
+        "active Authority Relation matches — in which case defer to a human. "
+        "The response lists the prerequisite ARs walked (prerequisite_chain) and "
+        "where each AR field value came from (resolved_refs)."
     )
     parameters = {
         "ar_id": {"type": "string", "description": "Authority Relation id or slug to resolve against."},
@@ -56,7 +58,13 @@ class ResolveAuthorityTool(BaseTool):
             "cosign_present": kwargs.get("cosign_present"),
             "escalated": kwargs.get("escalated"),
         }
-        result = _manager.resolve(ctx.db, ar_id, req)
+        app_ws = ctx.workspace_client
+        result = _manager.resolve(
+            ctx.db, ar_id, req,
+            semantic_models_manager=ctx.semantic_models_manager,
+            obo_ws_factory=ctx.obo_workspace_client_factory,
+            app_ws_factory=(lambda: app_ws) if app_ws is not None else None,
+        )
         return ToolResult(success=True, data=result)
 
 

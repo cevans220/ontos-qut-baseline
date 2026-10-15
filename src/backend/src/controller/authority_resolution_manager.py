@@ -14,9 +14,11 @@ Design notes:
   the AR's compiled ``decision_logic`` and never (re)computes the DNAco. The
   DNAco is an *activation-time* gate only.
 """
+import re
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -24,6 +26,8 @@ from src.common.logging import get_logger
 from src.common import authority_resolution_dna as authority_dna
 from src.common.authority_resolution_dna import Criterion, DIR_NONE
 from src.common.compliance_dsl import evaluate_rule_on_object
+from src.common import mcp_resolver
+from src.common.mcp_resolver import Deadline, McpHttpClient, McpResolverError
 from src.db_models.authority_resolution import (
     AuthorityRelationDb,
     AuthorityAffirmationDb,
@@ -62,6 +66,27 @@ STATUS_RETIRED = "retired"
 ACTION_VOCAB = {"approve", "escalate", "override", "delegate", "veto"}
 
 _MODEL_COLUMNS = {c.name for c in AuthorityRelationDb.__table__.columns}
+
+RESOLVER_AUTH_OBO = "obo"
+RESOLVER_AUTH_APP_SP = "app_sp"
+_RESOLVER_AUTH_VALUES = (RESOLVER_AUTH_OBO, RESOLVER_AUTH_APP_SP)
+RESOLVE_BUDGET_S = 10.0
+# Criteria see each materialised ref as ``obj.ref_<field_path>``; callers may
+# not supply keys in this namespace.
+REF_KEY_PREFIX = "ref_"
+
+
+def ref_key(field_path: str) -> str:
+    return REF_KEY_PREFIX + re.sub(r"[^A-Za-z0-9_]", "_", field_path)
+
+
+@dataclass
+class _ResolveCtx:
+    semantic_models_manager: Optional[Any] = None
+    obo_ws_factory: Optional[Callable[[], Any]] = None
+    app_ws_factory: Optional[Callable[[], Any]] = None
+    mcp_client_factory: Callable[..., Any] = McpHttpClient
+    deadline: Optional[Deadline] = None
 
 
 class AuthorityResolutionManager:
@@ -148,6 +173,7 @@ class AuthorityResolutionManager:
             "dna_scoring_config": data.get("dna_scoring_config"),
             "schedule_cron": data.get("schedule_cron"),
             "decision_logic": data.get("decision_logic"),
+            "resolver_auth": self._validate_resolver_auth(data.get("resolver_auth")),
             "created_by": current_user,
         }
 
@@ -226,6 +252,15 @@ class AuthorityResolutionManager:
             if v.slug:
                 return v.slug
         return None
+
+    @staticmethod
+    def _validate_resolver_auth(value: Optional[str]) -> str:
+        value = value or RESOLVER_AUTH_OBO
+        if value not in _RESOLVER_AUTH_VALUES:
+            raise ValueError(
+                f"resolver_auth must be one of {_RESOLVER_AUTH_VALUES}, got '{value}'."
+            )
+        return value
 
     def list_family_slugs(self, db: Session) -> List[Dict[str, Any]]:
         """One ``{family_slug, name, status, version}`` row per slug-carrying
@@ -318,6 +353,8 @@ class AuthorityResolutionManager:
         if evidence is not None and hasattr(evidence, "dict"):
             data["evidence_binding"] = evidence.dict()
 
+        if "resolver_auth" in data:
+            data["resolver_auth"] = self._validate_resolver_auth(data["resolver_auth"])
         update_data = {k: v for k, v in data.items() if k in _MODEL_COLUMNS}
 
         # Versioning parity with Data Products / Contracts: edits mutate the
@@ -373,6 +410,7 @@ class AuthorityResolutionManager:
         "domain_context", "justification_chain", "decision_logic",
         "evidence_binding", "evidence_sources",
         "dna_max_threshold", "dna_scoring_config", "schedule_cron",
+        "resolver_auth",
     )
 
     def get_relation_versions(self, db: Session, relation_id: str) -> List[AuthorityRelationDb]:
@@ -479,6 +517,22 @@ class AuthorityResolutionManager:
                 "affirmed": False,
                 "review_status": "pending" if is_reviewer else "na",
                 "sort_order": a.sort_order,
+            })
+
+        # Clone typed resource refs (definition, not cache).
+        for r in authority_resource_ref_repo.list_for_relation(db, relation_id=source.id):
+            authority_resource_ref_repo.create(db, obj_in={
+                "id": str(uuid.uuid4()),
+                "relation_id": new_id,
+                "field_path": r.field_path,
+                "ref_type": r.ref_type,
+                "literal_value": r.literal_value,
+                "entity_type": r.entity_type,
+                "entity_id": r.entity_id,
+                "mcp_service_name": r.mcp_service_name,
+                "mcp_tool_name": r.mcp_tool_name,
+                "mcp_params": r.mcp_params,
+                "mcp_result_pointer": r.mcp_result_pointer or "$",
             })
 
         # Clone polymorphic tags (best-effort).
@@ -742,7 +796,21 @@ class AuthorityResolutionManager:
                         f"Ontos-entity resource ref for '{field_path}' has unsupported "
                         f"entity_type '{entity_type}' — expected one of {self._ONTOS_ENTITY_TYPES}."
                     )
-            # mcp_tool rows are stored verbatim (fields validated by step 4).
+            elif ref_type == "mcp_tool":
+                service = (r.get("mcp_service_name") or "").strip()
+                tool = (r.get("mcp_tool_name") or "").strip()
+                if not service.startswith(mcp_resolver.SERVICE_PREFIX) or not tool:
+                    raise ValueError(
+                        f"MCP resource ref for '{field_path}' needs mcp_service_name "
+                        f"('{mcp_resolver.SERVICE_PREFIX}…') and mcp_tool_name."
+                    )
+                if r.get("mcp_params") is not None and not isinstance(r["mcp_params"], dict):
+                    raise ValueError(f"MCP resource ref for '{field_path}': mcp_params must be an object.")
+                pointer = (r.get("mcp_result_pointer") or "$").strip()
+                if not pointer.startswith("$"):
+                    raise ValueError(
+                        f"MCP resource ref for '{field_path}': mcp_result_pointer must start with '$'."
+                    )
             normalised[field_path] = r
         # Validate everything before touching existing rows.
         authority_resource_ref_repo.delete_for_relation(db, relation_id=relation_id)
@@ -821,8 +889,8 @@ class AuthorityResolutionManager:
         self,
         db: Session,
         relation: AuthorityRelationDb,
-        *,
-        semantic_models_manager: Optional[Any] = None,
+        req: Dict[str, Any],
+        rctx: "_ResolveCtx",
     ) -> List[Dict[str, Any]]:
         """Walk the AR's resource refs and resolve each to a concrete value.
 
@@ -832,10 +900,9 @@ class AuthorityResolutionManager:
         (list view, provenance audit) can show the last-known resolved
         value without re-walking the graph.
 
-        ``mcp_tool`` refs are a deliberate no-op at this stage: the entry
-        is still emitted (so authors see the field is wired up) with
-        ``value=cached_label`` and ``source='mcp_cached'`` — the full MCP
-        resolver lands in commit 4.
+        ``mcp_tool`` refs are invoked live (see :meth:`_resolve_mcp_ref`); a
+        failure leaves ``value=None`` and sets ``error`` + ``error_kind`` so the
+        caller can turn it into a ``no_authority`` verdict.
         """
         rows = authority_resource_ref_repo.list_for_relation(db, relation_id=relation.id)
         resolved: List[Dict[str, Any]] = []
@@ -854,17 +921,18 @@ class AuthorityResolutionManager:
                     db,
                     entity_type=row.entity_type or "",
                     entity_id=row.entity_id or "",
-                    semantic_models_manager=semantic_models_manager,
+                    semantic_models_manager=rctx.semantic_models_manager,
                 )
                 value = lookup.get("value")
                 iri = lookup.get("iri")
                 if lookup.get("error"):
                     entry["error"] = lookup["error"]
             elif row.ref_type == "mcp_tool":
-                # No-op until commit 4; surface the last cache so UIs don't
-                # look empty when authoring hasn't been exercised yet.
-                value = row.cached_label
-                source = "mcp_cached"
+                try:
+                    value = self._resolve_mcp_ref(relation, row, req, rctx)
+                except McpResolverError as e:
+                    entry["error"] = str(e)
+                    entry["error_kind"] = e.kind
             entry["value"] = value
             if iri is not None:
                 entry["iri"] = iri
@@ -875,6 +943,51 @@ class AuthorityResolutionManager:
                 row.cached_label = value
                 row.cached_at = self._now()
         return resolved
+
+    def _resolve_mcp_ref(
+        self,
+        relation: AuthorityRelationDb,
+        row: Any,
+        req: Dict[str, Any],
+        rctx: "_ResolveCtx",
+    ) -> Optional[str]:
+        """Invoke the ref's MCP tool and return the pointer-selected value as a string.
+
+        Credentials follow the AR's ``resolver_auth``: ``obo`` uses the caller's
+        token and never silently falls back to the app SP (a missing caller
+        token is a permission failure); ``app_sp`` uses the Ontos app's SP.
+        """
+        auth = getattr(relation, "resolver_auth", None) or RESOLVER_AUTH_OBO
+        factory = rctx.app_ws_factory if auth == RESOLVER_AUTH_APP_SP else rctx.obo_ws_factory
+        if factory is None:
+            raise McpResolverError(
+                "no caller (OBO) credentials available for an obo-authenticated MCP ref"
+                if auth == RESOLVER_AUTH_OBO else "app service principal client unavailable",
+                kind="permission",
+            )
+        ws = factory()
+        if ws is None:
+            raise McpResolverError(f"no workspace client for resolver_auth={auth}", kind="permission")
+        deadline = rctx.deadline or Deadline(RESOLVE_BUDGET_S)
+        template_ctx = {
+            **req,
+            "request": req,
+            "ar": {
+                "slug": relation.slug,
+                "actor_role": relation.actor_role,
+                "actor_identity": relation.actor_identity,
+                "action": relation.action,
+                "object_type": relation.object_type,
+                "object_id": relation.object_id,
+                "domain_context": relation.domain_context or {},
+            },
+        }
+        arguments = mcp_resolver.render_params(row.mcp_params or {}, template_ctx)
+        client = rctx.mcp_client_factory(ws, row.mcp_service_name, deadline=deadline)
+        raw = client.call_tool(row.mcp_tool_name, arguments)
+        return mcp_resolver.stringify(
+            mcp_resolver.apply_result_pointer(raw, row.mcp_result_pointer),
+        )
 
     def list_resource_refs(
         self, db: Session, relation: AuthorityRelationDb,
@@ -1424,13 +1537,23 @@ class AuthorityResolutionManager:
 
     # --------------------------------------------------------- runtime gate
 
-    def _evaluate_decision(self, relation: AuthorityRelationDb, req: Dict[str, Any]) -> Tuple[str, str]:
+    def _evaluate_decision(
+        self,
+        relation: AuthorityRelationDb,
+        req: Dict[str, Any],
+        resolved_refs: Optional[List[Dict[str, Any]]] = None,
+    ) -> Tuple[str, str]:
         """Deterministic evaluation of request params against the AR's author-configured
         decision criteria. Each enabled criterion's DSL rule is run against the request;
         the first that fails denies (with its failure message). No criteria = an
         unconstrained gate (approve).
         """
-        norm = authority_dna.normalize_row(req)
+        obj = {k: v for k, v in req.items() if not str(k).startswith(REF_KEY_PREFIX)}
+        for r in resolved_refs or []:
+            obj[ref_key(r["field_path"])] = r.get("value")
+            if r.get("iri"):
+                obj[ref_key(r["field_path"]) + "_iri"] = r["iri"]
+        norm = authority_dna.normalize_row(obj)
         for c in self._load_criteria(relation):
             try:
                 passed, msg = evaluate_rule_on_object(c.rule, norm)
@@ -1449,6 +1572,9 @@ class AuthorityResolutionManager:
         record: bool = True,
         require_active: bool = True,
         semantic_models_manager: Optional[Any] = None,
+        obo_ws_factory: Optional[Callable[[], Any]] = None,
+        app_ws_factory: Optional[Callable[[], Any]] = None,
+        mcp_client_factory: Optional[Callable[..., Any]] = None,
     ) -> Dict[str, Any]:
         """Deterministically resolve a decision against an AR (by id or slug).
 
@@ -1470,11 +1596,23 @@ class AuthorityResolutionManager:
         ``ontos_entity`` refs targeting Business Concepts can look up a
         label from the semantic graph; otherwise the IRI is passed through
         verbatim (safe for unit tests and cold-start resolves).
+
+        ``obo_ws_factory`` / ``app_ws_factory`` lazily build the caller-scoped
+        and app-SP WorkspaceClients for ``mcp_tool`` refs (picked per AR by
+        ``resolver_auth``). All MCP calls in one resolve, prerequisites
+        included, share a ``RESOLVE_BUDGET_S`` deadline; an MCP failure or
+        timeout makes that AR's verdict ``no_authority``.
         """
+        rctx = _ResolveCtx(
+            semantic_models_manager=semantic_models_manager,
+            obo_ws_factory=obo_ws_factory,
+            app_ws_factory=app_ws_factory,
+            mcp_client_factory=mcp_client_factory or McpHttpClient,
+            deadline=Deadline(RESOLVE_BUDGET_S),
+        )
         return self._resolve_internal(
             db, ar_ref, req, visited=set(),
-            record=record, require_active=require_active,
-            semantic_models_manager=semantic_models_manager,
+            record=record, require_active=require_active, rctx=rctx,
         )
 
     def _resolve_internal(
@@ -1486,7 +1624,7 @@ class AuthorityResolutionManager:
         visited: set,
         record: bool,
         require_active: bool,
-        semantic_models_manager: Optional[Any] = None,
+        rctx: _ResolveCtx,
     ) -> Dict[str, Any]:
         # By slug this resolves to the family's active version (the stable @id
         # agents call); by UUID it pins the exact version.
@@ -1520,8 +1658,7 @@ class AuthorityResolutionManager:
             try:
                 outer_verdict, blocker_reason, chain = self._walk_prerequisites(
                     db, head_slug, req, visited,
-                    require_active=require_active,
-                    semantic_models_manager=semantic_models_manager,
+                    require_active=require_active, rctx=rctx,
                 )
             finally:
                 visited.discard(head_slug)
@@ -1529,19 +1666,24 @@ class AuthorityResolutionManager:
                 # A blocked outer still materialises its own refs — the
                 # provenance audit trail wants to show *what the AR was
                 # pointing at* even when the chain short-circuited.
-                resolved_refs = self._materialise_refs(
-                    db, relation,
-                    semantic_models_manager=semantic_models_manager,
-                )
+                resolved_refs = self._materialise_refs(db, relation, req, rctx)
                 return self._finalize_resolve(
                     db, relation, req, outer_verdict, blocker_reason,
                     chain, resolved_refs, record,
                 )
 
-        resolved_refs = self._materialise_refs(
-            db, relation, semantic_models_manager=semantic_models_manager,
+        resolved_refs = self._materialise_refs(db, relation, req, rctx)
+        mcp_failure = next(
+            (r for r in resolved_refs if r["ref_type"] == "mcp_tool" and r.get("error")), None,
         )
-        verdict, reason = self._evaluate_decision(relation, req)
+        if mcp_failure is not None:
+            verdict = VERDICT_NO_AUTHORITY
+            reason = (
+                "resolver_timeout" if mcp_failure.get("error_kind") == "timeout"
+                else f"MCP ref {mcp_failure['field_path']} failed: {mcp_failure['error']}"
+            )
+        else:
+            verdict, reason = self._evaluate_decision(relation, req, resolved_refs)
         return self._finalize_resolve(
             db, relation, req, verdict, reason, chain, resolved_refs, record,
         )
@@ -1554,7 +1696,7 @@ class AuthorityResolutionManager:
         visited: set,
         *,
         require_active: bool,
-        semantic_models_manager: Optional[Any] = None,
+        rctx: _ResolveCtx,
     ) -> Tuple[Optional[str], Optional[str], List[Dict[str, Any]]]:
         """Depth-first walk over the AR's declared prerequisite edges.
 
@@ -1579,7 +1721,7 @@ class AuthorityResolutionManager:
             inner = self._resolve_internal(
                 db, pre_slug, req,
                 visited=visited, record=False, require_active=require_active,
-                semantic_models_manager=semantic_models_manager,
+                rctx=rctx,
             )
             chain.append({
                 "slug": pre_slug,
@@ -1722,6 +1864,7 @@ class AuthorityResolutionManager:
             "dna_measured_at": relation.dna_measured_at,
             "dna_max_threshold": relation.dna_max_threshold,
             "schedule_cron": relation.schedule_cron,
+            "resolver_auth": getattr(relation, "resolver_auth", None) or RESOLVER_AUTH_OBO,
             "fully_affirmed": fully_affirmed,
             "usage_count": relation.usage_count,
             "approved_count": relation.approved_count,

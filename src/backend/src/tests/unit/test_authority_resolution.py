@@ -1182,3 +1182,223 @@ def test_list_family_slugs_surfaces_slug_from_sibling_version(db_session):
 
     slugs = mgr.list_family_slugs(db_session)
     assert [s["family_slug"] for s in slugs] == ["fam-slug"]
+
+
+# ---------------------------------------------------------------------------
+# ARF v2: MCP-tool resource refs
+# ---------------------------------------------------------------------------
+
+
+class _FakeMcpClient:
+    """Stands in for McpHttpClient; records which workspace client was used."""
+    instances = []
+
+    def __init__(self, ws, service_name, deadline=None, response=None, raises=None):
+        self.ws, self.service_name, self.calls = ws, service_name, []
+        self.response, self.raises = response, raises
+        _FakeMcpClient.instances.append(self)
+
+    def call_tool(self, name, arguments):
+        self.calls.append((name, arguments))
+        if self.raises:
+            raise self.raises
+        return self.response
+
+
+def _mcp_factory(response=None, raises=None):
+    _FakeMcpClient.instances = []
+    return lambda ws, svc, deadline=None: _FakeMcpClient(ws, svc, deadline, response, raises)
+
+
+def _make_mcp_ar(mgr, db, *, slug, resolver_auth="obo", criteria=None, pointer="$.approver"):
+    from src.models.authority_resolution import (
+        AuthorityRelationCreate, CriterionInput, ResourceRefInput,
+    )
+    return mgr.create_relation(db, AuthorityRelationCreate(
+        name=f"MCP AR {slug}", slug=slug, resolver_auth=resolver_auth,
+        actor_role="Trade Marketing Director",
+        criteria=[CriterionInput(**c) for c in (criteria or [])],
+        resource_refs=[ResourceRefInput(
+            field_path="actor_identity", ref_type="mcp_tool",
+            mcp_service_name="mcp-services/hr.org.ontos_identity",
+            mcp_tool_name="get_role_holder",
+            mcp_params={"role": "{{ ar.actor_role }}", "market": "{{ market }}"},
+            mcp_result_pointer=pointer,
+        )],
+    ))
+
+
+def test_mcp_ref_value_feeds_criteria_via_ref_namespace(db_session):
+    """The MCP-resolved approver is exposed to criteria as obj.ref_actor_identity;
+    params are rendered from the AR + request; OBO is the default client."""
+    from src.controller.authority_resolution_manager import (
+        AuthorityResolutionManager, VERDICT_APPROVED, VERDICT_DENIED,
+    )
+
+    mgr = AuthorityResolutionManager()
+    _make_mcp_ar(mgr, db_session, slug="mcp-gate", criteria=[dict(
+        name="signer is role holder", rule="obj.actor_identity = obj.ref_actor_identity",
+        failure_message="signer does not hold the role",
+    )])
+    db_session.commit()
+    obo_ws, app_ws = object(), object()
+    factory = _mcp_factory(response={"approver": "dir@example.com"})
+
+    ok = mgr.resolve(db_session, "mcp-gate", {"actor_identity": "dir@example.com", "market": "DE"},
+                     record=False, require_active=False,
+                     obo_ws_factory=lambda: obo_ws, app_ws_factory=lambda: app_ws,
+                     mcp_client_factory=factory)
+    assert ok["verdict"] == VERDICT_APPROVED, ok["reason"]
+    assert ok["resolved_refs"][0]["value"] == "dir@example.com"
+    assert ok["resolved_refs"][0]["source"] == "mcp_tool"
+    client = _FakeMcpClient.instances[0]
+    assert client.ws is obo_ws
+    assert client.service_name == "mcp-services/hr.org.ontos_identity"
+    assert client.calls == [("get_role_holder", {"role": "Trade Marketing Director", "market": "DE"})]
+
+    bad = mgr.resolve(db_session, "mcp-gate", {"actor_identity": "intruder@example.com"},
+                      record=False, require_active=False,
+                      obo_ws_factory=lambda: obo_ws, mcp_client_factory=_mcp_factory(
+                          response={"approver": "dir@example.com"}))
+    # market is undefined in the request → StrictUndefined template error → no_authority.
+    assert bad["verdict"] != VERDICT_APPROVED
+
+
+def test_request_cannot_spoof_ref_namespace(db_session):
+    from src.controller.authority_resolution_manager import (
+        AuthorityResolutionManager, VERDICT_DENIED,
+    )
+
+    mgr = AuthorityResolutionManager()
+    _make_ar(mgr, db_session, slug="spoof-gate", name="Spoof", criteria=[dict(
+        name="needs ref", rule="obj.actor_identity = obj.ref_actor_identity",
+        failure_message="no resolved approver",
+    )])
+    db_session.commit()
+    out = mgr.resolve(db_session, "spoof-gate",
+                      {"actor_identity": "me", "ref_actor_identity": "me"},
+                      record=False, require_active=False)
+    assert out["verdict"] == VERDICT_DENIED
+
+
+def test_app_sp_auth_bypasses_caller_identity(db_session):
+    from src.controller.authority_resolution_manager import (
+        AuthorityResolutionManager, VERDICT_APPROVED,
+    )
+
+    mgr = AuthorityResolutionManager()
+    _make_mcp_ar(mgr, db_session, slug="sp-gate", resolver_auth="app_sp")
+    db_session.commit()
+    obo_ws, app_ws = object(), object()
+    out = mgr.resolve(db_session, "sp-gate", {"market": "DE"}, record=False, require_active=False,
+                      obo_ws_factory=lambda: obo_ws, app_ws_factory=lambda: app_ws,
+                      mcp_client_factory=_mcp_factory(response={"approver": "x"}))
+    assert out["verdict"] == VERDICT_APPROVED
+    assert _FakeMcpClient.instances[0].ws is app_ws
+
+
+def test_obo_ref_without_caller_token_fails_closed(db_session):
+    from src.controller.authority_resolution_manager import (
+        AuthorityResolutionManager, VERDICT_NO_AUTHORITY,
+    )
+
+    mgr = AuthorityResolutionManager()
+    _make_mcp_ar(mgr, db_session, slug="obo-gate")
+    db_session.commit()
+    factory = _mcp_factory(response={"approver": "x"})
+    out = mgr.resolve(db_session, "obo-gate", {"market": "DE"}, record=False, require_active=False,
+                      obo_ws_factory=None, app_ws_factory=lambda: object(),
+                      mcp_client_factory=factory)
+    assert out["verdict"] == VERDICT_NO_AUTHORITY
+    assert "OBO" in out["reason"]
+    assert _FakeMcpClient.instances == []
+
+
+def test_mcp_ref_timeout_falls_back_to_no_authority(db_session):
+    from src.common.mcp_resolver import McpResolverError
+    from src.controller.authority_resolution_manager import (
+        AuthorityResolutionManager, VERDICT_NO_AUTHORITY,
+    )
+
+    mgr = AuthorityResolutionManager()
+    _make_mcp_ar(mgr, db_session, slug="slow-gate")
+    db_session.commit()
+    out = mgr.resolve(db_session, "slow-gate", {"market": "DE"}, record=False, require_active=False,
+                      obo_ws_factory=lambda: object(),
+                      mcp_client_factory=_mcp_factory(
+                          raises=McpResolverError("resolver_timeout", kind="timeout")))
+    assert out["verdict"] == VERDICT_NO_AUTHORITY
+    assert out["reason"] == "resolver_timeout"
+    assert out["resolved_refs"][0]["error_kind"] == "timeout"
+
+
+def test_mcp_failure_in_prerequisite_blocks_outer(db_session):
+    from src.common.mcp_resolver import McpResolverError
+    from src.controller.authority_resolution_manager import (
+        AuthorityResolutionManager, VERDICT_DENIED, VERDICT_NO_AUTHORITY,
+    )
+
+    mgr = AuthorityResolutionManager()
+    _make_mcp_ar(mgr, db_session, slug="upstream-mcp")
+    _make_ar(mgr, db_session, slug="outer-mcp", name="Outer",
+             prerequisites=[dict(prerequisite_family_slug="upstream-mcp")])
+    db_session.commit()
+    out = mgr.resolve(db_session, "outer-mcp", {"market": "DE"}, record=False, require_active=False,
+                      obo_ws_factory=lambda: object(),
+                      mcp_client_factory=_mcp_factory(
+                          raises=McpResolverError("MCP permission denied (403)", kind="permission")))
+    assert out["verdict"] == VERDICT_DENIED
+    assert out["prerequisite_chain"][0]["verdict"] == VERDICT_NO_AUTHORITY
+
+
+def test_literal_fallback_when_no_ref_row_present(db_session):
+    """No ref rows → no resolved_refs; criteria evaluate against the request alone."""
+    from src.controller.authority_resolution_manager import (
+        AuthorityResolutionManager, VERDICT_APPROVED,
+    )
+
+    mgr = AuthorityResolutionManager()
+    _make_ar(mgr, db_session, slug="plain-gate", name="Plain", criteria=[dict(
+        name="cap", rule="obj.value <= 10", failure_message="over")])
+    db_session.commit()
+    out = mgr.resolve(db_session, "plain-gate", {"value": 5}, record=False, require_active=False)
+    assert out["verdict"] == VERDICT_APPROVED
+    assert out["resolved_refs"] == []
+
+
+def test_mcp_ref_and_resolver_auth_write_validation(db_session):
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.models.authority_resolution import (
+        AuthorityRelationCreate, AuthorityRelationUpdate, ResourceRefInput,
+    )
+
+    mgr = AuthorityResolutionManager()
+    with pytest.raises(ValueError, match="resolver_auth"):
+        mgr.create_relation(db_session, AuthorityRelationCreate(name="x", resolver_auth="root"))
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(name="MCP validate", slug="mcp-val"))
+    db_session.commit()
+    assert mgr.to_read_dict(db_session, rel)["resolver_auth"] == "obo"
+    with pytest.raises(ValueError, match="mcp_service_name"):
+        mgr.update_relation(db_session, rel.id, AuthorityRelationUpdate(resource_refs=[ResourceRefInput(
+            field_path="actor_identity", ref_type="mcp_tool",
+            mcp_service_name="system.ai.github", mcp_tool_name="t")]))
+    with pytest.raises(ValueError, match="mcp_result_pointer"):
+        mgr.update_relation(db_session, rel.id, AuthorityRelationUpdate(resource_refs=[ResourceRefInput(
+            field_path="actor_identity", ref_type="mcp_tool",
+            mcp_service_name="mcp-services/system.ai.github", mcp_tool_name="t",
+            mcp_result_pointer="approver")]))
+
+
+def test_new_version_clones_resource_refs_and_resolver_auth(db_session):
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.repositories.authority_resolution_repository import authority_resource_ref_repo
+
+    mgr = AuthorityResolutionManager()
+    v1 = _make_mcp_ar(mgr, db_session, slug="ver-mcp", resolver_auth="app_sp")
+    db_session.commit()
+    v2 = mgr.create_new_version(db_session, v1.id, "2.0.0")
+    db_session.commit()
+    refs = authority_resource_ref_repo.list_for_relation(db_session, relation_id=v2.id)
+    assert [(r.field_path, r.ref_type, r.mcp_tool_name) for r in refs] == [
+        ("actor_identity", "mcp_tool", "get_role_holder")]
+    assert v2.resolver_auth == "app_sp"

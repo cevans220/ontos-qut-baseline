@@ -141,6 +141,7 @@ export interface AuthorityRelation {
   dna_measured_at?: string | null;
   dna_max_threshold?: number | null;
   schedule_cron?: string | null;
+  resolver_auth?: ResolverAuth;
   fully_affirmed?: boolean;
   usage_count?: number;
   approved_count?: number;
@@ -218,9 +219,26 @@ export interface AuthorityPrerequisite {
   resolved_id?: string | null;   // id of the currently-active version row
 }
 
+export type ResolverAuth = 'obo' | 'app_sp';
+
+// UC MCP service from GET /api/authority/mcp-services.
+export interface McpServiceInfo {
+  name: string;          // mcp-services/<catalog>.<schema>.<name>
+  short_name: string;
+  schema: string;
+  comment?: string | null;
+}
+
+// Tool from GET /api/authority/mcp-services/tools.
+export interface McpToolInfo {
+  name: string;
+  description?: string | null;
+  input_schema?: { properties?: Record<string, any>; required?: string[] } | null;
+  output_schema?: Record<string, any> | null;
+}
+
 // A typed pointer backing one of the AR's canonical fields. Mirrors
-// AuthorityResourceRefDb on the backend; MCP fields are stored but not
-// yet live (ARF v2 commit 4).
+// AuthorityResourceRefDb on the backend.
 export interface AuthorityResourceRef {
   id?: string;
   field_path: string;
@@ -264,8 +282,9 @@ export interface ResolvedRefEntry {
   ref_type: 'literal' | 'ontos_entity' | 'mcp_tool';
   value: string | null;
   iri?: string | null;
-  source: string;       // literal | ontos_entity | mcp_tool | mcp_cached
+  source: string;       // literal | ontos_entity | mcp_tool
   error?: string | null;
+  error_kind?: string | null;  // timeout | permission | protocol | tool_error | config
 }
 
 export interface PrerequisiteInput {
