@@ -269,7 +269,7 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
       domain_context: Object.keys(domain_context).length ? domain_context : undefined,
       criteria: rowsToPayload(criteriaRows),
       evidence_sources,
-      dna_max_threshold: parseFloat(dnaMax) || 0.3,
+      dna_max_threshold: Number.isFinite(parseFloat(dnaMax)) ? parseFloat(dnaMax) : 0.3,
       domain_ids: domainIds,
       primary_domain_id: primaryDomainId,
       affirmations: affirmations.filter((a) => a.principal.trim() && a.role),

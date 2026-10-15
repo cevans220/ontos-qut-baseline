@@ -19,6 +19,7 @@ changes.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -163,16 +164,26 @@ def _direction_sign(direction: Optional[str]) -> int:
 # Core evaluation                                                             #
 # --------------------------------------------------------------------------- #
 
+_ASSERT_CLAUSE_RE = re.compile(r"^\s*(?:MATCH\s*\([^)]*\)\s*)?ASSERT\b", re.S)
+
+
+def has_assert_clause(rule: Optional[str]) -> bool:
+    """True for ``ASSERT …`` or ``MATCH (…) ASSERT …`` (keyword case as the
+    evaluator expects); an 'ASSERT' inside a literal does not count."""
+    return bool(rule and _ASSERT_CLAUSE_RE.match(rule))
+
+
 def rule_parse_error(rule: Optional[str]) -> Optional[str]:
     """Why ``rule`` can't be parsed, or None. ``evaluate_rule_on_object`` folds
     parse errors into an ordinary failure, so callers check this first to tell
     a malformed rule (configuration error) from a failing one (policy result)."""
     from src.common.compliance_dsl import Lexer, Parser
 
-    if not rule or "ASSERT" not in rule:
+    m = _ASSERT_CLAUSE_RE.match(rule or "")
+    if not m:
         return "rule must contain an ASSERT clause"
     try:
-        Parser(Lexer(rule.split("ASSERT", 1)[1].strip()).tokenize()).parse_expression()
+        Parser(Lexer(rule[m.end():].strip()).tokenize()).parse_expression()
     except Exception as e:
         return str(e) or type(e).__name__
     return None

@@ -1812,6 +1812,7 @@ def test_update_recompute_scores_the_new_criteria(db_session, monkeypatch):
     "x = 1 -- comment",
     "read_files('/Volumes/x') IS NOT NULL",
     "x IN (SELECT y FROM other)",
+    "a = 'x\\'' UNION SELECT * FROM other_cat.s.t --'",
 ])
 def test_row_filter_rejects_injection(bad):
     from src.controller.authority_resolution_manager import validate_row_filter
@@ -1892,3 +1893,66 @@ def test_malformed_rule_rejected_on_write_and_conflict_at_resolve(db_session):
     crit = dna.Criterion(code="broken", rule="ASSERT obj.value <=", message=None, direction="neutral",
                          weight=1.0, dimension="people")
     assert dna.evaluate_row([crit], {"value": 1}).diverged is False
+
+
+
+def test_resaving_unchanged_participants_keeps_signoffs_and_status(db_session):
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager, STATUS_ACTIVE
+    from src.models.authority_resolution import (
+        AuthorityRelationCreate, AuthorityRelationUpdate, AffirmationInput,
+    )
+
+    mgr = AuthorityResolutionManager()
+    parts = [AffirmationInput(role="Approver", principal="a@x.com")]
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(name="Keep signoffs", affirmations=parts))
+    db_session.commit()
+    aff = mgr.to_read_dict(db_session, rel)["affirmations"][0]
+    mgr.affirm(db_session, aff["id"], affirmed_by="a@x.com", user=_user("a@x.com"))
+    rel.status = STATUS_ACTIVE
+    db_session.commit()
+
+    updated = mgr.update_relation(db_session, rel.id, AuthorityRelationUpdate(
+        description="typo fix", affirmations=parts))
+    assert updated.status == STATUS_ACTIVE
+    assert mgr.is_fully_affirmed(db_session, rel.id)
+
+    updated = mgr.update_relation(db_session, rel.id, AuthorityRelationUpdate(
+        affirmations=[AffirmationInput(role="Approver", principal="b@x.com")]))
+    assert updated.status == "needs_review"
+
+
+def test_dnaco_run_fails_on_malformed_linked_rule(db_session):
+    import uuid as _uuid
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.db_models.compliance import CompliancePolicyDb
+    from src.models.authority_resolution import AuthorityRelationCreate, CriterionInput
+    from src.repositories.authority_resolution_repository import authority_dna_run_repo
+
+    pid = str(_uuid.uuid4())
+    db_session.add(CompliancePolicyDb(id=pid, slug=f"p-{pid[:8]}", name="broken linked", rule="ASSERT obj.value <=",
+                                      category="Governance", severity="high", is_active=True))
+    db_session.flush()
+    mgr = AuthorityResolutionManager()
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(
+        name="Linked broken", criteria=[CriterionInput(policy_id=pid)]))
+    db_session.commit()
+    with pytest.raises(ValueError, match="malformed"):
+        mgr.compute_dnaco(db_session, rel.id, rows=[{"value": 1}])
+    assert authority_dna_run_repo.list_for_relation(db_session, relation_id=rel.id)[0].status == "failed"
+    assert rel.dna_magnitude is None
+
+
+def test_assert_detection_ignores_literal_text():
+    from src.common import authority_resolution_dna as dna
+    assert not dna.has_assert_clause("obj.state = 'ASSERTED'")
+    assert dna.has_assert_clause("MATCH (p:PromotionProposal) ASSERT p.market IN ['DE']")
+    assert dna.rule_parse_error("ASSERT obj.state = 'ASSERTED'") is None
+
+
+def test_criterion_rule_with_assert_in_literal_is_prefixed_and_accepted(db_session):
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    mgr = AuthorityResolutionManager()
+    rel = _make_ar(mgr, db_session, slug="asserted-ar", name="Asserted",
+                   criteria=[dict(name="state", rule="obj.state = 'ASSERTED'")])
+    crit = mgr.to_read_dict(db_session, rel)["criteria"][0]
+    assert crit["rule"] == "ASSERT obj.state = 'ASSERTED'"

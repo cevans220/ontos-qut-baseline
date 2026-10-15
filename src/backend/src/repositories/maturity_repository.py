@@ -111,19 +111,15 @@ class MaturityLevelRepository:
         return self.get_all_ordered(db)
 
     def count_snapshots_for_level(self, db: Session, level_order: int, entity_type: Optional[str] = "all") -> int:
-        """Snapshots at ``level_order`` on this level's own ladder: a dedicated
-        ladder counts its entity type only; the shared 'all' ladder excludes
-        entity types that have a dedicated ladder."""
+        """Snapshots at ``level_order`` that may reference this level. Snapshots
+        store no level id, so this errs toward blocking deletion: a dedicated
+        ladder counts its own entity type; the shared 'all' ladder counts every
+        snapshot (an entity type may have used it before getting its own)."""
         q = db.query(func.count(MaturitySnapshotDb.id)).filter(
             MaturitySnapshotDb.achieved_level_order == level_order
         )
         if entity_type and entity_type != "all":
             q = q.filter(MaturitySnapshotDb.entity_type == entity_type)
-        else:
-            dedicated = [t for (t,) in db.query(MaturityLevelDb.entity_type)
-                         .filter(MaturityLevelDb.entity_type != "all").distinct()]
-            if dedicated:
-                q = q.filter(MaturitySnapshotDb.entity_type.notin_(dedicated))
         return q.scalar() or 0
 
     def is_empty(self, db: Session, entity_type: Optional[str] = None) -> bool:

@@ -113,6 +113,10 @@ def validate_row_filter(row_filter: Optional[str]) -> Optional[str]:
     if row_filter is None or not str(row_filter).strip():
         return None
     text = str(row_filter)
+    if "\\" in text:
+        # Databricks SQL honours backslash escapes in literals; ANSI-only lexing
+        # here could disagree on where a string ends.
+        raise ValueError("Evidence row_filter may not contain backslashes.")
     pos, prev_ident = 0, False
     while pos < len(text):
         if text[pos:].strip() == "":
@@ -687,11 +691,37 @@ class AuthorityResolutionManager:
 
     # ------------------------------------------------------- affirmations
 
+    @staticmethod
+    def _participant_key(principal: Any, principal_type: Any, role_id: Any, role: Any,
+                         is_approver: Any, is_reviewer: Any) -> Tuple:
+        return (str(principal or "").strip().casefold(), principal_type or "user",
+                role_id or role, bool(is_approver), bool(is_reviewer))
+
     def _replace_affirmations(self, db: Session, relation_id: str, affirmations: List[Any]) -> None:
+        """Replace participants, carrying affirmation/review state over for any
+        participant that is unchanged (same principal, type, role and duties), so
+        re-saving an AR doesn't wipe its sign-offs."""
+        prior = {}
+        for old in authority_affirmation_repo.list_for_relation(db, relation_id=relation_id):
+            prior[self._participant_key(
+                old.principal, old.principal_type, getattr(old, "business_role_id", None), old.role,
+                getattr(old, "is_approver", True), getattr(old, "is_reviewer", False),
+            )] = old
+        carried = {
+            k: {f: getattr(o, f, None) for f in (
+                "affirmed", "affirmed_by", "affirmed_at", "notes",
+                "review_status", "review_answers", "review_request_id",
+            )}
+            for k, o in prior.items()
+        }
         authority_affirmation_repo.delete_for_relation(db, relation_id=relation_id)
         for idx, aff in enumerate(affirmations):
             a = aff.dict() if hasattr(aff, "dict") else dict(aff)
             is_reviewer = a.get("is_reviewer", False)
+            keep = carried.get(self._participant_key(
+                a["principal"], a.get("principal_type", "user"), a.get("business_role_id"), a["role"],
+                a.get("is_approver", True), is_reviewer,
+            )) or {}
             authority_affirmation_repo.create(db, obj_in={
                 "id": str(uuid.uuid4()),
                 "relation_id": relation_id,
@@ -703,8 +733,13 @@ class AuthorityResolutionManager:
                 "is_approver": a.get("is_approver", True),
                 "is_reviewer": is_reviewer,
                 "required": a.get("required", True),
-                "affirmed": False,
-                "review_status": "pending" if is_reviewer else "na",
+                "affirmed": bool(keep.get("affirmed")),
+                "affirmed_by": keep.get("affirmed_by"),
+                "affirmed_at": keep.get("affirmed_at"),
+                "notes": keep.get("notes"),
+                "review_status": keep.get("review_status") or ("pending" if is_reviewer else "na"),
+                "review_answers": keep.get("review_answers"),
+                "review_request_id": keep.get("review_request_id"),
                 "sort_order": a.get("sort_order", idx),
             })
 
@@ -743,7 +778,7 @@ class AuthorityResolutionManager:
         rule = (c.get("rule") or "").strip()
         if not rule:
             return None
-        if not rule.upper().startswith("ASSERT") and "ASSERT" not in rule:
+        if not authority_dna.has_assert_clause(rule):
             rule = "ASSERT " + rule
         parse_error = authority_dna.rule_parse_error(rule)
         if parse_error:
@@ -1503,7 +1538,11 @@ class AuthorityResolutionManager:
                 rows = self._collect_evidence(relation)
             if not rows:
                 raise ValueError("No evidence rows were read; the DNA-Coefficient cannot be measured.")
-            result = authority_dna.compute_dnaco(self._load_criteria(relation), rows)
+            criteria = self._load_criteria(relation)
+            broken = [c.code for c in criteria if authority_dna.rule_parse_error(c.rule)]
+            if broken:
+                raise ValueError(f"Criteria with malformed rules: {', '.join(broken)}; fix them before measuring.")
+            result = authority_dna.compute_dnaco(criteria, rows)
 
             # Combine the evidence-based dimensions with the definition-based
             # 'structural' dimension; overall = probabilistic union (noisy-OR),
