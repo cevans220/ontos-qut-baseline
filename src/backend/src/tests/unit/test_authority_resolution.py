@@ -551,3 +551,136 @@ async def test_compute_dna_coefficient_tool_resolves_slug_and_handles_not_found(
     empty = await tool.execute(ctx, ar_id="")
     assert empty.success is False
     assert "required" in (empty.error or "").lower()
+
+
+# ---------------------------------------------------------------------------
+# ARF v2 graph: resource refs + prerequisites (schema + model smoke)
+# ---------------------------------------------------------------------------
+
+
+def test_resource_ref_round_trips_and_enforces_unique_field(db_session):
+    """A ref row persists the typed pointer for an AR field, and the DB
+    rejects a second row for the same ``(relation_id, field_path)``."""
+    import uuid
+    from sqlalchemy.exc import IntegrityError
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.db_models.authority_resolution import AuthorityResourceRefDb
+    from src.models.authority_resolution import AuthorityRelationCreate
+
+    mgr = AuthorityResolutionManager()
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(name="Ref-test AR"))
+    db_session.commit()
+
+    db_session.add(AuthorityResourceRefDb(
+        id=str(uuid.uuid4()), relation_id=rel.id,
+        field_path="actor_identity", ref_type="mcp_tool",
+        mcp_service_name="mcp-services/system.ai.github",
+        mcp_tool_name="get_user_by_role",
+        mcp_params={"role": "{{ actor_role }}"},
+    ))
+    db_session.commit()
+
+    stored = db_session.query(AuthorityResourceRefDb).filter_by(
+        relation_id=rel.id, field_path="actor_identity",
+    ).one()
+    assert stored.mcp_result_pointer == "$"           # server default landed
+    assert stored.mcp_params == {"role": "{{ actor_role }}"}
+
+    db_session.add(AuthorityResourceRefDb(
+        id=str(uuid.uuid4()), relation_id=rel.id,
+        field_path="actor_identity", ref_type="literal", literal_value="x",
+    ))
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+    db_session.rollback()
+
+
+def test_resource_ref_cascades_on_relation_delete(db_session):
+    """Deleting the parent AR removes its resource_refs via the FK CASCADE."""
+    import uuid
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.db_models.authority_resolution import AuthorityResourceRefDb
+    from src.models.authority_resolution import AuthorityRelationCreate
+
+    mgr = AuthorityResolutionManager()
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(name="Cascade-ref AR"))
+    db_session.commit()
+    rel_id = rel.id
+
+    db_session.add(AuthorityResourceRefDb(
+        id=str(uuid.uuid4()), relation_id=rel_id,
+        field_path="object_id", ref_type="ontos_entity",
+        entity_type="data_product", entity_id="dp-123",
+    ))
+    db_session.commit()
+    assert db_session.query(AuthorityResourceRefDb).filter_by(relation_id=rel_id).count() == 1
+
+    db_session.delete(rel)
+    db_session.commit()
+    assert db_session.query(AuthorityResourceRefDb).filter_by(relation_id=rel_id).count() == 0
+
+
+def test_prerequisite_edge_rejects_self_loop(db_session):
+    """A self-referential prerequisite is a cycle by definition; the DB
+    check-constraint rejects it at write time so the resolve-time cycle
+    detector never has to fire for the trivial case."""
+    import uuid
+    from sqlalchemy.exc import IntegrityError
+    from src.db_models.authority_resolution import AuthorityPrerequisiteDb
+
+    db_session.add(AuthorityPrerequisiteDb(
+        id=str(uuid.uuid4()),
+        relation_family_slug="trade-promotion",
+        prerequisite_family_slug="trade-promotion",
+    ))
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+    db_session.rollback()
+
+
+def test_prerequisite_edge_round_trips(db_session):
+    """Two ARs in distinct families can be wired as an A→B prerequisite,
+    retrieved by downstream family slug (``list_for_family``), and by
+    upstream family slug (``list_dependents`` — used by the write-time
+    cycle check)."""
+    import uuid
+    from src.db_models.authority_resolution import AuthorityPrerequisiteDb
+    from src.repositories.authority_resolution_repository import authority_prerequisite_repo
+
+    db_session.add(AuthorityPrerequisiteDb(
+        id=str(uuid.uuid4()),
+        relation_family_slug="trade-promotion",
+        prerequisite_family_slug="market-compliance",
+        display_order=0,
+    ))
+    db_session.add(AuthorityPrerequisiteDb(
+        id=str(uuid.uuid4()),
+        relation_family_slug="trade-promotion",
+        prerequisite_family_slug="budget-delegation",
+        display_order=1,
+    ))
+    db_session.commit()
+
+    deps = authority_prerequisite_repo.list_for_family(
+        db_session, relation_family_slug="trade-promotion",
+    )
+    assert [e.prerequisite_family_slug for e in deps] == [
+        "market-compliance", "budget-delegation",
+    ]
+
+    rev = authority_prerequisite_repo.list_dependents(
+        db_session, prerequisite_family_slug="market-compliance",
+    )
+    assert [e.relation_family_slug for e in rev] == ["trade-promotion"]
+
+
+def test_resolver_auth_defaults_to_obo(db_session):
+    """New ARs default to OBO; the author pins ``app_sp`` when stability
+    matters more than per-caller context."""
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.models.authority_resolution import AuthorityRelationCreate
+
+    mgr = AuthorityResolutionManager()
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(name="Auth-flag AR"))
+    db_session.commit()
+    assert rel.resolver_auth == "obo"

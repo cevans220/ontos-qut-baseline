@@ -25,6 +25,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Column, String, DateTime, Text, Boolean, ForeignKey, Integer, Float, JSON,
+    CheckConstraint, UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
@@ -91,6 +92,13 @@ class AuthorityRelationDb(Base):
     # Optional scheduled recompute (background job reads this).
     schedule_cron = Column(String, nullable=True)
 
+    # ARF v2: how MCP calls made while resolving this AR are authenticated.
+    # 'obo'    — on-behalf-of the calling agent's token (default; correct for
+    #            actor-identity-style resolution where context matters).
+    # 'app_sp' — the Ontos app's own service principal (author pins this when
+    #            stability matters more than per-caller context).
+    resolver_auth = Column(String, nullable=False, default='obo', server_default='obo')
+
     # --- Maturity (shared, compliance-gated Maturity Level feature) ----------
     maturity_level_order = Column(Integer, nullable=True)   # cache of achieved level_order
     maturity_evaluated_at = Column(DateTime(timezone=True), nullable=True)
@@ -120,6 +128,10 @@ class AuthorityRelationDb(Base):
     dna_runs = relationship(
         "AuthorityDnaRunDb", back_populates="relation",
         cascade="all, delete-orphan", lazy="select",
+    )
+    resource_refs = relationship(
+        "AuthorityResourceRefDb", back_populates="relation",
+        cascade="all, delete-orphan", lazy="selectin",
     )
 
 
@@ -248,6 +260,115 @@ class AuthorityDecisionDb(Base):
     divergence_magnitude = Column(Float, nullable=True)  # per-row divergence (evidence rows)
     direction = Column(String, nullable=True)
 
+    # ARF v2 provenance: records the prerequisite chain the resolver walked
+    # and the resource-ref values it materialised to reach this verdict.
+    # Shape (nullable to stay compatible with existing rows):
+    #   {
+    #     "chain":          [{"ar_slug": "...", "version": "x.y.z", "verdict": "..."}],
+    #     "resolved_refs":  [{"field_path": "...", "ref_type": "...",
+    #                         "value": "...", "source": "..." }]
+    #   }
+    provenance = Column(JSON, nullable=True)
+
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False, index=True)
 
     relation = relationship("AuthorityRelationDb", back_populates="decisions")
+
+
+class AuthorityResourceRefDb(Base):
+    """A typed pointer that backs one of an AR's canonical fields.
+
+    The AR row's own ``actor_identity`` / ``object_id`` / ``domain_context``
+    columns continue to hold the resolved *string* so existing list views,
+    search, and REST responses keep working unchanged; this row records
+    where that string came from and lets the resolver re-materialise it
+    on demand.
+
+    ``ref_type`` selects which branch is populated:
+
+    * ``literal``       — ``literal_value`` is the answer; nothing to resolve.
+    * ``ontos_entity``  — points at another Ontos entity (Business Concept /
+                          Term / Data Domain / Data Product / asset / …).
+                          Resolution reuses the existing semantic-link +
+                          entity-domain-association plumbing to fetch the
+                          canonical label and IRI.
+    * ``mcp_tool``      — invoked at eval time via the Databricks MCP SDK.
+                          ``mcp_service_name`` is the SDK's full service
+                          name (``mcp-services/system.ai.github`` etc.);
+                          ``mcp_params`` is a Jinja template over the
+                          resolve-time request; ``mcp_result_pointer`` is
+                          a JSONPath into the tool response (default
+                          ``$`` — take the whole value).
+    """
+    __tablename__ = 'authority_resource_refs'
+
+    id = Column(String, primary_key=True)
+    relation_id = Column(
+        String, ForeignKey('authority_relations.id', ondelete='CASCADE'),
+        nullable=False, index=True,
+    )
+    # JSON-pointer-ish path on the AR, e.g. ``actor_identity``,
+    # ``object_id``, ``domain_context.brand``.
+    field_path = Column(String, nullable=False)
+    ref_type = Column(String, nullable=False)  # literal|ontos_entity|mcp_tool
+
+    literal_value = Column(Text, nullable=True)
+
+    entity_type = Column(String, nullable=True)
+    entity_id = Column(String, nullable=True)
+
+    mcp_service_name = Column(String, nullable=True)
+    mcp_tool_name = Column(String, nullable=True)
+    mcp_params = Column(JSON, nullable=True)
+    mcp_result_pointer = Column(String, nullable=False, default='$', server_default='$')
+
+    cached_label = Column(Text, nullable=True)
+    cached_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('relation_id', 'field_path', name='uq_authority_resource_refs_field'),
+    )
+
+    relation = relationship("AuthorityRelationDb", back_populates="resource_refs")
+
+
+class AuthorityPrerequisiteDb(Base):
+    """A ``requires_prior_authority`` edge between two Authority Relations.
+
+    Both endpoints are per-family slugs (never version UUIDs) — the resolver
+    walks these edges at eval time and resolves each slug to its family's
+    active version via :func:`AuthorityResolutionManager.resolve_relation_ref`.
+    Keying by family means a published AR survives version bumps of its
+    prerequisites; the tradeoff is that *replacing* an upstream AR with a
+    new active version can transitively change what the downstream AR
+    does. Cycle detection is enforced at write time; a defensive check
+    also runs during resolve.
+
+    A required prerequisite that comes back ``denied`` / ``no_authority``
+    short-circuits the outer AR to ``denied`` with the chain recorded on
+    ``AuthorityDecisionDb.provenance``. Optional prerequisites surface as
+    advisory warnings on the response but do not block.
+    """
+    __tablename__ = 'authority_prerequisites'
+
+    id = Column(String, primary_key=True)
+    relation_family_slug = Column(String, nullable=False, index=True)
+    prerequisite_family_slug = Column(String, nullable=False, index=True)
+    required = Column(Boolean, nullable=False, default=True, server_default='true')
+    display_order = Column(Integer, nullable=False, default=0, server_default='0')
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            'relation_family_slug', 'prerequisite_family_slug',
+            name='uq_authority_prerequisites_edge',
+        ),
+        CheckConstraint(
+            'relation_family_slug <> prerequisite_family_slug',
+            name='ck_authority_prerequisites_no_self_loop',
+        ),
+    )

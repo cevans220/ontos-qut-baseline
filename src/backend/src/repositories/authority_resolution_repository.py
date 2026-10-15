@@ -11,6 +11,8 @@ from src.db_models.authority_resolution import (
     AuthorityCriterionDb,
     AuthorityDecisionDb,
     AuthorityDnaRunDb,
+    AuthorityResourceRefDb,
+    AuthorityPrerequisiteDb,
 )
 
 
@@ -115,8 +117,64 @@ class AuthorityDecisionRepository(CRUDBase[AuthorityDecisionDb, Dict[str, Any], 
         return list(db.execute(stmt).scalars().all())
 
 
+class AuthorityResourceRefRepository(CRUDBase[AuthorityResourceRefDb, Dict[str, Any], Dict[str, Any]]):
+    def __init__(self):
+        super().__init__(AuthorityResourceRefDb)
+
+    def list_for_relation(self, db: Session, *, relation_id: str) -> List[AuthorityResourceRefDb]:
+        stmt = (
+            select(AuthorityResourceRefDb)
+            .where(AuthorityResourceRefDb.relation_id == relation_id)
+            .order_by(AuthorityResourceRefDb.field_path)
+        )
+        return list(db.execute(stmt).scalars().all())
+
+    def get_field(
+        self, db: Session, *, relation_id: str, field_path: str,
+    ) -> Optional[AuthorityResourceRefDb]:
+        stmt = select(AuthorityResourceRefDb).where(
+            AuthorityResourceRefDb.relation_id == relation_id,
+            AuthorityResourceRefDb.field_path == field_path,
+        )
+        return db.execute(stmt).scalars().first()
+
+
+class AuthorityPrerequisiteRepository(CRUDBase[AuthorityPrerequisiteDb, Dict[str, Any], Dict[str, Any]]):
+    def __init__(self):
+        super().__init__(AuthorityPrerequisiteDb)
+
+    def list_for_family(
+        self, db: Session, *, relation_family_slug: str,
+    ) -> List[AuthorityPrerequisiteDb]:
+        """Edges where ``relation_family_slug`` is the *downstream* AR —
+        i.e. the ARs this one requires to be satisfied first. Ordered by the
+        author-defined ``display_order`` so the resolver walks them in a
+        stable sequence."""
+        stmt = (
+            select(AuthorityPrerequisiteDb)
+            .where(AuthorityPrerequisiteDb.relation_family_slug == relation_family_slug)
+            .order_by(AuthorityPrerequisiteDb.display_order, AuthorityPrerequisiteDb.prerequisite_family_slug)
+        )
+        return list(db.execute(stmt).scalars().all())
+
+    def list_dependents(
+        self, db: Session, *, prerequisite_family_slug: str,
+    ) -> List[AuthorityPrerequisiteDb]:
+        """Reverse edges — ARs that have the given slug as a prerequisite.
+        Used by the write-time cycle check (``A requires B; adding B
+        requires A`` closes a loop)."""
+        stmt = (
+            select(AuthorityPrerequisiteDb)
+            .where(AuthorityPrerequisiteDb.prerequisite_family_slug == prerequisite_family_slug)
+            .order_by(AuthorityPrerequisiteDb.relation_family_slug)
+        )
+        return list(db.execute(stmt).scalars().all())
+
+
 authority_relation_repo = AuthorityRelationRepository()
 authority_affirmation_repo = AuthorityAffirmationRepository()
 authority_criterion_repo = AuthorityCriterionRepository()
 authority_dna_run_repo = AuthorityDnaRunRepository()
 authority_decision_repo = AuthorityDecisionRepository()
+authority_resource_ref_repo = AuthorityResourceRefRepository()
+authority_prerequisite_repo = AuthorityPrerequisiteRepository()
