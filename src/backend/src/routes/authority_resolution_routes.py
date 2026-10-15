@@ -317,22 +317,7 @@ async def list_relation_slugs(
     unique, so each slug belongs to exactly one family). Shape stays tight:
     the picker only needs ``family_slug`` + a label.
     """
-    # Collapse to one representative per family (same semantics the list view uses)
-    # and keep only the ones that actually carry a family slug.
-    rows = manager.list_relations(db)
-    out: List[dict] = []
-    for r in rows:
-        family_slug = manager._family_slug_of(db, r)
-        if not family_slug:
-            continue
-        out.append({
-            "family_slug": family_slug,
-            "name": r.name,
-            "status": r.status,
-            "version": r.version,
-        })
-    out.sort(key=lambda x: x["name"].lower())
-    return out
+    return manager.list_family_slugs(db)
 
 
 @router.get("/authority/relations/{relation_id}/prerequisites")
@@ -410,42 +395,21 @@ async def entity_ref_candidates(
                 "label": label or iri,
                 "iri": iri,
             })
-    elif entity_type == "data_product":
-        from src.repositories.data_products_repository import data_product_repo
-        try:
-            rows = data_product_repo.get_multi(db, limit=1000)
-        except Exception as e:
-            logger.warning(f"Data-product list failed: {e}")
-            return []
-        for dp in rows or []:
-            label = getattr(dp, "name", None) or getattr(dp, "id", None) or ""
-            if needle and needle not in label.lower():
-                continue
+    elif entity_type in ("data_product", "data_domain"):
+        if entity_type == "data_product":
+            from src.db_models.data_products import DataProductDb as model
+        else:
+            from src.db_models.data_domains import DataDomain as model
+        query = db.query(model.id, model.name)
+        if needle:
+            escaped = needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            query = query.filter(model.name.ilike(f"%{escaped}%", escape="\\"))
+        for row_id, row_name in query.order_by(model.name).limit(limit).all():
             out.append({
-                "entity_type": "data_product",
-                "entity_id": getattr(dp, "id", None),
-                "label": label,
+                "entity_type": entity_type,
+                "entity_id": str(row_id),
+                "label": row_name or str(row_id),
             })
-            if len(out) >= limit:
-                break
-    elif entity_type == "data_domain":
-        from src.repositories.data_domain_repository import data_domain_repo
-        try:
-            rows = data_domain_repo.get_multi_with_details(db)
-        except Exception as e:
-            logger.warning(f"Data-domain list failed: {e}")
-            return []
-        for dd in rows or []:
-            label = getattr(dd, "name", None) or getattr(dd, "id", None) or ""
-            if needle and needle not in label.lower():
-                continue
-            out.append({
-                "entity_type": "data_domain",
-                "entity_id": str(getattr(dd, "id", None)) if getattr(dd, "id", None) is not None else None,
-                "label": label,
-            })
-            if len(out) >= limit:
-                break
     else:
         raise HTTPException(
             status_code=400,

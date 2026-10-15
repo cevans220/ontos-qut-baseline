@@ -477,7 +477,7 @@ def test_authority_maturity_feature_integration(db_session):
 
 
 @pytest.mark.asyncio
-async def test_compute_dna_coefficient_tool_by_uuid(db_session):
+async def test_compute_dna_coefficient_tool_by_uuid(db_session, monkeypatch):
     """The MCP tool is a thin wrapper over `manager.compute_dnaco`; verify it
     accepts a UUID, returns the persisted run shape, and leaves the AR row's
     cached magnitude updated."""
@@ -498,14 +498,12 @@ async def test_compute_dna_coefficient_tool_by_uuid(db_session):
 
     tool = ComputeDnaCoefficientTool()
     ctx = ToolContext(db=db_session, settings=MagicMock())
-    # Patch _collect_evidence so the tool doesn't try to read a real Delta table.
-    mgr._collect_evidence = lambda _rel: [
+    # Patch the tool's module-level manager so it doesn't read a real Delta table.
+    import src.tools.authority_resolution as artools
+    monkeypatch.setattr(artools._manager, "_collect_evidence", lambda _rel: [
         {"actor_identity": "a", "value": 0.22},   # breaches
         {"actor_identity": "a", "value": 0.10},   # clean
-    ]
-    # The tool references the module-level manager; patch it there too.
-    import src.tools.authority_resolution as artools
-    artools._manager._collect_evidence = mgr._collect_evidence
+    ])
 
     result = await tool.execute(ctx, ar_id=rel.id)
     assert result.success is True, result.error
@@ -519,7 +517,7 @@ async def test_compute_dna_coefficient_tool_by_uuid(db_session):
 
 
 @pytest.mark.asyncio
-async def test_compute_dna_coefficient_tool_resolves_slug_and_handles_not_found(db_session):
+async def test_compute_dna_coefficient_tool_resolves_slug_and_handles_not_found(db_session, monkeypatch):
     """Slug input is resolved to the family's active version (so this works
     stably across version clones), and an unknown ar_id returns a tool error
     rather than crashing."""
@@ -535,7 +533,7 @@ async def test_compute_dna_coefficient_tool_resolves_slug_and_handles_not_found(
         name="DNAco-tool AR by slug", slug="dnaco-tool-slug",
     ))
     db_session.commit()
-    artools._manager._collect_evidence = lambda _rel: []
+    monkeypatch.setattr(artools._manager, "_collect_evidence", lambda _rel: [])
 
     tool = ComputeDnaCoefficientTool()
     ctx = ToolContext(db=db_session, settings=MagicMock())
@@ -1117,3 +1115,70 @@ def test_resource_refs_are_replaced_on_update(db_session):
     assert len(rows) == 1
     assert rows[0].field_path == "actor_identity"
     assert rows[0].literal_value == "new@example.com"
+
+
+def test_prereq_slug_containing_cycle_is_denied_not_conflict(db_session):
+    """Outer verdict comes from the inner verdict, not a substring of the reason."""
+    from src.controller.authority_resolution_manager import (
+        AuthorityResolutionManager, VERDICT_DENIED,
+    )
+
+    mgr = AuthorityResolutionManager()
+    _make_ar(mgr, db_session, slug="cycle-check-approvals", name="Cycle check",
+             criteria=[dict(name="never", rule="obj.actor_identity = 'nobody'",
+                             failure_message="not allowed")])
+    _make_ar(mgr, db_session, slug="downstream", name="Downstream",
+             prerequisites=[dict(prerequisite_family_slug="cycle-check-approvals")])
+    db_session.commit()
+
+    out = mgr.resolve(db_session, "downstream", {"actor_identity": "x"},
+                       record=False, require_active=False)
+    assert out["verdict"] == VERDICT_DENIED
+
+
+def test_write_rejects_dangling_prerequisite_slug(db_session):
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+
+    mgr = AuthorityResolutionManager()
+    with pytest.raises(ValueError, match="does not match"):
+        _make_ar(mgr, db_session, slug="orphan-dep", name="Orphan",
+                 prerequisites=[dict(prerequisite_family_slug="nonexistent-ar")])
+
+
+def test_invalid_resource_ref_update_keeps_existing_rows(db_session):
+    """Validation runs before the delete, so a rejected update leaves prior refs
+    intact even without a transaction rollback; unsupported entity types are
+    rejected at write time."""
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.models.authority_resolution import (
+        AuthorityRelationCreate, AuthorityRelationUpdate, ResourceRefInput,
+    )
+    from src.repositories.authority_resolution_repository import authority_resource_ref_repo
+
+    mgr = AuthorityResolutionManager()
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(
+        name="Keep refs", slug="keep-refs",
+        resource_refs=[ResourceRefInput(field_path="object_id", ref_type="literal",
+                                        literal_value="dp-1")],
+    ))
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="unsupported entity_type"):
+        mgr.update_relation(db_session, rel.id, AuthorityRelationUpdate(
+            resource_refs=[ResourceRefInput(field_path="object_id", ref_type="ontos_entity",
+                                            entity_type="kafka_topic", entity_id="x")],
+        ))
+    rows = authority_resource_ref_repo.list_for_relation(db_session, relation_id=rel.id)
+    assert [r.literal_value for r in rows] == ["dp-1"]
+
+
+def test_list_family_slugs_surfaces_slug_from_sibling_version(db_session):
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+
+    mgr = AuthorityResolutionManager()
+    v1 = _make_ar(mgr, db_session, slug="fam-slug", name="Family")
+    mgr.create_new_version(db_session, v1.id, "2.0.0")
+    db_session.commit()
+
+    slugs = mgr.list_family_slugs(db_session)
+    assert [s["family_slug"] for s in slugs] == ["fam-slug"]

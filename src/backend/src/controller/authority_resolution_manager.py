@@ -227,6 +227,26 @@ class AuthorityResolutionManager:
                 return v.slug
         return None
 
+    def list_family_slugs(self, db: Session) -> List[Dict[str, Any]]:
+        """One ``{family_slug, name, status, version}`` row per slug-carrying
+        family, sorted by name. Feeds the Requires picker."""
+        slug_by_family: Dict[str, str] = {}
+        for r in authority_relation_repo.list_all(db):
+            fid = getattr(r, "version_family_id", None) or r.id
+            if r.slug and fid not in slug_by_family:
+                slug_by_family[fid] = r.slug
+        out: List[Dict[str, Any]] = []
+        for r in self.list_relations(db):
+            fid = getattr(r, "version_family_id", None) or r.id
+            family_slug = slug_by_family.get(fid)
+            if family_slug:
+                out.append({
+                    "family_slug": family_slug, "name": r.name,
+                    "status": r.status, "version": r.version,
+                })
+        out.sort(key=lambda x: x["name"].lower())
+        return out
+
     def resolve_relation_ref(
         self, db: Session, ref: str, *, prefer_active: bool = True
     ) -> Optional[AuthorityRelationDb]:
@@ -616,6 +636,10 @@ class AuthorityResolutionManager:
                 raise ValueError(
                     f"An Authority Relation cannot require itself ({slug})."
                 )
+            if authority_relation_repo.get_by_slug(db, slug) is None:
+                raise ValueError(
+                    f"Prerequisite '{slug}' does not match any Authority Relation slug."
+                )
             if self._cycle_would_close(db, head_slug, slug):
                 raise ValueError(
                     f"Adding '{slug}' as a prerequisite of '{head_slug}' would close a cycle."
@@ -685,7 +709,6 @@ class AuthorityResolutionManager:
         rows record *where* a value came from, not *what* it currently is.
         Call sites: ``create_relation`` and ``update_relation``.
         """
-        authority_resource_ref_repo.delete_for_relation(db, relation_id=relation_id)
         normalised: Dict[str, Dict[str, Any]] = {}
         for item in refs:
             r = item.dict() if hasattr(item, "dict") else dict(item)
@@ -714,8 +737,15 @@ class AuthorityResolutionManager:
                         f"Ontos-entity resource ref for '{field_path}' needs both "
                         "entity_type and entity_id."
                     )
+                if entity_type not in self._ONTOS_ENTITY_TYPES:
+                    raise ValueError(
+                        f"Ontos-entity resource ref for '{field_path}' has unsupported "
+                        f"entity_type '{entity_type}' — expected one of {self._ONTOS_ENTITY_TYPES}."
+                    )
             # mcp_tool rows are stored verbatim (fields validated by step 4).
             normalised[field_path] = r
+        # Validate everything before touching existing rows.
+        authority_resource_ref_repo.delete_for_relation(db, relation_id=relation_id)
         for field_path, r in normalised.items():
             authority_resource_ref_repo.create(db, obj_in={
                 "id": str(uuid.uuid4()),
@@ -840,16 +870,10 @@ class AuthorityResolutionManager:
                 entry["iri"] = iri
             entry["source"] = source
             resolved.append(entry)
-            # Best-effort cache update — never block resolve on a cache write.
-            try:
-                if value is not None and value != row.cached_label:
-                    row.cached_label = value
-                    row.cached_at = self._now()
-                    db.add(row)
-            except Exception as e:  # pragma: no cover - cache write is best-effort
-                logger.warning(
-                    f"Could not update cached_label for ref {row.id}: {e}"
-                )
+            # Rows are session-attached; the decision write flushes this too.
+            if value is not None:
+                row.cached_label = value
+                row.cached_at = self._now()
         return resolved
 
     def list_resource_refs(
@@ -1494,18 +1518,14 @@ class AuthorityResolutionManager:
                 )
             visited.add(head_slug)
             try:
-                blocked, blocker_reason, chain = self._walk_prerequisites(
+                outer_verdict, blocker_reason, chain = self._walk_prerequisites(
                     db, head_slug, req, visited,
                     require_active=require_active,
                     semantic_models_manager=semantic_models_manager,
                 )
             finally:
                 visited.discard(head_slug)
-            if blocked:
-                outer_verdict = (
-                    VERDICT_CONFLICT if "cycle" in (blocker_reason or "")
-                    else VERDICT_DENIED
-                )
+            if outer_verdict is not None:
                 # A blocked outer still materialises its own refs — the
                 # provenance audit trail wants to show *what the AR was
                 # pointing at* even when the chain short-circuited.
@@ -1535,7 +1555,7 @@ class AuthorityResolutionManager:
         *,
         require_active: bool,
         semantic_models_manager: Optional[Any] = None,
-    ) -> Tuple[bool, Optional[str], List[Dict[str, Any]]]:
+    ) -> Tuple[Optional[str], Optional[str], List[Dict[str, Any]]]:
         """Depth-first walk over the AR's declared prerequisite edges.
 
         Each edge is recursed through :meth:`_resolve_internal` with
@@ -1545,8 +1565,10 @@ class AuthorityResolutionManager:
         detail-view **Test** dry-run previews the chain against draft rows.
         The ``visited`` set carries family slugs currently on the stack so a
         cycle that the write-time check somehow missed is still caught here.
-        Returns ``(blocked, blocker_reason, chain)`` where ``chain`` is the
-        full walk order (always populated for the caller to persist).
+        Returns ``(blocked_verdict, blocker_reason, chain)``: ``blocked_verdict``
+        is ``None`` when every required edge approved, ``conflict`` when the
+        blocking edge hit a cycle, else ``denied``. ``chain`` is the full walk
+        order (always populated for the caller to persist).
         """
         chain: List[Dict[str, Any]] = []
         edges = authority_prerequisite_repo.list_for_family(
@@ -1575,8 +1597,12 @@ class AuthorityResolutionManager:
                     f"blocked by prerequisite ar:{pre_slug} — "
                     f"{inner.get('reason') or inner['verdict']}"
                 )
-                return True, reason, chain
-        return False, None, chain
+                blocked = (
+                    VERDICT_CONFLICT if inner["verdict"] == VERDICT_CONFLICT
+                    else VERDICT_DENIED
+                )
+                return blocked, reason, chain
+        return None, None, chain
 
     def _finalize_resolve(
         self,

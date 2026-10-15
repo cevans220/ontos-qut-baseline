@@ -607,6 +607,8 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
                                 entity_id: null,
                                 mcp_service_name: null,
                                 mcp_tool_name: null,
+                                mcp_params: null,
+                                mcp_result_pointer: null,
                               }
                             : x,
                         ),
