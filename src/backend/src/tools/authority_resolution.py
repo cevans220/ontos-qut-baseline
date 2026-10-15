@@ -6,6 +6,12 @@ deterministic ``approved`` / ``denied`` / ``no_authority`` verdict with a
 machine-readable reason — evaluated against the AR's compiled decision logic. It
 never (re)computes the DNA-Coefficient; the DNAco gates *activation*, not the
 per-decision verdict.
+
+``ComputeDnaCoefficientTool`` is the explicit, write-scoped escape hatch an app
+can call when it has reason to believe the cached DNA-Coefficient is stale (new
+evidence landed, the authored criteria changed, or a drift signal fired) — the
+same code path the ``POST /api/authority/relations/{id}/compute-dnaco`` endpoint
+and the scheduled ``authority_dna_recompute`` job run through.
 """
 from typing import Any
 
@@ -75,3 +81,48 @@ class GetAuthorityRelationTool(BaseTool):
         if not relation:
             return ToolResult(success=False, error=f"Authority Relation not found: {ar_id}")
         return ToolResult(success=True, data=_manager.to_read_dict(ctx.db, relation))
+
+
+class ComputeDnaCoefficientTool(BaseTool):
+    name = "compute_dna_coefficient"
+    description = (
+        "Recompute the DNA-Coefficient for an Authority Relation (ARF) by re-"
+        "evaluating its authored criteria against the bound evidence sources. "
+        "The DNA-Coefficient is a divergence measure (0.0 = documented authority "
+        "matches lived practice, higher = worse) that gates the AR's activation. "
+        "Use when new evidence has landed or the criteria have changed and the "
+        "cached value is suspected stale. The AR row's dna_magnitude / "
+        "dna_direction / dna_dimensions / dna_measured_at are updated in place "
+        "and a new AuthorityDnaRun record is persisted."
+    )
+    parameters = {
+        "ar_id": {"type": "string", "description": "Authority Relation id or slug to recompute. By slug the family's active version is used; by UUID that exact version is recomputed."},
+    }
+    required_params = ["ar_id"]
+    required_scope = "authority:write"
+    category = "authority"
+
+    async def execute(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
+        ar_id = kwargs.get("ar_id")
+        if not ar_id:
+            return ToolResult(success=False, error="ar_id is required")
+        relation = _manager.resolve_relation_ref(ctx.db, ar_id)
+        if not relation:
+            return ToolResult(success=False, error=f"Authority Relation not found: {ar_id}")
+        try:
+            run = _manager.compute_dnaco(ctx.db, relation.id)
+        except Exception as e:
+            return ToolResult(success=False, error=f"DNA-Coefficient computation failed: {e}")
+        if not run:
+            return ToolResult(success=False, error=f"Authority Relation not found: {ar_id}")
+        return ToolResult(success=True, data={
+            "run_id": run.id,
+            "relation_id": relation.id,
+            "status": run.status,
+            "sampled_count": run.sampled_count,
+            "divergent_count": run.divergent_count,
+            "magnitude": run.magnitude,
+            "direction": run.direction,
+            "per_dimension_scores": run.per_dimension_scores,
+            "error_message": run.error_message,
+        })

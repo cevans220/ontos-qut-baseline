@@ -5,6 +5,8 @@ deterministic runtime gate — plus the DB-backed configurable-criteria path
 (inline Compliance Checks driving both the gate and divergence) and the shared
 Maturity Level integration.
 """
+import pytest
+
 from src.common.authority_resolution_dna import (
     Criterion,
     compute_dnaco,
@@ -467,3 +469,85 @@ def test_authority_maturity_feature_integration(db_session):
     rep2 = evaluator.evaluate(db_session, entity_type="AuthorityRelation", entity_id=rel2.id, persist=False)
     # object + evidence + measured + within ceiling, but not affirmed -> L3 DNA-Measured
     assert rep2.achieved_level_order == 3
+
+
+# ---------------------------------------------------------------------------
+# MCP tool: ComputeDnaCoefficientTool
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_compute_dna_coefficient_tool_by_uuid(db_session):
+    """The MCP tool is a thin wrapper over `manager.compute_dnaco`; verify it
+    accepts a UUID, returns the persisted run shape, and leaves the AR row's
+    cached magnitude updated."""
+    from unittest.mock import MagicMock
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.models.authority_resolution import AuthorityRelationCreate, CriterionInput
+    from src.tools.authority_resolution import ComputeDnaCoefficientTool
+    from src.tools.base import ToolContext
+
+    mgr = AuthorityResolutionManager()
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(
+        name="DNAco-tool AR",
+        criteria=[CriterionInput(name="cap", rule="obj.value <= 0.15",
+                                 failure_message="over", direction=DIR_ACTUAL_EXCEEDS,
+                                 weight=1.0, order=0)],
+    ))
+    db_session.commit()
+
+    tool = ComputeDnaCoefficientTool()
+    ctx = ToolContext(db=db_session, settings=MagicMock())
+    # Patch _collect_evidence so the tool doesn't try to read a real Delta table.
+    mgr._collect_evidence = lambda _rel: [
+        {"actor_identity": "a", "value": 0.22},   # breaches
+        {"actor_identity": "a", "value": 0.10},   # clean
+    ]
+    # The tool references the module-level manager; patch it there too.
+    import src.tools.authority_resolution as artools
+    artools._manager._collect_evidence = mgr._collect_evidence
+
+    result = await tool.execute(ctx, ar_id=rel.id)
+    assert result.success is True, result.error
+    assert result.data["relation_id"] == rel.id
+    assert result.data["status"] == "succeeded"
+    assert result.data["sampled_count"] == 2
+    assert result.data["divergent_count"] == 1
+    assert result.data["direction"] == DIR_ACTUAL_EXCEEDS
+    assert result.data["magnitude"] > 0.0
+    assert "people" in (result.data["per_dimension_scores"] or {})
+
+
+@pytest.mark.asyncio
+async def test_compute_dna_coefficient_tool_resolves_slug_and_handles_not_found(db_session):
+    """Slug input is resolved to the family's active version (so this works
+    stably across version clones), and an unknown ar_id returns a tool error
+    rather than crashing."""
+    from unittest.mock import MagicMock
+    from src.controller.authority_resolution_manager import AuthorityResolutionManager
+    from src.models.authority_resolution import AuthorityRelationCreate
+    from src.tools.authority_resolution import ComputeDnaCoefficientTool
+    from src.tools.base import ToolContext
+    import src.tools.authority_resolution as artools
+
+    mgr = AuthorityResolutionManager()
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(
+        name="DNAco-tool AR by slug", slug="dnaco-tool-slug",
+    ))
+    db_session.commit()
+    artools._manager._collect_evidence = lambda _rel: []
+
+    tool = ComputeDnaCoefficientTool()
+    ctx = ToolContext(db=db_session, settings=MagicMock())
+
+    ok = await tool.execute(ctx, ar_id="dnaco-tool-slug")
+    assert ok.success is True, ok.error
+    assert ok.data["relation_id"] == rel.id
+
+    missing = await tool.execute(ctx, ar_id="does-not-exist-slug")
+    assert missing.success is False
+    assert "not found" in (missing.error or "").lower()
+
+    empty = await tool.execute(ctx, ar_id="")
+    assert empty.success is False
+    assert "required" in (empty.error or "").lower()

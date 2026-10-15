@@ -262,6 +262,7 @@ def create_default_registry() -> ToolRegistry:
     from src.tools.authority_resolution import (
         ResolveAuthorityTool,
         GetAuthorityRelationTool,
+        ComputeDnaCoefficientTool,
     )
 
     registry = ToolRegistry()
@@ -352,8 +353,11 @@ def create_default_registry() -> ToolRegistry:
     registry.register(ListSchemasTool())
 
     # Authority Resolution tools (ARF) — the agentic decision gate + AR lookup
+    # + an explicit DNAco recompute escape hatch for apps that know the cached
+    # value is stale.
     registry.register(ResolveAuthorityTool())
     registry.register(GetAuthorityRelationTool())
+    registry.register(ComputeDnaCoefficientTool())
 
     logger.info(f"Created default registry with {len(registry)} tools")
     return registry
