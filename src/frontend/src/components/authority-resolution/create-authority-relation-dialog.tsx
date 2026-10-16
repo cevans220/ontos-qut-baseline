@@ -10,6 +10,7 @@ import TagSelector from '@/components/ui/tag-selector';
 import type { AssignedTag } from '@/components/ui/tag-chip';
 import ScheduleSelect from '@/components/authority-resolution/schedule-select';
 import McpRefEditor from '@/components/authority-resolution/mcp-ref-editor';
+import { InfoHint, SectionTitle } from '@/components/authority-resolution/info-hint';
 import CriteriaBuilder, {
   rowsFromCriteria, rowsToPayload, type CriterionRow,
 } from '@/components/authority-resolution/criteria-builder';
@@ -322,7 +323,7 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="EMEA-North discount approval" />
             </div>
             <div className="space-y-1">
-              <Label>Slug (agent key)</Label>
+              <Label className="flex items-center gap-1.5">Slug <InfoHint>Stable key agents use to call this AR. Shared by every version of the family.</InfoHint></Label>
               <Input value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="ar-disc-emea-north" />
             </div>
           </div>
@@ -332,14 +333,14 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
             <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
           </div>
 
-          <div className="text-sm font-semibold text-muted-foreground pt-2">Authority Relation (ARF tuple)</div>
+          <SectionTitle title="Authority Relation" info={<>The ARF tuple: <strong>who</strong> (actor role + signing identity) may perform which <strong>action</strong> on which <strong>object</strong>.</>} />
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label>Actor role</Label>
               <Input value={actorRole} onChange={(e) => setActorRole(e.target.value)} placeholder="Regional Sales Manager – East" />
             </div>
             <div className="space-y-1">
-              <Label>Actor identity (signer)</Label>
+              <Label>Actor identity</Label>
               <Input value={actorIdentity} onChange={(e) => setActorIdentity(e.target.value)} placeholder="rsm-east@example.com" />
             </div>
             <div className="space-y-1">
@@ -358,7 +359,7 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
             </div>
           </div>
 
-          <div className="text-sm font-semibold text-muted-foreground pt-2">Domain-Context (evaluable predicate)</div>
+          <SectionTitle title="Domain-Context" info="The evaluable predicate: the context (threshold, currency, market) this authority holds in. Criteria are evaluated against it." />
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1">
               <Label>Threshold</Label>
@@ -373,11 +374,11 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
               <Input value={market} onChange={(e) => setMarket(e.target.value)} placeholder="emea-north" />
             </div>
           </div>
-          <div className="text-sm font-semibold text-muted-foreground pt-2">Decision criteria</div>
-          <p className="text-xs text-muted-foreground -mt-2">
-            Author the rules the resolution gate enforces (and the DNA-Coefficient measures divergence
-            against). Each criterion is a reusable <strong>Compliance Check</strong>.
-          </p>
+          <SectionTitle
+            title="Decision criteria"
+            info={<>Author the rules the resolution gate enforces (and the DNA-Coefficient measures divergence
+            against). Each criterion is a reusable <strong>Compliance Check</strong>.</>}
+          />
           <CriteriaBuilder rows={criteriaRows} onChange={setCriteriaRows} />
 
           <div className="text-sm font-semibold text-muted-foreground pt-2">Domains</div>
@@ -387,12 +388,12 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
             onChange={(ids, primary) => { setDomainIds(ids); setPrimaryDomainId(primary); }}
           />
 
-          <div className="text-sm font-semibold text-muted-foreground pt-2">Evidence sources</div>
-          <p className="text-xs text-muted-foreground -mt-2">
-            Bind the past decisions the DNA-Coefficient is measured against. Add one or more sources —
+          <SectionTitle
+            title="Evidence sources"
+            info={<>Bind the past decisions the DNA-Coefficient is measured against. Add one or more sources —
             a <strong>Delta table</strong>, a <strong>Data Product</strong>, or an <strong>Asset</strong>
-            (volume file, table, or view). Each maps its columns to the canonical AR elements.
-          </p>
+            (volume file, table, or view). Each maps its columns to the canonical AR elements via the column map.</>}
+          />
           {evidenceSources.map((s, idx) => (
             <div key={idx} className="rounded-md border p-3 space-y-2">
               <div className="grid grid-cols-[auto_1fr_auto] gap-2 items-center">
@@ -437,11 +438,12 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
             <Plus className="h-4 w-4 mr-1" /> Add evidence source
           </Button>
 
-          <div className="text-sm font-semibold text-muted-foreground pt-2">Participants (N-functional gate & review)</div>
-          <p className="text-xs text-muted-foreground -mt-2">
-            <strong>Approvers</strong> count toward the affirmation gate. <strong>Reviewers</strong> are
-            interviewed during the review process to confirm the relation reflects reality. A principal can be both.
-          </p>
+          <SectionTitle
+            title="Participants"
+            info={<>The N-functional gate and review. <strong>Approvers</strong> count toward the affirmation gate.
+            <strong> Reviewers</strong> are interviewed during the review process to confirm the relation reflects
+            reality. A principal can be both.</>}
+          />
           {affirmations.map((a, idx) => {
             // Flag the empty field on a half-authored row so the author sees
             // *which* field is missing without having to re-read the toast.
@@ -508,12 +510,12 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
             <Plus className="h-4 w-4 mr-1" /> Add participant
           </Button>
 
-          <div className="text-sm font-semibold text-muted-foreground pt-2">Requires (prerequisite ARs)</div>
-          <p className="text-xs text-muted-foreground -mt-2">
-            Each listed Authority Relation must resolve <strong>approved</strong> before this one
+          <SectionTitle
+            title="Requires"
+            info={<>Prerequisite ARs: each must resolve <strong>approved</strong> before this one
             decides. Keyed by the family slug (not the version) so this AR keeps working when a
-            prerequisite is version-bumped. Save requires this AR to carry a slug of its own.
-          </p>
+            prerequisite is version-bumped. Save requires this AR to carry a slug of its own.</>}
+          />
           {prerequisites.map((p, idx) => {
             // Avoid offering the current AR (edit mode) or any already-picked slug.
             const takenSlugs = new Set(prerequisites.filter((_, j) => j !== idx).map((q) => q.prerequisite_family_slug));
@@ -571,16 +573,16 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
             <Plus className="h-4 w-4 mr-1" /> Add prerequisite
           </Button>
 
-          <div className="text-sm font-semibold text-muted-foreground pt-2">Resource refs (where field values come from)</div>
-          <p className="text-xs text-muted-foreground -mt-2">
-            Instead of a plain literal, back a canonical field (<code>actor_identity</code>,
+          <SectionTitle
+            title="Resource refs"
+            info={<>Where field values come from. Instead of a plain literal, back a canonical field (<code>actor_identity</code>,
             <code>object_id</code>, <code>domain_context.&lt;key&gt;</code>) with a typed pointer. An
             <strong> Ontos entity</strong> ref re-resolves against the knowledge graph at eval time so
             the value stays current when the underlying concept, product, or domain changes.
             <strong> MCP tool</strong> refs call a Unity Catalog MCP service at decision time; criteria can
             compare against the resolved value as <code>obj.ref_&lt;field_path&gt;</code> (dots become
-            underscores, e.g. <code>obj.ref_actor_identity</code>).
-          </p>
+            underscores, e.g. <code>obj.ref_actor_identity</code>).</>}
+          />
           {resourceRefs.map((r, idx) => {
             const candidateKey = `${r.entity_type || ''}::${idx}`;
             const candidates = refCandidates[candidateKey] || [];
@@ -721,7 +723,15 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
           </Button>
           {resourceRefs.some((r) => r.ref_type === 'mcp_tool') && (
             <div className="space-y-1">
-              <Label>MCP resolver credentials</Label>
+              <Label className="flex items-center gap-1.5">
+                MCP resolver credentials
+                <InfoHint>
+                  <strong>OBO:</strong> MCP tools run with the caller&apos;s own permissions; a caller without a
+                  forwarded token gets no_authority. <strong>App service principal:</strong> tools run as the Ontos
+                  app for every caller, so the result no longer depends on who is asking. Only use this when the
+                  tool must see data callers cannot.
+                </InfoHint>
+              </Label>
               <NativeSelect
                 className="max-w-sm"
                 value={resolverAuth}
@@ -730,28 +740,25 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
                 <option value="obo">Calling user / agent (OBO) — default</option>
                 <option value="app_sp">Ontos app service principal</option>
               </NativeSelect>
-              <p className="text-xs text-muted-foreground">
-                {resolverAuth === 'obo'
-                  ? 'MCP tools run with the caller\'s own permissions; a caller without a forwarded token gets no_authority.'
-                  : 'MCP tools run as the Ontos app service principal for every caller — the result no longer depends on who is asking. Only use this when the tool must see data callers cannot.'}
-              </p>
             </div>
           )}
 
-          <div className="text-sm font-semibold text-muted-foreground pt-2">DNA-Coefficient schedule</div>
+          <SectionTitle title="DNA-Coefficient schedule" info="How often the DNA-Coefficient is recomputed against the evidence sources." />
           <ScheduleSelect value={scheduleCron} onChange={setScheduleCron} />
 
-          <div className="text-sm font-semibold text-muted-foreground pt-2">Tags</div>
+          <SectionTitle title="Tags" />
           <TagSelector value={tags} onChange={setTags} placeholder="Search and select tags…" />
 
           <div className="space-y-1 pt-2">
-            <Label>Max DNA-Coefficient to activate (divergence ceiling)</Label>
+            <Label className="flex items-center gap-1.5">
+              Max DNA-Coefficient to activate
+              <InfoHint>
+                The divergence ceiling. The DNA-Coefficient measures how far past decisions <strong>diverge</strong> from
+                this rule (0.0 = perfect match, higher = worse). The AR can be activated only while its measured value
+                stays at or below this ceiling; an active AR that later drifts above it is auto-flagged <strong>Needs Review</strong>.
+              </InfoHint>
+            </Label>
             <Input value={dnaMax} onChange={(e) => setDnaMax(e.target.value)} placeholder="0.3" className="max-w-[200px]" />
-            <p className="text-xs text-muted-foreground">
-              The DNA-Coefficient measures how far past decisions <strong>diverge</strong> from this rule
-              (0.0 = perfect match, higher = worse). The AR can be activated only while its measured value
-              stays at or below this ceiling; an active AR that later drifts above it is auto-flagged <strong>Needs Review</strong>.
-            </p>
           </div>
         </div>
 

@@ -6,6 +6,7 @@ import { Textarea } from '@/components/ui/textarea';
 import NativeSelect from '@/components/ui/native-select';
 import { useApi } from '@/hooks/use-api';
 import { Loader2, RefreshCw } from 'lucide-react';
+import { InfoHint } from '@/components/authority-resolution/info-hint';
 import type { McpServiceInfo, McpToolInfo, ResourceRefInput } from '@/types/authority-resolution';
 
 interface Props {
@@ -91,7 +92,7 @@ export default function McpRefEditor({ value, onChange }: Props) {
     <div className="space-y-2">
       <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
         <div className="space-y-1">
-          <Label className="text-xs">Extra schemas to search (catalog.schema, comma-separated; system.ai is always included)</Label>
+          <Label className="text-xs flex items-center gap-1.5">Extra schemas <InfoHint>catalog.schema, comma-separated, to search for MCP services. system.ai is always included.</InfoHint></Label>
           <Input value={schemas} onChange={(e) => setSchemas(e.target.value)} placeholder="main.app_ontos" />
         </div>
         <Button variant="outline" size="sm" onClick={refreshServices} disabled={servicesLoading}>
@@ -135,15 +136,18 @@ export default function McpRefEditor({ value, onChange }: Props) {
       </div>
       {selectedTool?.description && <p className="text-xs text-muted-foreground">{selectedTool.description}</p>}
       <div className="space-y-1">
-        <Label className="text-xs">
-          Params (JSON; string values are Jinja templates over the request plus <code>ar.*</code>, e.g.{' '}
-          <code>{'{{ actor_identity }}'}</code>, <code>{'{{ ar.domain_context.market }}'}</code>)
+        <Label className="text-xs flex items-center gap-1.5">
+          Params (JSON)
+          <InfoHint>
+            String values are Jinja templates over the request plus <code>ar.*</code>, e.g.{' '}
+            <code>{'{{ actor_identity }}'}</code>, <code>{'{{ ar.domain_context.market }}'}</code>.
+          </InfoHint>
         </Label>
         <Textarea value={paramsText} onChange={(e) => setParams(e.target.value)} rows={4} className="font-mono text-xs" />
         {paramsError && <p className="text-xs text-destructive">{paramsError}</p>}
       </div>
       <div className="space-y-1">
-        <Label className="text-xs">Result pointer (JSONPath into the tool response)</Label>
+        <Label className="text-xs flex items-center gap-1.5">Result pointer <InfoHint>JSONPath into the tool response; <code>$</code> is the whole response.</InfoHint></Label>
         <Input
           value={value.mcp_result_pointer || ''}
           onChange={(e) => onChange({ mcp_result_pointer: e.target.value || null })}
