@@ -372,10 +372,11 @@ def _resolve_role_to_users(
     if role_by_id:
         return [(role_by_id.name, role_by_id.id)]
 
-    # Fallback: role name (legacy)
-    normalized = role_spec.lower().replace(' ', '')
+    # Fallback: role name (legacy), ignoring case, spaces and underscores so
+    # 'data_steward' matches 'Data Steward'
+    normalized = role_spec.lower().replace(' ', '').replace('_', '')
     for r in db.query(AppRoleDb).all():
-        if r.name.lower().replace(' ', '') == normalized:
+        if r.name.lower().replace(' ', '').replace('_', '') == normalized:
             return [(r.name, r.id)]
 
     return [(role_spec, None)]
@@ -577,7 +578,10 @@ class ApprovalStepHandler(StepHandler):
         from src.models.notifications import Notification, NotificationType
         from src.repositories.notification_repository import notification_repo
         
-        approvers = self._config.get('approvers', '')
+        # Default workflows loaded before 'approvers' was used in the YAML
+        # store the approver under 'approver_role'; accept it so existing
+        # databases keep working without reloading the defaults.
+        approvers = self._config.get('approvers') or self._config.get('approver_role', '')
         timeout_days = self._config.get('timeout_days', 7)
         require_all = self._config.get('require_all', False)
         approval_message = self._config.get('message', '')
@@ -1961,6 +1965,12 @@ class EntityActionStepHandler(StepHandler):
         fixed_scope: str  (when scope_source == fixed)
     """
 
+    # Same rules as the set-publication-scope routes.
+    PUBLISHABLE_STATUSES = {
+        'data_product': {'active'},
+        'data_contract': {'approved', 'active'},
+    }
+
     def execute(self, context: StepContext) -> StepResult:
         from datetime import datetime, timezone
 
@@ -2062,9 +2072,24 @@ class EntityActionStepHandler(StepHandler):
             return StepResult(passed=False, error=f"{entity_type} {entity_id} not found")
 
         scope = self._resolve_scope(context)
+        # Approval can come days after the request: re-check the live status
+        # with the same rules as the set-publication-scope routes.
+        allowed = self.PUBLISHABLE_STATUSES.get(resolved_type)
+        status = (getattr(db_entity, 'status', None) or '').lower()
+        if scope != 'none' and allowed and status not in allowed:
+            return StepResult(
+                passed=False,
+                error=f"Cannot publish {resolved_type} in status '{status}' "
+                      f"(allowed: {', '.join(sorted(allowed))})",
+            )
         db_entity.publication_scope = scope
-        db_entity.published_at = datetime.now(timezone.utc)
-        db_entity.published_by = context.user_email
+        if scope == 'none':
+            # Unpublishing: clear the publication metadata, as unpublish does
+            db_entity.published_at = None
+            db_entity.published_by = None
+        else:
+            db_entity.published_at = datetime.now(timezone.utc)
+            db_entity.published_by = context.user_email
         self._db.add(db_entity)
         self._db.commit()
         logger.info(f"entity_action: published {entity_type} {entity_id} with scope={scope}")
