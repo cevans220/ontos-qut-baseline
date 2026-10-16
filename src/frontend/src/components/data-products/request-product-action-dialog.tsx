@@ -346,8 +346,16 @@ export default function RequestProductActionDialog({
       if (response.error) {
         throw new Error(statusChangeErrorText(response, t, 'data-products'));
       }
-      // Different success messages for direct changes vs requests
-      if (type === 'status_change' && canDirectStatusChange) {
+      // The request was recorded; a failed workflow means nobody was asked to decide
+      const outcome = response.data as { workflow_status?: string; workflow_error?: string } | undefined;
+      if (outcome?.workflow_status === 'failed') {
+        toast({
+          title: t('data-products:requestAction.toast.workflowFailed'),
+          description: t('data-products:requestAction.toast.workflowFailedDesc', { type, error: outcome.workflow_error }),
+          variant: 'destructive',
+        });
+      } else if (type === 'status_change' && canDirectStatusChange) {
+        // Different success messages for direct changes vs requests
         toast({
           title: t('data-products:requestAction.toast.statusChanged'),
           description: t('data-products:requestAction.toast.statusChangedDesc', { fromStatus: statusLabel(productStatus), toStatus: statusLabel(targetStatus) }),
