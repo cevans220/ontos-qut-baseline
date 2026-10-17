@@ -215,7 +215,8 @@
       "resourceRefs": "Resource refs",
       "mcpResolverCredentials": "MCP resolver credentials",
       "dnaSchedule": "DNA-Coefficient schedule",
-      "tags": "Tags"
+      "tags": "Tags",
+      "ownership": "Ownership & project"
     },
     "sectionDescriptions": {
       "decisionCriteria": "Author the rules the resolution gate enforces (and the DNA-Coefficient measures divergence against). Each criterion is a reusable <strong>Compliance Check</strong>.",
@@ -256,7 +257,11 @@
       },
       "dnaMaxThreshold": {
         "placeholder": "0.3"
-      }
+      },
+      "ownerTeam": "Owner team",
+      "project": "Project",
+      "noTeam": "No team",
+      "noProject": "No project"
     },
     "evidenceSources": {
       "type": {

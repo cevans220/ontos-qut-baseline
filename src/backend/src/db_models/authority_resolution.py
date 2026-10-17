@@ -54,6 +54,10 @@ class AuthorityRelationDb(Base):
     change_summary = Column(Text, nullable=True)       # what changed in this version
     draft_owner_id = Column(String, nullable=True, index=True)  # personal-draft owner (mirrors DP/DC)
 
+    # Ownership & scoping (parity with Data Products / Contracts).
+    owner_team_id = Column(String, ForeignKey('teams.id', ondelete='SET NULL'), nullable=True, index=True)
+    project_id = Column(String, ForeignKey('projects.id', ondelete='SET NULL'), nullable=True, index=True)
+
     # --- ARF tuple: Actor ---------------------------------------------------
     actor_role = Column(String, nullable=True)        # arf:actor OrganizationalRole
     actor_identity = Column(String, nullable=True)    # arf:heldBy (principal)

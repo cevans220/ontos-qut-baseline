@@ -215,7 +215,8 @@
       "resourceRefs": "Referências de recursos",
       "mcpResolverCredentials": "Credenciais do resolvedor MCP",
       "dnaSchedule": "Agendamento do DNA-Coefficient",
-      "tags": "Tags"
+      "tags": "Tags",
+      "ownership": "Propriedade e projeto"
     },
     "sectionDescriptions": {
       "decisionCriteria": "Defina as regras que o gate de resolução aplica (e em relação às quais o DNA-Coefficient mede a divergência). Cada critério é uma <strong>Verificação de Conformidade</strong> reutilizável.",
@@ -256,7 +257,11 @@
       },
       "dnaMaxThreshold": {
         "placeholder": "0.3"
-      }
+      },
+      "ownerTeam": "Equipe responsável",
+      "project": "Projeto",
+      "noTeam": "Nenhuma equipe",
+      "noProject": "Nenhum projeto"
     },
     "evidenceSources": {
       "type": {

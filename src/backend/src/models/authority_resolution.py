@@ -125,6 +125,9 @@ class AuthorityRelationCreate(BaseModel):
     # Multi-domain assignment
     domain_ids: List[str] = Field(default_factory=list)
     primary_domain_id: Optional[str] = None
+    # Ownership & scoping (parity with Data Products / Contracts)
+    owner_team_id: Optional[str] = None
+    project_id: Optional[str] = None
     # N-functional affirmation stakeholders
     affirmations: List[AffirmationInput] = Field(default_factory=list)
     # Author-configurable decision criteria (Compliance Checks)
@@ -161,6 +164,8 @@ class AuthorityRelationUpdate(BaseModel):
     resolver_auth: Optional[str] = None
     domain_ids: Optional[List[str]] = None
     primary_domain_id: Optional[str] = None
+    owner_team_id: Optional[str] = None
+    project_id: Optional[str] = None
     affirmations: Optional[List[AffirmationInput]] = None
     criteria: Optional[List[CriterionInput]] = None
     prerequisites: Optional[List[PrerequisiteInput]] = None

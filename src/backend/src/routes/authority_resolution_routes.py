@@ -69,10 +69,15 @@ async def list_relations(
     db: DBSessionDep,
     domain_ids: Optional[str] = Query(None, description="CSV of domain ids (any-of filter)"),
     include_history: bool = Query(False, description="Return every version instead of one row per family"),
+    project_id: Optional[str] = Query(None, description="Only ARs in this project"),
+    owner_team_id: Optional[str] = Query(None, description="Only ARs owned by this team"),
     _: bool = Depends(PermissionChecker(FEATURE_ID, FeatureAccessLevel.READ_ONLY)),
 ):
     ids = [d for d in domain_ids.split(",") if d] if domain_ids else None
-    relations = manager.list_relations(db, domain_ids=ids, include_history=include_history)
+    relations = manager.list_relations(
+        db, domain_ids=ids, include_history=include_history,
+        project_id=project_id, owner_team_id=owner_team_id,
+    )
     return [manager.to_read_dict(db, r) for r in relations]
 
 

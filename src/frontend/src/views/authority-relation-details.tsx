@@ -21,6 +21,7 @@ import RequestAuthorityActionDialog from '@/components/authority-resolution/requ
 import AuthorityRelationReview from '@/components/authority-resolution/authority-relation-review';
 import { CommentSidebar } from '@/components/comments';
 import EntityMetadataPanel from '@/components/metadata/entity-metadata-panel';
+import { OwnershipPanel } from '@/components/common/ownership-panel';
 import ArConceptLinks from '@/components/authority-resolution/ar-concept-links';
 import { MaturityInline } from '@/components/common/maturity-inline';
 import VersionNavigator from '@/components/common/version-navigator';
@@ -667,9 +668,18 @@ export default function AuthorityRelationDetails() {
               ))}
               {(relation.domains || []).length === 0 && <span className="text-muted-foreground">—</span>}
             </div>
+            <div className="pt-2"><span className="text-muted-foreground">{t('editor.fields.ownerTeam')}:</span> {relation.owner_team_name || '—'}</div>
+            <div><span className="text-muted-foreground">{t('editor.fields.project')}:</span> {relation.project_name || '—'}</div>
           </CardContent>
         </Card>
       </div>
+
+      <OwnershipPanel
+        objectType="authority_relation"
+        objectId={relationId!}
+        canAssign={canWrite}
+        ownerTeamId={relation.owner_team_id || undefined}
+      />
 
       <EntityMetadataPanel entityId={relationId!} entityType="authority_relation" />
 

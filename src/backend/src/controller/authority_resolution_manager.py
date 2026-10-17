@@ -23,6 +23,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from src.common.logging import get_logger
+from src.common.search_interfaces import SearchableAsset, SearchIndexItem
 from src.common import authority_resolution_dna as authority_dna
 from src.common.authority_resolution_dna import Criterion, DIR_NONE
 from src.common.compliance_dsl import evaluate_rule_on_object
@@ -35,6 +36,8 @@ from src.db_models.authority_resolution import (
     AuthorityDnaRunDb,
 )
 from src.db_models.compliance import CompliancePolicyDb
+from src.db_models.projects import ProjectDb
+from src.db_models.teams import TeamDb
 from src.repositories.authority_resolution_repository import (
     authority_relation_repo,
     authority_affirmation_repo,
@@ -49,6 +52,7 @@ from src.repositories.entity_domain_association_repository import entity_domain_
 logger = get_logger(__name__)
 
 ENTITY_TYPE = "authority_relation"
+FEATURE_ID = "authority-resolution"  # search feature filter (common/features.py)
 
 # Verdicts returned by the runtime gate.
 VERDICT_APPROVED = "approved"
@@ -169,7 +173,80 @@ class _ResolveCtx:
     write_cache: bool = False
 
 
-class AuthorityResolutionManager:
+class AuthorityResolutionManager(SearchableAsset):
+    # ------------------------------------------------------- search index
+    # One index entry per version family (the representative row the list
+    # view shows), keyed by family id so new versions don't duplicate hits.
+
+    @staticmethod
+    def _search_id(family_id: str) -> str:
+        return f"authority-relation::{family_id}"
+
+    def _build_search_index_item(self, db: Session, relation: AuthorityRelationDb) -> Optional[SearchIndexItem]:
+        if not getattr(relation, "id", None) or not getattr(relation, "name", None):
+            return None
+        family_id = getattr(relation, "version_family_id", None) or relation.id
+        tags: List[str] = []
+        try:
+            from src.controller.tags_manager import TagsManager
+            tags = [t.fully_qualified_name for t in TagsManager().list_assigned_tags(
+                db, entity_id=relation.id, entity_type=ENTITY_TYPE) if getattr(t, "fully_qualified_name", None)]
+        except Exception:  # pragma: no cover - tags are best-effort for search
+            pass
+        domains = entity_domain_repo.get_domains_for_entity(db, entity_type=ENTITY_TYPE, entity_id=relation.id)
+        primary = next((d for d in domains if getattr(d, "is_primary", False)), domains[0] if domains else None)
+        return SearchIndexItem(
+            id=self._search_id(family_id),
+            type="authority-relation",
+            feature_id=FEATURE_ID,
+            title=relation.name,
+            description=relation.description or "",
+            link=f"/authority-resolution/{relation.id}",
+            tags=tags,
+            extra_data={
+                "status": relation.status,
+                "version": relation.version,
+                "slug": relation.slug,
+                "domain": getattr(primary, "domain_name", None) if primary else None,
+                "owner": self._name_of(db, TeamDb, getattr(relation, "owner_team_id", None)),
+                "project": self._name_of(db, ProjectDb, getattr(relation, "project_id", None)),
+            },
+        )
+
+    def _reindex_family(self, db: Session, family_id: str) -> None:
+        """Upsert the family's representative row, or drop the entry if the family is gone."""
+        try:
+            from src.common.version_visibility import collapse_by_family
+            rows = authority_relation_repo.get_family_versions(db, family_id=family_id)
+            rows = collapse_by_family(rows, elevated_family_ids=set(), is_admin=True)
+            item = self._build_search_index_item(db, rows[0]) if rows else None
+            if item:
+                self._notify_index_upsert(item)
+            else:
+                self._notify_index_remove(self._search_id(family_id))
+        except Exception as e:  # pragma: no cover - index refresh is best-effort
+            logger.debug(f"Failed to refresh search entry for AR family {family_id}: {e}")
+
+    def _reindex(self, db: Session, relation: Optional[AuthorityRelationDb]) -> None:
+        if relation is not None:
+            self._reindex_family(db, getattr(relation, "version_family_id", None) or relation.id)
+
+    def get_search_index_items(self) -> List[SearchIndexItem]:
+        from src.common.database import get_session_factory
+        session_factory = get_session_factory()
+        if not session_factory:
+            return []
+        items: List[SearchIndexItem] = []
+        try:
+            with session_factory() as db:
+                for relation in self.list_relations(db):
+                    item = self._build_search_index_item(db, relation)
+                    if item:
+                        items.append(item)
+        except Exception as e:
+            logger.error(f"Error preparing Authority Relations for search: {e}", exc_info=True)
+        return items
+
     # --------------------------------------------------------------- helpers
 
     @staticmethod
@@ -229,6 +306,7 @@ class AuthorityResolutionManager:
         if evidence is not None and hasattr(evidence, "dict"):
             evidence = evidence.dict()
         _validate_evidence(evidence, data.get("evidence_sources"))
+        self._validate_scoping(db, data)
 
         fields = {
             "id": rel_id,
@@ -255,6 +333,8 @@ class AuthorityResolutionManager:
             "schedule_cron": data.get("schedule_cron"),
             "decision_logic": data.get("decision_logic"),
             "resolver_auth": self._validate_resolver_auth(data.get("resolver_auth")),
+            "owner_team_id": data.get("owner_team_id") or None,
+            "project_id": data.get("project_id") or None,
             "created_by": current_user,
         }
 
@@ -283,6 +363,7 @@ class AuthorityResolutionManager:
             self._replace_resource_refs(db, rel_id, refs)
         # Polymorphic tags.
         self._set_tags(db, rel_id, getattr(payload, "tags", None), current_user)
+        self._reindex(db, relation)
         return relation
 
     def _set_tags(self, db: Session, relation_id: str, tags: Optional[List[Any]], user_email: Optional[str]) -> None:
@@ -333,6 +414,25 @@ class AuthorityResolutionManager:
             if v.slug:
                 return v.slug
         return None
+
+    @staticmethod
+    def _validate_scoping(db: Session, data: Dict[str, Any]) -> None:
+        """Normalise ``""`` to ``None`` (the dialogs' "none" choice) and reject
+        unknown team/project ids with a ValueError (400) instead of an FK error."""
+        for key, model, label in (("owner_team_id", TeamDb, "Team"), ("project_id", ProjectDb, "Project")):
+            if key not in data:
+                continue
+            value = data[key] or None
+            data[key] = value
+            if value and db.get(model, value) is None:
+                raise ValueError(f"{label} '{value}' not found")
+
+    @staticmethod
+    def _name_of(db: Session, model, entity_id: Optional[str]) -> Optional[str]:
+        if not entity_id:
+            return None
+        row = db.get(model, entity_id)
+        return getattr(row, "name", None) if row else None
 
     @staticmethod
     def _validate_resolver_auth(value: Optional[str]) -> str:
@@ -390,6 +490,8 @@ class AuthorityResolutionManager:
         db: Session,
         domain_ids: Optional[List[str]] = None,
         include_history: bool = False,
+        project_id: Optional[str] = None,
+        owner_team_id: Optional[str] = None,
     ) -> List[AuthorityRelationDb]:
         """List Authority Relations. By default one representative row per version
         family (latest/best-ranked); ``include_history`` returns every version.
@@ -405,6 +507,10 @@ class AuthorityResolutionManager:
             rows = authority_relation_repo.list_by_ids(db, ids)
         else:
             rows = authority_relation_repo.list_all(db)
+        if project_id:
+            rows = [r for r in rows if r.project_id == project_id]
+        if owner_team_id:
+            rows = [r for r in rows if r.owner_team_id == owner_team_id]
 
         from src.common.version_visibility import collapse_by_family, family_counts
         counts = family_counts(rows)
@@ -435,6 +541,7 @@ class AuthorityResolutionManager:
             data["evidence_binding"] = evidence.dict()
         _validate_evidence(data.get("evidence_binding"), data.get("evidence_sources"))
 
+        self._validate_scoping(db, data)
         if "resolver_auth" in data:
             data["resolver_auth"] = self._validate_resolver_auth(data["resolver_auth"])
         update_data = {k: v for k, v in data.items() if k in _MODEL_COLUMNS}
@@ -482,6 +589,7 @@ class AuthorityResolutionManager:
                 self.compute_dnaco(db, relation_id)
             except Exception as e:  # pragma: no cover - evidence read is environment-dependent
                 logger.warning(f"DNAco recompute after update failed for {relation_id}: {e}")
+        self._reindex(db, relation)
         return relation
 
     def delete_relation(self, db: Session, relation_id: str) -> bool:
@@ -528,6 +636,8 @@ class AuthorityResolutionManager:
             ).delete(synchronize_session=False)
         entity_domain_repo.remove_all_for_entity(db, entity_type=ENTITY_TYPE, entity_id=relation_id)
         authority_relation_repo.remove(db, id=relation_id)
+        db.flush()
+        self._reindex_family(db, family_id)
         return True
 
     # --------------------------------------------------------- versioning
@@ -542,7 +652,7 @@ class AuthorityResolutionManager:
         "domain_context", "justification_chain", "decision_logic",
         "evidence_binding", "evidence_sources",
         "dna_max_threshold", "dna_scoring_config", "schedule_cron",
-        "resolver_auth",
+        "resolver_auth", "owner_team_id", "project_id",
     )
 
     def get_relation_versions(self, db: Session, relation_id: str) -> List[AuthorityRelationDb]:
@@ -687,6 +797,7 @@ class AuthorityResolutionManager:
             db, new_id,
             f"Version {new_version} created from {source.version} (family {family_id}).",
         )
+        self._reindex(db, relation)
         return relation
 
     # ------------------------------------------------------- affirmations
@@ -1602,6 +1713,7 @@ class AuthorityResolutionManager:
             )
             if auto_flagged:
                 msg += f" Exceeded the ceiling ({relation.dna_max_threshold}); status auto-changed to needs_review."
+                self._reindex(db, relation)
             self._log_timeline(db, relation_id, msg)
             return run
         except Exception as e:
@@ -1750,7 +1862,11 @@ class AuthorityResolutionManager:
                 )
             if not self.is_fully_affirmed(db, relation_id):
                 return relation, "All required affirmations must be completed before activation."
+        previous = relation.status
         updated = authority_relation_repo.update(db, db_obj=relation, obj_in={"status": status})
+        if previous != status:
+            self._log_timeline(db, relation_id, f"Status changed from {previous} to {status}.")
+        self._reindex(db, updated)
         return updated, None
 
     # --------------------------------------------------------- runtime gate
@@ -2289,6 +2405,10 @@ class AuthorityResolutionManager:
             "base_name": getattr(relation, "base_name", None),
             "change_summary": getattr(relation, "change_summary", None),
             "draft_owner_id": getattr(relation, "draft_owner_id", None),
+            "owner_team_id": getattr(relation, "owner_team_id", None),
+            "owner_team_name": self._name_of(db, TeamDb, getattr(relation, "owner_team_id", None)),
+            "project_id": getattr(relation, "project_id", None),
+            "project_name": self._name_of(db, ProjectDb, getattr(relation, "project_id", None)),
             # Transient family size set by list_relations; absent on single reads.
             "version_count": getattr(relation, "_version_count", None),
             "actor_role": relation.actor_role,

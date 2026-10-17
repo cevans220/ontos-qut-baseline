@@ -1956,3 +1956,129 @@ def test_criterion_rule_with_assert_in_literal_is_prefixed_and_accepted(db_sessi
                    criteria=[dict(name="state", rule="obj.state = 'ASSERTED'")])
     crit = mgr.to_read_dict(db_session, rel)["criteria"][0]
     assert crit["rule"] == "ASSERT obj.state = 'ASSERTED'"
+
+
+# ------------------------------------------- team / project / search parity
+
+def _team_and_project(db_session):
+    import uuid
+    from src.db_models.projects import ProjectDb
+    from src.db_models.teams import TeamDb
+    team = TeamDb(id=str(uuid.uuid4()), name=f"Governance {uuid.uuid4().hex[:6]}", created_by="a@x", updated_by="a@x")
+    project = ProjectDb(id=str(uuid.uuid4()), name=f"Promo {uuid.uuid4().hex[:6]}", project_type="TEAM", created_by="a@x", updated_by="a@x")
+    db_session.add_all([team, project])
+    db_session.flush()
+    return team, project
+
+
+class _RecordingSearch:
+    def __init__(self):
+        self.upserts, self.removes = [], []
+
+    def upsert_item(self, item):
+        self.upserts.append(item)
+
+    def remove_item(self, item_id):
+        self.removes.append(item_id)
+
+
+def test_owner_team_and_project_persist_and_read(db_session):
+    """ARs carry an owner team and project like Data Products / Contracts."""
+    from src.models.authority_resolution import AuthorityRelationCreate, AuthorityRelationUpdate
+
+    team, project = _team_and_project(db_session)
+    mgr = AuthorityResolutionManager()
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(
+        name="Scoped AR", owner_team_id=team.id, project_id=project.id))
+    db_session.commit()
+
+    read = mgr.to_read_dict(db_session, rel)
+    assert (read["owner_team_id"], read["owner_team_name"]) == (team.id, team.name)
+    assert (read["project_id"], read["project_name"]) == (project.id, project.name)
+
+    assert [r.id for r in mgr.list_relations(db_session, project_id=project.id)] == [rel.id]
+    assert [r.id for r in mgr.list_relations(db_session, owner_team_id=team.id)] == [rel.id]
+    assert mgr.list_relations(db_session, project_id="other") == []
+
+    # "" is the dialogs' "none" choice and clears the assignment.
+    mgr.update_relation(db_session, rel.id, AuthorityRelationUpdate(owner_team_id="", project_id=""))
+    db_session.commit()
+    read = mgr.to_read_dict(db_session, mgr.get_relation(db_session, rel.id))
+    assert read["owner_team_id"] is None and read["project_id"] is None
+
+
+def test_unknown_team_or_project_is_rejected(db_session):
+    from src.models.authority_resolution import AuthorityRelationCreate, AuthorityRelationUpdate
+
+    mgr = AuthorityResolutionManager()
+    with pytest.raises(ValueError, match="Team"):
+        mgr.create_relation(db_session, AuthorityRelationCreate(name="Bad", owner_team_id="nope"))
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(name="Ok"))
+    with pytest.raises(ValueError, match="Project"):
+        mgr.update_relation(db_session, rel.id, AuthorityRelationUpdate(project_id="nope"))
+
+
+def test_new_version_keeps_team_and_project(db_session):
+    from src.models.authority_resolution import AuthorityRelationCreate
+
+    team, project = _team_and_project(db_session)
+    mgr = AuthorityResolutionManager()
+    src = mgr.create_relation(db_session, AuthorityRelationCreate(
+        name="Versioned scoped AR", owner_team_id=team.id, project_id=project.id))
+    db_session.commit()
+    v2 = mgr.create_new_version(db_session, src.id, "2.0.0", current_user="a@x")
+    assert (v2.owner_team_id, v2.project_id) == (team.id, project.id)
+
+
+def test_search_index_one_entry_per_family_and_status_timeline(db_session):
+    """Create/update/status/new-version/delete keep a single per-family search entry
+    fresh, and status changes are written to the Comments timeline."""
+    from src.db_models.comments import CommentDb
+    from src.models.authority_resolution import AuthorityRelationCreate, AuthorityRelationUpdate
+
+    team, _ = _team_and_project(db_session)
+    mgr = AuthorityResolutionManager()
+    search = _RecordingSearch()
+    mgr.set_search_manager(search)
+
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(name="Indexed AR", owner_team_id=team.id))
+    item = search.upserts[-1]
+    assert item.id == f"authority-relation::{rel.id}"
+    assert item.type == "authority-relation" and item.feature_id == "authority-resolution"
+    assert item.link == f"/authority-resolution/{rel.id}"
+    assert item.extra_data["owner"] == team.name and item.extra_data["status"] == "draft"
+
+    mgr.update_relation(db_session, rel.id, AuthorityRelationUpdate(description="now searchable"))
+    assert search.upserts[-1].description == "now searchable"
+
+    _, err = mgr.set_status(db_session, rel.id, "retired")
+    assert err is None and search.upserts[-1].extra_data["status"] == "retired"
+    timeline = [c.comment for c in db_session.query(CommentDb).filter(
+        CommentDb.entity_type == "authority_relation", CommentDb.entity_id == rel.id)]
+    assert any("Status changed from draft to retired" in c for c in timeline)
+
+    db_session.commit()
+    v2 = mgr.create_new_version(db_session, rel.id, "2.0.0", current_user="a@x")
+    assert {u.id for u in search.upserts} == {f"authority-relation::{rel.id}"}  # same family key
+    db_session.commit()
+
+    mgr.delete_relation(db_session, v2.id)
+    mgr.delete_relation(db_session, rel.id)
+    assert search.removes == [f"authority-relation::{rel.id}"]
+
+
+def test_get_search_index_items_lists_families(db_session, monkeypatch):
+    from contextlib import contextmanager
+    from src.models.authority_resolution import AuthorityRelationCreate
+
+    mgr = AuthorityResolutionManager()
+    rel = mgr.create_relation(db_session, AuthorityRelationCreate(name="Startup indexed AR"))
+    db_session.commit()
+
+    @contextmanager
+    def factory():
+        yield db_session
+
+    monkeypatch.setattr("src.common.database.get_session_factory", lambda: factory)
+    ids = {i.id for i in mgr.get_search_index_items()}
+    assert f"authority-relation::{rel.id}" in ids

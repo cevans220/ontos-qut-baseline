@@ -215,7 +215,8 @@
       "resourceRefs": "Resourceverwijzingen",
       "mcpResolverCredentials": "Referenties van MCP-resolver",
       "dnaSchedule": "DNA-Coefficient-schema",
-      "tags": "Tags"
+      "tags": "Tags",
+      "ownership": "Eigenaarschap & project"
     },
     "sectionDescriptions": {
       "decisionCriteria": "Stel de regels op die de resolutiepoort afdwingt (en waartegen de DNA-Coefficient divergentie meet). Elk criterium is een herbruikbare <strong>Compliance Check</strong>.",
@@ -256,7 +257,11 @@
       },
       "dnaMaxThreshold": {
         "placeholder": "0.3"
-      }
+      },
+      "ownerTeam": "Eigenaarsteam",
+      "project": "Project",
+      "noTeam": "Geen team",
+      "noProject": "Geen project"
     },
     "evidenceSources": {
       "type": {

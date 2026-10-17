@@ -215,7 +215,8 @@
       "resourceRefs": "Referencias de recursos",
       "mcpResolverCredentials": "Credenciales del resolvedor MCP",
       "dnaSchedule": "Programación del DNA-Coefficient",
-      "tags": "Etiquetas"
+      "tags": "Etiquetas",
+      "ownership": "Propiedad y proyecto"
     },
     "sectionDescriptions": {
       "decisionCriteria": "Defina las reglas que aplica la puerta de resolución (y contra las que el DNA-Coefficient mide la divergencia). Cada criterio es una <strong>Verificación de cumplimiento</strong> reutilizable.",
@@ -256,7 +257,11 @@
       },
       "dnaMaxThreshold": {
         "placeholder": "0.3"
-      }
+      },
+      "ownerTeam": "Equipo propietario",
+      "project": "Proyecto",
+      "noTeam": "Sin equipo",
+      "noProject": "Sin proyecto"
     },
     "evidenceSources": {
       "type": {

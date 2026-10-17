@@ -215,7 +215,8 @@
       "resourceRefs": "Ressourcenreferenzen",
       "mcpResolverCredentials": "MCP-Resolver-Zugangsdaten",
       "dnaSchedule": "DNA-Coefficient-Zeitplan",
-      "tags": "Tags"
+      "tags": "Tags",
+      "ownership": "Verantwortung & Projekt"
     },
     "sectionDescriptions": {
       "decisionCriteria": "Legen Sie die Regeln fest, die das Resolution-Gate durchsetzt (und gegen die der DNA-Coefficient die Divergenz misst). Jedes Kriterium ist eine wiederverwendbare <strong>Compliance-Prüfung</strong>.",
@@ -256,7 +257,11 @@
       },
       "dnaMaxThreshold": {
         "placeholder": "0.3"
-      }
+      },
+      "ownerTeam": "Verantwortliches Team",
+      "project": "Projekt",
+      "noTeam": "Kein Team",
+      "noProject": "Kein Projekt"
     },
     "evidenceSources": {
       "type": {

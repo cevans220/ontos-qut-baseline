@@ -17,6 +17,8 @@ import CriteriaBuilder, {
   rowsFromCriteria, rowsToPayload, type CriterionRow,
 } from '@/components/authority-resolution/criteria-builder';
 import { useApi } from '@/hooks/use-api';
+import { useTeams } from '@/hooks/use-teams';
+import { useProjectContext } from '@/stores/project-store';
 import { useToast } from '@/hooks/use-toast';
 import { Plus, Trash2, Loader2 } from 'lucide-react';
 import {
@@ -87,6 +89,10 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
   const [evidenceSources, setEvidenceSources] = useState<EvidenceSourceInput[]>([]);
   const [domainIds, setDomainIds] = useState<string[]>([]);
   const [primaryDomainId, setPrimaryDomainId] = useState<string | null>(null);
+  const [ownerTeamId, setOwnerTeamId] = useState('');
+  const [projectId, setProjectId] = useState('');
+  const { teams } = useTeams();
+  const { currentProject, availableProjects, fetchUserProjects } = useProjectContext();
   const [affirmations, setAffirmations] = useState<AffirmationInput[]>(DEFAULT_AFFIRMATIONS);
   const [tags, setTags] = useState<(string | AssignedTag)[]>([]);
   const [scheduleCron, setScheduleCron] = useState<string | null>(null);
@@ -103,6 +109,7 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
     setAction('approve'); setObjectType('data_product'); setObjectId(''); setThreshold('');
     setCurrency(''); setMarket(''); setDnaMax('0.3'); setCriteriaRows([]);
     setEvidenceSources([]); setDomainIds([]); setPrimaryDomainId(null);
+    setOwnerTeamId(''); setProjectId(currentProject?.id || '');
     setAffirmations(DEFAULT_AFFIRMATIONS); setTags([]); setScheduleCron(null);
     setPrerequisites([]); setResourceRefs([]); setResolverAuth('obo');
   };
@@ -136,6 +143,11 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
     })();
     return () => { cancelled = true; };
   }, [open, get]);
+
+  // Projects the user can assign (same source as the Data Product dialog).
+  useEffect(() => {
+    if (open) fetchUserProjects();
+  }, [open, fetchUserProjects]);
 
   // Prefill from the relation when editing; reset to defaults when creating.
   // Keyed on `open` so reopening the dialog re-syncs from the latest data.
@@ -176,6 +188,8 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
       }
       setDomainIds((relation.domains || []).map((d) => d.domain_id));
       setPrimaryDomainId((relation.domains || []).find((d) => d.is_primary)?.domain_id ?? null);
+      setOwnerTeamId(relation.owner_team_id || '');
+      setProjectId(relation.project_id || '');
       setAffirmations(
         (relation.affirmations || []).length
           ? (relation.affirmations || []).map((a) => ({
@@ -292,6 +306,8 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
       dna_max_threshold: Number.isFinite(parseFloat(dnaMax)) ? parseFloat(dnaMax) : 0.3,
       domain_ids: domainIds,
       primary_domain_id: primaryDomainId,
+      owner_team_id: ownerTeamId,
+      project_id: projectId,
       affirmations: affirmations.filter((a) => a.principal.trim() && a.role),
       tags: tags.map((t) => ({ tag_fqn: typeof t === 'string' ? t : t.fully_qualified_name })),
       schedule_cron: scheduleCron,
@@ -405,6 +421,24 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
             primaryDomainId={primaryDomainId}
             onChange={(ids, primary) => { setDomainIds(ids); setPrimaryDomainId(primary); }}
           />
+
+          <div className="text-sm font-semibold text-muted-foreground pt-2">{t('editor.sections.ownership')}</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label>{t('editor.fields.ownerTeam')}</Label>
+              <NativeSelect value={ownerTeamId} onChange={(e) => setOwnerTeamId(e.target.value)}>
+                <option value="">{t('editor.fields.noTeam')}</option>
+                {teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+              </NativeSelect>
+            </div>
+            <div className="space-y-1">
+              <Label>{t('editor.fields.project')}</Label>
+              <NativeSelect value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+                <option value="">{t('editor.fields.noProject')}</option>
+                {availableProjects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </NativeSelect>
+            </div>
+          </div>
 
           <SectionTitle
             title={t('editor.sections.evidenceSources')}

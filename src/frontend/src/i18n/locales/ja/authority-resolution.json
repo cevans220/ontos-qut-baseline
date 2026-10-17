@@ -215,7 +215,8 @@
       "resourceRefs": "リソース参照",
       "mcpResolverCredentials": "MCP リゾルバーの認証情報",
       "dnaSchedule": "DNA-Coefficient のスケジュール",
-      "tags": "タグ"
+      "tags": "タグ",
+      "ownership": "所有者とプロジェクト"
     },
     "sectionDescriptions": {
       "decisionCriteria": "解決ゲートが適用するルール（および DNA-Coefficient が乖離を測定する基準）を定義します。各基準は再利用可能な<strong>コンプライアンスチェック</strong>です。",
@@ -256,7 +257,11 @@
       },
       "dnaMaxThreshold": {
         "placeholder": "0.3"
-      }
+      },
+      "ownerTeam": "オーナーチーム",
+      "project": "プロジェクト",
+      "noTeam": "チームなし",
+      "noProject": "プロジェクトなし"
     },
     "evidenceSources": {
       "type": {

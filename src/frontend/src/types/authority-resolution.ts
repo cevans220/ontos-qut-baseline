@@ -122,6 +122,10 @@ export interface AuthorityRelation {
   base_name?: string | null;
   change_summary?: string | null;
   draft_owner_id?: string | null;
+  owner_team_id?: string | null;
+  owner_team_name?: string | null;
+  project_id?: string | null;
+  project_name?: string | null;
   version_count?: number | null;  // family size (list view only); drives the count badge
   actor_role?: string | null;
   actor_identity?: string | null;

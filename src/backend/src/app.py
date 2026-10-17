@@ -237,6 +237,9 @@ async def startup_event():
         from src.common.search_interfaces import SearchableAsset
         from src.controller.search_manager import SearchManager
         logger.info("Initializing SearchManager after data load (app.py)...")
+        # The AR manager is a module-level singleton in its routes module; expose it on
+        # app.state so it is indexed and receives the SearchManager like the others.
+        app.state.authority_resolution_manager = authority_resolution_routes.manager
         searchable_managers_instances = []
         for attr_name, manager_instance in list(getattr(app.state, '_state', {}).items()):
             try:
