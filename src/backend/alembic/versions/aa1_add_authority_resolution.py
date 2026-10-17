@@ -1,7 +1,7 @@
 """Add Authority Resolution (ARF) tables
 
 Revision ID: aa1_authority_resolution
-Revises: l1_entity_domain_associations
+Revises: b2_contract_deploy_default
 Create Date: 2026-09-20
 
 Creates the Authority Resolution feature tables: authority_relations (the AR
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 
 
 revision: str = 'aa1_authority_resolution'
-down_revision: Union[str, None] = 'l1_entity_domain_associations'
+down_revision: Union[str, None] = 'b2_contract_deploy_default'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
