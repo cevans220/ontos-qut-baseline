@@ -106,6 +106,10 @@ class PrincipalAttributeSource:
     def attributes(self, db: Session, principal: str) -> Dict[str, List[str]]:  # pragma: no cover - interface
         raise NotImplementedError
 
+    def principals(self, db: Session) -> List[str]:
+        """Principals this source knows (compile-time expansion of attribute-refined Audiences)."""
+        return []
+
 
 class BusinessRoleAttributeSource(PrincipalAttributeSource):
     """v1 source: the Ontos Business Roles a principal actively holds (via business owners)."""
@@ -124,6 +128,12 @@ class BusinessRoleAttributeSource(PrincipalAttributeSource):
             .all()
         )
         return {"ontos:businessRole": sorted({r[0] for r in rows if r[0]})}
+
+    def principals(self, db: Session) -> List[str]:
+        from src.db_models.business_owners import BusinessOwnerDb
+
+        rows = db.query(BusinessOwnerDb.user_email).filter(BusinessOwnerDb.is_active.is_(True)).distinct().all()
+        return sorted({r[0] for r in rows if r[0]})
 
 
 class DirectoryAttributeSource(PrincipalAttributeSource):
@@ -575,6 +585,16 @@ class AccessPoliciesManager:
             except Exception as e:  # pragma: no cover - a failing source never breaks evaluation
                 logger.warning(f"Principal attribute source {source.name} failed: {e}")
         return attrs
+
+    def known_principals(self, db: Session) -> List[Tuple[str, Dict[str, List[str]]]]:
+        """Every principal any attribute source knows, with its resolved attributes."""
+        seen: List[str] = []
+        for source in self.attribute_sources:
+            try:
+                seen.extend(p for p in source.principals(db) if p not in seen)
+            except Exception as e:  # pragma: no cover - a failing source never breaks compilation
+                logger.warning(f"Principal attribute source {source.name} failed to enumerate: {e}")
+        return [(p, self.principal_attributes(db, p)) for p in seen]
 
     def check_access(self, db: Session, request: Any, *, viewer: Optional[str] = None, is_admin: bool = True) -> Dict[str, Any]:
         what_if = bool(request.policy_ids)

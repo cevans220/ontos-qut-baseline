@@ -517,6 +517,7 @@ class NotificationsManager:
                 'product_update': "Update Data Product",
                 'dataset_update': "Update Dataset",
                 'role_update': "Update Role Permissions",
+                'policy_release': "Apply Access Policy Release",
             }
             title = title_map.get(change_type, f"Action Required: {change_type}")
             
@@ -532,6 +533,13 @@ class NotificationsManager:
                 principal = data.get('principal', 'Unknown')
                 target = data.get('target', entity_id)
                 description_parts.append(f"Revoke access from {principal} on {target}")
+            elif change_type == 'policy_release':
+                if data.get('summary'):
+                    description_parts.append(data['summary'])
+                statements = data.get('sql') or []
+                if statements:
+                    description_parts.append("Run in a SQL warehouse, then mark the release as applied in Ontos:")
+                    description_parts.extend(statements)
             else:
                 description_parts.append(f"Change type: {change_type}")
             
