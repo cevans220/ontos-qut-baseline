@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -34,6 +35,7 @@ interface Props {
 export default function RequestAuthorityActionDialog({
   isOpen, onOpenChange, relationId, relationName, relationStatus, onSuccess,
 }: Props) {
+  const { t } = useTranslation(['authority-resolution', 'common']);
   const { post } = useApi();
   const { toast } = useToast();
   const refreshNotifications = useNotificationsStore((s) => s.refreshNotifications);
@@ -49,14 +51,14 @@ export default function RequestAuthorityActionDialog({
       case 'review':
         return {
           icon: <ClipboardCheck className="h-5 w-5" />,
-          title: 'Request Review',
-          description: 'Start the N-functional review: each assigned reviewer gets an Asset Review to confirm the relation reflects reality, and the review workflow is fired.',
+          title: t('request.types.review.title'),
+          description: t('request.types.review.description'),
         };
       case 'status_change':
         return {
           icon: <RefreshCw className="h-5 w-5" />,
-          title: 'Change Status',
-          description: 'Move this Authority Relation through its lifecycle. Activation requires the DNA-Coefficient to be measured within its ceiling and every required affirmation completed.',
+          title: t('request.types.statusChange.title'),
+          description: t('request.types.statusChange.description'),
         };
     }
   };
@@ -67,7 +69,7 @@ export default function RequestAuthorityActionDialog({
   const handleSubmit = async () => {
     setError(null);
     if (requestType === 'status_change' && !targetStatus) {
-      setError('Please select a target status.');
+      setError(t('request.errors.selectStatus'));
       return;
     }
     setSubmitting(true);
@@ -82,17 +84,17 @@ export default function RequestAuthorityActionDialog({
 
       if (requestType === 'review') {
         const notified = (res.data as any)?.reviewers_notified ?? 0;
-        toast({ title: 'Review requested', description: `${notified} reviewer(s) notified.` });
+        toast({ title: t('request.toasts.reviewRequested'), description: t('request.toasts.reviewersNotified', { count: notified }) });
       } else {
-        toast({ title: 'Status changed', description: `Status set to "${targetStatus}".` });
+        toast({ title: t('request.toasts.statusChanged'), description: t('request.toasts.statusSetTo', { status: targetStatus }) });
       }
       refreshNotifications();
       onSuccess?.();
       reset();
       onOpenChange(false);
     } catch (e: any) {
-      setError(e.message || 'Failed to submit request');
-      toast({ title: 'Error', description: e.message || 'Failed to submit request', variant: 'destructive' });
+      setError(e.message || t('request.errors.submitFailed'));
+      toast({ title: t('common:status.error'), description: e.message || t('request.errors.submitFailed'), variant: 'destructive' });
     } finally {
       setSubmitting(false);
     }
@@ -104,24 +106,24 @@ export default function RequestAuthorityActionDialog({
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">Request Action</DialogTitle>
-          <DialogDescription>Select the type of request you want to submit for this Authority Relation.</DialogDescription>
+          <DialogTitle className="flex items-center gap-2">{t('request.dialog.title')}</DialogTitle>
+          <DialogDescription>{t('request.dialog.description')}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="p-3 bg-muted/50 rounded-lg border">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <span className="font-medium">Authority Relation:</span>
+              <span className="font-medium">{t('request.relationInfo.label')}:</span>
               <span className="font-mono">{relationId}</span>
             </div>
             {relationName && <div className="text-sm font-medium mt-1">{relationName}</div>}
             {relationStatus && (
-              <div className="text-xs text-muted-foreground mt-1">Status: <span className="uppercase">{relationStatus}</span></div>
+              <div className="text-xs text-muted-foreground mt-1">{t('request.relationInfo.status')}: <span className="uppercase">{relationStatus}</span></div>
             )}
           </div>
 
           <div className="space-y-3">
-            <Label className="text-sm font-medium">Request Type *</Label>
+            <Label className="text-sm font-medium">{t('request.form.requestType')}</Label>
             <Select value={requestType} onValueChange={(v) => setRequestType(v as RequestType)}>
               <SelectTrigger>
                 <SelectValue>
@@ -146,12 +148,12 @@ export default function RequestAuthorityActionDialog({
 
           {requestType === 'review' && (
             <div className="space-y-2">
-              <Label htmlFor="ar-review-message" className="text-sm font-medium">Message (optional)</Label>
+              <Label htmlFor="ar-review-message" className="text-sm font-medium">{t('request.form.message')}</Label>
               <Textarea
                 id="ar-review-message"
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
-                placeholder="Add any notes for the reviewers…"
+                placeholder={t('request.form.messagePlaceholder')}
                 className="min-h-[80px] resize-none"
                 disabled={submitting}
               />
@@ -160,12 +162,12 @@ export default function RequestAuthorityActionDialog({
 
           {requestType === 'status_change' && (
             <div className="space-y-2">
-              <Label className="text-sm font-medium">Target Status *</Label>
+              <Label className="text-sm font-medium">{t('request.form.targetStatus')}</Label>
               <Select value={targetStatus} onValueChange={setTargetStatus} disabled={submitting}>
-                <SelectTrigger><SelectValue placeholder="Choose target status…" /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder={t('request.form.statusPlaceholder')} /></SelectTrigger>
                 <SelectContent>
                   {AR_STATUSES.filter((s) => s !== (relationStatus || '').toLowerCase()).map((s) => (
-                    <SelectItem key={s} value={s}>{s}</SelectItem>
+                    <SelectItem key={s} value={s}>{t(`status.${s}`, { defaultValue: s })}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -178,10 +180,10 @@ export default function RequestAuthorityActionDialog({
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button variant="outline" onClick={handleCancel} disabled={submitting}>Cancel</Button>
+          <Button variant="outline" onClick={handleCancel} disabled={submitting}>{t('common:actions.cancel')}</Button>
           <Button onClick={handleSubmit} disabled={submitting}>
             {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {submitting ? 'Submitting…' : (requestType === 'status_change' ? 'Change Status' : 'Send Request')}
+            {submitting ? t('request.actions.submitting') : (requestType === 'status_change' ? t('request.actions.changeStatus') : t('request.actions.sendRequest'))}
           </Button>
         </DialogFooter>
       </DialogContent>

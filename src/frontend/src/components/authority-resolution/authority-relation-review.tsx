@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useApi } from '@/hooks/use-api';
 import { useToast } from '@/hooks/use-toast';
 import { useUserStore } from '@/stores/user-store';
@@ -8,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { DialogSkeleton, SkeletonLine } from '@/components/common/list-view-skeleton';
 import type { AuthorityReviewContext } from '@/types/authority-resolution';
 
 interface Props {
@@ -39,6 +41,7 @@ function DetailBlock({ label, data }: { label: string; data: any }) {
  * AR detail view and by the Asset Review editor (asset_type = authority_relation).
  */
 export default function AuthorityRelationReview({ relationId, reviewer, onCompleted }: Props) {
+  const { t } = useTranslation(['authority-resolution', 'common']);
   const { get, post } = useApi();
   const { toast } = useToast();
   const currentEmail = useUserStore((s) => s.userInfo?.email);
@@ -51,13 +54,13 @@ export default function AuthorityRelationReview({ relationId, reviewer, onComple
   const [saving, setSaving] = useState(false);
 
   const fetchContext = useCallback(async () => {
-    if (!principal) { setError('No reviewer identity available.'); setLoading(false); return; }
+    if (!principal) { setError(t('review.errors.noReviewerIdentity')); setLoading(false); return; }
     setLoading(true);
     const { data, error } = await get<AuthorityReviewContext>(
       `/api/authority/relations/${relationId}/review-context?reviewer=${encodeURIComponent(principal)}`,
     );
     if (error || !data) {
-      setError(error || 'No review found for you on this Authority Relation.');
+      setError(error || t('review.errors.noReviewFound'));
       setCtx(null);
     } else {
       setError(null);
@@ -65,7 +68,7 @@ export default function AuthorityRelationReview({ relationId, reviewer, onComple
       setAnswers(data.existing_answers || {});
     }
     setLoading(false);
-  }, [get, relationId, principal]);
+  }, [get, relationId, principal, t]);
 
   useEffect(() => { fetchContext(); }, [fetchContext]);
 
@@ -78,15 +81,23 @@ export default function AuthorityRelationReview({ relationId, reviewer, onComple
     );
     setSaving(false);
     if (error) {
-      toast({ title: 'Failed to submit review', description: error, variant: 'destructive' });
+      toast({ title: t('review.toasts.submitFailed'), description: error, variant: 'destructive' });
       return;
     }
-    toast({ title: 'Review submitted' });
+    toast({ title: t('review.toasts.submitSuccess') });
     fetchContext();
     onCompleted?.();
   };
 
-  if (loading) return <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (loading) return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <SkeletonLine className="h-6 w-24" />
+        <SkeletonLine className="h-6 w-32" />
+      </div>
+      <DialogSkeleton />
+    </div>
+  );
   if (error || !ctx) return (
     <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertDescription>{error}</AlertDescription></Alert>
   );
@@ -98,44 +109,44 @@ export default function AuthorityRelationReview({ relationId, reviewer, onComple
       <div className="flex items-center gap-2">
         <Badge variant="outline">{ctx.role}</Badge>
         {completed
-          ? <Badge><CheckCircle2 className="h-3 w-3 mr-1" /> completed</Badge>
-          : <Badge variant="secondary">{ctx.review_status}</Badge>}
+          ? <Badge><CheckCircle2 className="h-3 w-3 mr-1" /> {t('review.statuses.completed')}</Badge>
+          : <Badge variant="secondary">{t(`review.statuses.${ctx.review_status}`, { defaultValue: ctx.review_status })}</Badge>}
         <span className="text-sm text-muted-foreground">{ctx.ar_name}</span>
       </div>
 
       {ctx.details && (
         <div className="space-y-3 rounded-md border p-3">
-          <div className="text-sm font-semibold text-muted-foreground">Authority Relation details</div>
+          <div className="text-sm font-semibold text-muted-foreground">{t('review.details.title')}</div>
           <div className="grid md:grid-cols-2 gap-3">
-            <DetailBlock label="Actor identity" data={ctx.details.actor_identity} />
-            <DetailBlock label="Action" data={ctx.details.action} />
+            <DetailBlock label={t('review.details.actorIdentity')} data={ctx.details.actor_identity} />
+            <DetailBlock label={t('review.details.action')} data={ctx.details.action} />
           </div>
-          <DetailBlock label="Domain-Context" data={ctx.details.domain_context} />
+          <DetailBlock label={t('review.details.domainContext')} data={ctx.details.domain_context} />
           <div>
-            <div className="text-xs uppercase text-muted-foreground mb-1">Decision criteria</div>
+            <div className="text-xs uppercase text-muted-foreground mb-1">{t('review.details.decisionCriteria')}</div>
             {(ctx.details.criteria || []).length > 0 ? (
               <div className="space-y-1">
                 {(ctx.details.criteria || []).map((c, i) => (
                   <div key={i} className="text-xs rounded border p-2">
                     <div className="flex items-center gap-2">
-                      <span className="font-medium">{c.name || 'Criterion'}</span>
+                      <span className="font-medium">{c.name || t('review.details.criterion')}</span>
                       <span className="ml-auto text-muted-foreground">{c.direction} · w{c.weight}</span>
                     </div>
                     <div className="font-mono break-all">{c.rule}</div>
                   </div>
                 ))}
               </div>
-            ) : <span className="text-sm text-muted-foreground">—</span>}
+            ) : <span className="text-sm text-muted-foreground">{t('review.details.empty')}</span>}
           </div>
-          <DetailBlock label="Evidence sources" data={ctx.details.evidence_sources} />
-          <DetailBlock label="Evidence binding" data={ctx.details.evidence_binding} />
-          <DetailBlock label="Justification chain" data={ctx.details.justification_chain} />
+          <DetailBlock label={t('review.details.evidenceSources')} data={ctx.details.evidence_sources} />
+          <DetailBlock label={t('review.details.evidenceBinding')} data={ctx.details.evidence_binding} />
+          <DetailBlock label={t('review.details.justificationChain')} data={ctx.details.justification_chain} />
         </div>
       )}
 
       <div className="space-y-3">
         <div className="text-sm font-semibold text-muted-foreground">
-          {ctx.details ? 'Confirmation' : 'Structured elicitation'}
+          {ctx.details ? t('review.questionnaire.confirmation') : t('review.questionnaire.elicitation')}
         </div>
         {ctx.questionnaire.map((q) => (
           <div key={q.id} className="space-y-1">
@@ -145,7 +156,7 @@ export default function AuthorityRelationReview({ relationId, reviewer, onComple
               onChange={(e) => setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
               rows={2}
               disabled={completed}
-              placeholder="Your answer…"
+              placeholder={t('review.questionnaire.placeholder')}
             />
           </div>
         ))}
@@ -155,7 +166,7 @@ export default function AuthorityRelationReview({ relationId, reviewer, onComple
         <div className="flex justify-end">
           <Button onClick={submit} disabled={saving}>
             {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            Submit review
+            {t('review.actions.submitReview')}
           </Button>
         </div>
       )}

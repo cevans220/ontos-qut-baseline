@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { ColumnDef } from '@tanstack/react-table';
 import { useApi } from '@/hooks/use-api';
 import { usePermissions } from '@/stores/permissions-store';
@@ -41,6 +42,7 @@ export function formatDna(magnitude: number | null | undefined, direction?: stri
 }
 
 export default function AuthorityResolution() {
+  const { t } = useTranslation(['authority-resolution', 'common']);
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { toast } = useToast();
@@ -73,23 +75,23 @@ export default function AuthorityResolution() {
   const setDynamicTitle = useBreadcrumbStore((s) => s.setDynamicTitle);
   useEffect(() => {
     setStaticSegments([]);
-    setDynamicTitle('Authority Resolution');
+    setDynamicTitle(t('title.main'));
     return () => { setStaticSegments([]); setDynamicTitle(null); };
-  }, [setStaticSegments, setDynamicTitle]);
+  }, [setStaticSegments, setDynamicTitle, t]);
 
   const handleDelete = async (r: AuthorityRelation) => {
-    if (!confirm(`Delete Authority Relation "${r.name}"?`)) return;
+    if (!confirm(t('list.confirmDelete', { name: r.name }))) return;
     const { error } = await del(`/api/authority/relations/${r.id}`);
-    if (error) toast({ title: 'Delete failed', description: error, variant: 'destructive' });
-    else { toast({ title: 'Deleted', description: r.name }); fetchRelations(); }
+    if (error) toast({ title: t('common:toast.error'), description: error, variant: 'destructive' });
+    else { toast({ title: t('common:toast.deleted'), description: r.name }); fetchRelations(); }
   };
 
   const handleBulkDelete = async (ids: string[]) => {
     if (ids.length === 0) return;
-    if (!confirm(`Delete ${ids.length} selected Authority Relation(s)?`)) return;
+    if (!confirm(t('list.confirmBulkDelete', { count: ids.length }))) return;
     const results = await Promise.allSettled(ids.map((id) => del(`/api/authority/relations/${id}`)));
     const ok = results.filter((r) => r.status === 'fulfilled').length;
-    if (ok > 0) toast({ title: 'Deleted', description: `${ok} Authority Relation(s) deleted.` });
+    if (ok > 0) toast({ title: t('common:toast.deleted'), description: t('list.bulkDeleteSuccess', { count: ok }) });
     fetchRelations();
   };
 
@@ -103,7 +105,7 @@ export default function AuthorityResolution() {
   const columns: ColumnDef<AuthorityRelation>[] = [
     {
       accessorKey: 'name',
-      header: sortableHeader('Name'),
+      header: sortableHeader(t('common:labels.name')),
       cell: ({ row }) => (
         <div className="space-y-1">
           <div className="font-medium">{row.original.name}</div>
@@ -115,14 +117,14 @@ export default function AuthorityResolution() {
     },
     {
       accessorKey: 'status',
-      header: sortableHeader('Status'),
+      header: sortableHeader(t('common:labels.status')),
       cell: ({ row }) => (
-        <Badge variant="outline" className={getStatusColor(row.original.status)}>{row.original.status}</Badge>
+        <Badge variant="outline" className={getStatusColor(row.original.status)}>{t(`status.${row.original.status}`, { defaultValue: row.original.status })}</Badge>
       ),
     },
     {
       accessorKey: 'version',
-      header: 'Version',
+      header: t('common:labels.version'),
       cell: ({ row }) => (
         <div className="flex items-center gap-1.5">
           <span className="text-sm">v{row.original.version}</span>
@@ -136,12 +138,12 @@ export default function AuthorityResolution() {
     },
     {
       accessorKey: 'dna_magnitude',
-      header: sortableHeader('DNAco'),
+      header: sortableHeader(t('list.columnDnaco')),
       cell: ({ row }) => formatDna(row.original.dna_magnitude, row.original.dna_direction),
     },
     {
       accessorKey: 'maturity_level_order',
-      header: 'Maturity',
+      header: t('list.columnMaturity'),
       cell: ({ row }) => (
         row.original.maturity_level_order != null
           ? <Badge variant="outline">L{row.original.maturity_level_order}</Badge>
@@ -151,13 +153,13 @@ export default function AuthorityResolution() {
     },
     {
       accessorKey: 'action',
-      header: 'Action',
+      header: t('list.columnAction'),
       cell: ({ row }) => <span className="text-muted-foreground">{row.original.action || '—'}</span>,
       enableSorting: false,
     },
     {
       accessorKey: 'usage_count',
-      header: sortableHeader('Usage'),
+      header: sortableHeader(t('list.columnUsage')),
       cell: ({ row }) => <div className="text-right">{row.original.usage_count ?? 0}</div>,
     },
     {
@@ -167,19 +169,19 @@ export default function AuthorityResolution() {
         const r = row.original;
         return (
           <div className="flex space-x-1 justify-end">
-            <Button variant="ghost" size="icon" title="View" onClick={(e) => { e.stopPropagation(); navigate(`${pathname}/${r.id}`); }}>
+            <Button variant="ghost" size="icon" title={t('common:actions.view')} onClick={(e) => { e.stopPropagation(); navigate(`${pathname}/${r.id}`); }}>
               <Eye className="h-4 w-4" />
             </Button>
             {canWrite && (
               <>
-                <Button variant="ghost" size="icon" title="Edit" onClick={(e) => { e.stopPropagation(); setEditRelation(r); }}>
+                <Button variant="ghost" size="icon" title={t('common:actions.edit')} onClick={(e) => { e.stopPropagation(); setEditRelation(r); }}>
                   <Pencil className="h-4 w-4" />
                 </Button>
                 <Button
                   variant="ghost"
                   size="icon"
                   className="text-destructive hover:text-destructive"
-                  title="Delete"
+                  title={t('common:actions.delete')}
                   onClick={(e) => { e.stopPropagation(); handleDelete(r); }}
                 >
                   <Trash2 className="h-4 w-4" />
@@ -196,14 +198,11 @@ export default function AuthorityResolution() {
     <div className="py-6">
       <h1 className="text-3xl font-bold mb-6 flex items-center gap-2">
         <ShieldCheck className="w-8 h-8" />
-        Authority Resolution
+        {t('title.main')}
       </h1>
 
       <p className="text-muted-foreground mb-6 max-w-3xl">
-        Author <strong>Authority Relations</strong> (ARF) that make soft decision authority explicit
-        and agent-callable. Each relation carries a DNA-Coefficient — a divergence measure where
-        <strong> 0.0 is best</strong> — computed from bound evidence, and becomes active only once it
-        is within its threshold and fully affirmed.
+        {t('list.description')}
       </p>
 
       {error && (
@@ -225,7 +224,7 @@ export default function AuthorityResolution() {
             canWrite && (
               <Button onClick={() => setCreateOpen(true)} className="gap-2 h-9">
                 <Plus className="h-4 w-4" />
-                New Authority Relation
+                {t('list.buttonNew')}
               </Button>
             )
           }
@@ -237,7 +236,7 @@ export default function AuthorityResolution() {
               onClick={() => handleBulkDelete(selectedRows.map((r) => r.id).filter(Boolean))}
             >
               <Trash2 className="w-4 h-4 mr-1" />
-              Delete Selected ({selectedRows.length})
+              {t('list.buttonDeleteSelected', { count: selectedRows.length })}
             </Button>
           )}
           onRowClick={(row) => navigate(`${pathname}/${row.original.id}`)}
@@ -249,7 +248,7 @@ export default function AuthorityResolution() {
         onOpenChange={setCreateOpen}
         onCreated={(created) => {
           setCreateOpen(false);
-          toast({ title: 'Authority Relation created', description: created.name });
+          toast({ title: t('common:toast.created'), description: created.name });
           if (created.id) navigate(`${pathname}/${created.id}`);
           else fetchRelations();
         }}
@@ -261,7 +260,7 @@ export default function AuthorityResolution() {
         relation={editRelation}
         onCreated={(updated) => {
           setEditRelation(null);
-          toast({ title: 'Authority Relation updated', description: updated.name });
+          toast({ title: t('common:toast.updated'), description: updated.name });
           fetchRelations();
         }}
       />

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useApi } from '@/hooks/use-api';
 import { usePermissions } from '@/stores/permissions-store';
 import { FeatureAccessLevel } from '@/types/settings';
@@ -23,22 +24,24 @@ import EntityMetadataPanel from '@/components/metadata/entity-metadata-panel';
 import ArConceptLinks from '@/components/authority-resolution/ar-concept-links';
 import { MaturityInline } from '@/components/common/maturity-inline';
 import VersionNavigator from '@/components/common/version-navigator';
+import { DetailHeaderSkeleton, PanelSkeleton, SkeletonLine } from '@/components/common/list-view-skeleton';
 import useBreadcrumbStore from '@/stores/breadcrumb-store';
 import type { AuthorityRelation, ResolveResponse, AuthorityReviewTracking, AuthorityDnaRun, AuthorityDecision } from '@/types/authority-resolution';
 
 /** Human-readable label for a stored 5-field recompute cron. */
-function cronLabel(cron?: string | null): string {
-  if (!cron || !cron.trim()) return 'Manual only';
+function cronLabel(cron?: string | null, i18nFn?: (key: string, opts?: any) => string): string {
+  const t = i18nFn || ((k) => k);
+  if (!cron || !cron.trim()) return t('details.cronManualOnly');
   const p = cron.trim().split(/\s+/);
-  if (p.length !== 5) return `Custom (${cron})`;
+  if (p.length !== 5) return t('details.cronCustom', { cron });
   const [min, hr, dom, mon, dow] = p;
-  const t = `${String(parseInt(hr, 10) || 0).padStart(2, '0')}:${String(parseInt(min, 10) || 0).padStart(2, '0')}`;
+  const time = `${String(parseInt(hr, 10) || 0).padStart(2, '0')}:${String(parseInt(min, 10) || 0).padStart(2, '0')}`;
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  if (mon === '*' && hr === '*' && dom === '*' && dow === '*') return `Hourly (at :${String(parseInt(min, 10) || 0).padStart(2, '0')})`;
-  if (mon === '*' && dom === '*' && dow === '*') return `Daily at ${t}`;
-  if (mon === '*' && dom === '*' && dow !== '*') return `Weekly on ${days[parseInt(dow, 10)] || dow} at ${t}`;
-  if (mon === '*' && dom === '1') return `Monthly (1st) at ${t}`;
-  return `Custom (${cron})`;
+  if (mon === '*' && hr === '*' && dom === '*' && dow === '*') return t('details.cronHourly', { min: String(parseInt(min, 10) || 0).padStart(2, '0') });
+  if (mon === '*' && dom === '*' && dow === '*') return t('details.cronDaily', { time });
+  if (mon === '*' && dom === '*' && dow !== '*') return t('details.cronWeekly', { day: days[parseInt(dow, 10)] || dow, time });
+  if (mon === '*' && dom === '1') return t('details.cronMonthly', { time });
+  return t('details.cronCustom', { cron });
 }
 
 function reviewStatusVariant(s?: string): 'default' | 'secondary' | 'outline' {
@@ -89,29 +92,29 @@ function DnaGauge({ label, value }: { label: string; value: number }) {
 }
 
 /** DNA-Coefficient tile with a per-dimension gauge breakdown on hover. */
-function DnaTile({ relation }: { relation: AuthorityRelation }) {
+function DnaTile({ relation, t }: { relation: AuthorityRelation; t: (key: string, opts?: any) => string }) {
   const dims = relation.dna_dimensions || null;
   const value = formatDna(relation.dna_magnitude, relation.dna_direction);
   if (!dims || Object.keys(dims).length === 0) {
-    return <Tile label="DNA-Coefficient" value={value} hint="0.0 is best" />;
+    return <Tile label={t('details.tileDnaco')} value={value} hint={t('details.tileDnacoHint')} />;
   }
   return (
     <HoverCard openDelay={150}>
       <HoverCardTrigger asChild>
         <div className="cursor-help">
-          <Tile label="DNA-Coefficient" value={value} hint="0.0 is best — hover for dimensions" />
+          <Tile label={t('details.tileDnaco')} value={value} hint={t('details.tileDnacoHintHover')} />
         </div>
       </HoverCardTrigger>
       <HoverCardContent className="w-72" align="start">
-        <div className="text-xs font-semibold mb-2">DNAco dimensions</div>
+        <div className="text-xs font-semibold mb-2">{t('details.dnacoDimensions')}</div>
         <div className="space-y-2">
           {Object.entries(dims).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => (
             <DnaGauge key={k} label={k} value={Number(v)} />
           ))}
         </div>
         <div className="text-[11px] text-muted-foreground mt-2">
-          Overall = 1 − ∏(1 − dₙ) = {(relation.dna_magnitude ?? 0).toFixed(2)}
-          <span className="block opacity-80">probability of divergence on ≥1 dimension</span>
+          {t('details.dnacoFormula', { value: (relation.dna_magnitude ?? 0).toFixed(2) })}
+          <span className="block opacity-80">{t('details.dnacoFormulaDescription')}</span>
         </div>
       </HoverCardContent>
     </HoverCard>
@@ -126,6 +129,7 @@ function JsonBlock({ data }: { data: any }) {
 }
 
 export default function AuthorityRelationDetails() {
+  const { t } = useTranslation(['authority-resolution', 'common']);
   const { relationId } = useParams<{ relationId: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -146,13 +150,17 @@ export default function AuthorityRelationDetails() {
   const [tracking, setTracking] = useState<AuthorityReviewTracking | null>(null);
   const [dnaRuns, setDnaRuns] = useState<AuthorityDnaRun[]>([]);
   const [decisions, setDecisions] = useState<AuthorityDecision[]>([]);
+  const [trackingLoading, setTrackingLoading] = useState(true);
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const setStaticSegments = useBreadcrumbStore((s) => s.setStaticSegments);
   const setDynamicTitle = useBreadcrumbStore((s) => s.setDynamicTitle);
 
-  const fetchRelation = useCallback(async () => {
+  // `initial` shows the page skeleton; refreshes after a mutation keep the
+  // current content on screen instead of flashing back to the skeleton.
+  const fetchRelation = useCallback(async (initial = false) => {
     if (!relationId) return;
-    setLoading(true);
+    if (initial) setLoading(true);
     let res = await get<AuthorityRelation>(`/api/authority/relations/${relationId}`);
     if (res.error) {
       // A just-created relation can 404 briefly: the request session commits after
@@ -161,15 +169,16 @@ export default function AuthorityRelationDetails() {
       await new Promise((r) => setTimeout(r, 600));
       res = await get<AuthorityRelation>(`/api/authority/relations/${relationId}`);
     }
-    if (res.error) toast({ title: 'Failed to load', description: res.error, variant: 'destructive' });
+    if (res.error) toast({ title: t('common:toast.error'), description: res.error, variant: 'destructive' });
     else setRelation(res.data);
     setLoading(false);
-  }, [relationId, get, toast]);
+  }, [relationId, get, toast, t]);
 
   const fetchTracking = useCallback(async () => {
     if (!relationId) return;
     const { data } = await get<AuthorityReviewTracking>(`/api/authority/relations/${relationId}/review-tracking`);
     if (data) setTracking(data);
+    setTrackingLoading(false);
   }, [relationId, get]);
 
   const fetchHistory = useCallback(async () => {
@@ -180,24 +189,25 @@ export default function AuthorityRelationDetails() {
     ]);
     if (Array.isArray(runs.data)) setDnaRuns(runs.data);
     if (Array.isArray(decs.data)) setDecisions(decs.data);
+    setHistoryLoading(false);
   }, [relationId, get]);
 
-  useEffect(() => { fetchRelation(); fetchTracking(); fetchHistory(); }, [fetchRelation, fetchTracking, fetchHistory]);
+  useEffect(() => { fetchRelation(true); fetchTracking(); fetchHistory(); }, [fetchRelation, fetchTracking, fetchHistory]);
 
   // Breadcrumb: Home > Authority Resolution > <name>
   useEffect(() => {
-    setStaticSegments([{ label: 'Authority Resolution', path: '/authority-resolution' }]);
-    setDynamicTitle(relation?.name ?? 'Authority Relation');
+    setStaticSegments([{ label: t('title.main'), path: '/authority-resolution' }]);
+    setDynamicTitle(relation?.name ?? t('details.defaultTitle'));
     return () => { setStaticSegments([]); setDynamicTitle(null); };
-  }, [relation?.name, setStaticSegments, setDynamicTitle]);
+  }, [relation?.name, setStaticSegments, setDynamicTitle, t]);
 
   const computeDna = async () => {
     setBusy('compute');
     const { data, error } = await post<any>(`/api/authority/relations/${relationId}/compute-dnaco`, {});
     setBusy(null);
-    if (error) toast({ title: 'DNAco computation failed', description: error, variant: 'destructive' });
+    if (error) toast({ title: t('details.dnaComputeFailed'), description: error, variant: 'destructive' });
     else {
-      toast({ title: 'DNAco computed', description: `magnitude ${data.magnitude} · ${data.divergent_count}/${data.sampled_count} divergent` });
+      toast({ title: t('details.dnaComputed'), description: t('details.dnaComputedMsg', { magnitude: data.magnitude, divergent: data.divergent_count, total: data.sampled_count }) });
       fetchRelation();
       fetchHistory();
     }
@@ -207,23 +217,23 @@ export default function AuthorityRelationDetails() {
     setBusy('activate');
     const { error } = await post<any>(`/api/authority/relations/${relationId}/status`, { status: 'active' });
     setBusy(null);
-    if (error) toast({ title: 'Cannot activate', description: error, variant: 'destructive' });
-    else { toast({ title: 'Authority Relation activated' }); fetchRelation(); }
+    if (error) toast({ title: t('details.activateFailed'), description: error, variant: 'destructive' });
+    else { toast({ title: t('details.activated') }); fetchRelation(); }
   };
 
   const affirm = async (affirmationId: string) => {
     setBusy(affirmationId);
     const { error } = await post<any>(`/api/authority/affirmations/${affirmationId}/affirm`, {});
     setBusy(null);
-    if (error) toast({ title: 'Affirm failed', description: error, variant: 'destructive' });
+    if (error) toast({ title: t('details.affirmFailed'), description: error, variant: 'destructive' });
     else fetchRelation();
   };
 
   const remove = async () => {
-    if (!confirm('Delete this Authority Relation?')) return;
+    if (!confirm(t('details.confirmDelete'))) return;
     const { error } = await del(`/api/authority/relations/${relationId}`);
-    if (error) toast({ title: 'Delete failed', description: error, variant: 'destructive' });
-    else { toast({ title: 'Deleted' }); navigate('/authority-resolution'); }
+    if (error) toast({ title: t('common:toast.error'), description: error, variant: 'destructive' });
+    else { toast({ title: t('common:toast.deleted') }); navigate('/authority-resolution'); }
   };
 
   // Suggest the next version by bumping the minor of a semantic version.
@@ -249,16 +259,33 @@ export default function AuthorityRelationDetails() {
       { new_version: newVersion.trim(), change_summary: changeSummary.trim() || undefined },
     );
     setBusy(null);
-    if (error) { toast({ title: 'New version failed', description: error, variant: 'destructive' }); return; }
+    if (error) { toast({ title: t('common:toast.error'), description: error, variant: 'destructive' }); return; }
     setVersionOpen(false);
-    toast({ title: 'New version created', description: `v${newVersion.trim()} (draft)` });
+    toast({ title: t('details.versionCreated'), description: t('details.versionCreatedMsg', { version: newVersion.trim() }) });
     if (data?.id) navigate(`/authority-resolution/${data.id}`);
   };
 
-  if (loading) return <div className="py-6 text-muted-foreground">Loading…</div>;
+  if (loading || permissionsLoading) {
+    return (
+      <div className="py-6 space-y-6">
+        <DetailHeaderSkeleton actionButtons={6} leftControls={2} />
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <SkeletonLine height="h-9" width="w-9" className="rounded" />
+            <SkeletonLine height="h-8" width="w-80" />
+            <SkeletonLine height="h-5" width="w-20" />
+          </div>
+          <SkeletonLine height="h-4" width="w-2/3" />
+        </div>
+        <PanelSkeleton rows={4} rowHeight="h-12" />
+        <PanelSkeleton rows={3} rowHeight="h-10" />
+        <PanelSkeleton rows={2} rowHeight="h-10" />
+      </div>
+    );
+  }
   if (!relation) return (
     <div className="py-6">
-      <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertDescription>Authority Relation not found.</AlertDescription></Alert>
+      <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertDescription>{t('details.notFound')}</AlertDescription></Alert>
     </div>
   );
 
@@ -271,30 +298,30 @@ export default function AuthorityRelationDetails() {
     <div className="py-6 space-y-6">
       <div className="flex items-center justify-between">
         <Button variant="outline" size="sm" onClick={() => navigate('/authority-resolution')}>
-          <ArrowLeft className="mr-2 h-4 w-4" /> Back to List
+          <ArrowLeft className="mr-2 h-4 w-4" /> {t('details.backButton')}
         </Button>
         {canWrite && (
           <div className="flex gap-2 flex-wrap justify-end">
             <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
-              <Pencil className="h-4 w-4 mr-1" /> Edit
+              <Pencil className="h-4 w-4 mr-1" /> {t('common:actions.edit')}
             </Button>
             <Button variant="outline" size="sm" onClick={openVersionDialog}>
-              <GitBranch className="h-4 w-4 mr-1" /> New Version
+              <GitBranch className="h-4 w-4 mr-1" /> {t('details.buttonNewVersion')}
             </Button>
             <Button variant="outline" size="sm" onClick={() => setRequestOpen(true)}>
-              <KeyRound className="h-4 w-4 mr-1" /> Request...
+              <KeyRound className="h-4 w-4 mr-1" /> {t('details.buttonRequest')}
             </Button>
             <Button variant="outline" size="sm" onClick={computeDna} disabled={busy === 'compute'}>
               {busy === 'compute' ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Play className="h-4 w-4 mr-1" />}
-              Compute DNAco
+              {t('details.buttonComputeDnaco')}
             </Button>
             {relation.status !== 'active' && (
               <Button variant="outline" size="sm" onClick={activate} disabled={busy === 'activate'}>
-                <CheckCircle2 className="h-4 w-4 mr-1" /> Activate
+                <CheckCircle2 className="h-4 w-4 mr-1" /> {t('details.buttonActivate')}
               </Button>
             )}
             <Button variant="outline" size="sm" onClick={() => setTestOpen(true)}>
-              <FlaskConical className="h-4 w-4 mr-1" /> Test
+              <FlaskConical className="h-4 w-4 mr-1" /> {t('details.buttonTest')}
             </Button>
             <CommentSidebar
               entityType="authority_relation"
@@ -304,7 +331,7 @@ export default function AuthorityRelationDetails() {
               className="h-8"
             />
             <Button variant="destructive" size="sm" onClick={remove}>
-              <Trash2 className="mr-2 h-4 w-4" /> Delete
+              <Trash2 className="mr-2 h-4 w-4" /> {t('common:actions.delete')}
             </Button>
           </div>
         )}
@@ -313,10 +340,10 @@ export default function AuthorityRelationDetails() {
       <div>
         <h1 className="text-2xl font-bold">{relation.name}</h1>
         <div className="flex items-center gap-3 mt-2">
-          <Badge>{relation.status}</Badge>
+          <Badge>{t(`status.${relation.status}`, { defaultValue: relation.status })}</Badge>
           <MaturityInline entityType="AuthorityRelation" entityId={relationId!} compact />
           {(relation.family_slug || relation.slug) && (
-            <span className="text-sm text-muted-foreground" title="Agent-facing @id (version family)">
+            <span className="text-sm text-muted-foreground" title={t('details.familySlugHint')}>
               {relation.family_slug || relation.slug}
             </span>
           )}
@@ -331,9 +358,9 @@ export default function AuthorityRelationDetails() {
         {relation.description && <p className="text-muted-foreground mt-2 max-w-2xl">{relation.description}</p>}
         {(relation.tags || []).length > 0 && (
           <div className="flex flex-wrap gap-1 mt-2">
-            {(relation.tags || []).map((t, i) => (
+            {(relation.tags || []).map((tag, i) => (
               <Badge key={i} variant="secondary" className="text-xs">
-                {t.fully_qualified_name}{t.assigned_value ? `: ${t.assigned_value}` : ''}
+                {tag.fully_qualified_name}{tag.assigned_value ? `: ${tag.assigned_value}` : ''}
               </Badge>
             ))}
           </div>
@@ -341,41 +368,42 @@ export default function AuthorityRelationDetails() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <DnaTile relation={relation} />
-        <Tile label="Usage" value={relation.usage_count ?? 0} />
-        <Tile label="Approved" value={relation.approved_count ?? 0} />
-        <Tile label="Denied" value={relation.denied_count ?? 0} />
+        <DnaTile relation={relation} t={t} />
+        <Tile label={t('details.tileUsage')} value={relation.usage_count ?? 0} />
+        <Tile label={t('details.tileApproved')} value={relation.approved_count ?? 0} />
+        <Tile label={t('details.tileDenied')} value={relation.denied_count ?? 0} />
       </div>
 
       {relation.status !== 'active' && (
         <Alert>
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
-            Activation requires the DNA-Coefficient to be measured and within its ceiling
-            ({relation.dna_max_threshold}), and every required affirmation completed
-            {relation.fully_affirmed ? '' : ' (not yet fully affirmed)'}.
+            {t('details.activationRequires', {
+              threshold: relation.dna_max_threshold,
+              affirmed: relation.fully_affirmed ? '' : ` ${t('details.notYetFullyAffirmed')}`
+            })}
           </AlertDescription>
         </Alert>
       )}
 
       <Card>
-        <CardHeader><CardTitle className="text-base">Approvers (N-functional gate)</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">{t('details.cardApprovers')}</CardTitle></CardHeader>
         <CardContent className="space-y-2">
-          {approvers.length === 0 && <div className="text-sm text-muted-foreground">No approvers defined.</div>}
+          {approvers.length === 0 && <div className="text-sm text-muted-foreground">{t('details.noApprovers')}</div>}
           {approvers.map((a) => (
             <div key={a.id} className="flex items-center justify-between border-b py-2 last:border-0">
               <div className="text-sm">
                 <Badge variant="outline" className="mr-2">{a.role}</Badge>
                 {a.principal} <span className="text-muted-foreground">({a.principal_type})</span>
-                {a.is_reviewer && <Badge variant="secondary" className="ml-2">also reviewer</Badge>}
+                {a.is_reviewer && <Badge variant="secondary" className="ml-2">{t('details.alsoReviewer')}</Badge>}
               </div>
               <div className="flex items-center gap-2">
                 {a.affirmed ? (
-                  <Badge><CheckCircle2 className="h-3 w-3 mr-1" /> affirmed{a.affirmed_by ? ` · ${a.affirmed_by}` : ''}</Badge>
+                  <Badge><CheckCircle2 className="h-3 w-3 mr-1" /> {t('details.affirmed')}{a.affirmed_by ? ` · ${a.affirmed_by}` : ''}</Badge>
                 ) : canWrite ? (
-                  <Button size="sm" variant="outline" onClick={() => affirm(a.id)} disabled={busy === a.id}>Affirm</Button>
+                  <Button size="sm" variant="outline" onClick={() => affirm(a.id)} disabled={busy === a.id}>{t('details.buttonAffirm')}</Button>
                 ) : (
-                  <Badge variant="secondary">pending</Badge>
+                  <Badge variant="secondary">{t('details.pending')}</Badge>
                 )}
               </div>
             </div>
@@ -385,7 +413,7 @@ export default function AuthorityRelationDetails() {
 
       {hasReviewers && (
         <Card>
-          <CardHeader><CardTitle className="text-base">Reviewers (interviewed to confirm the relation reflects reality)</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">{t('details.cardReviewers')}</CardTitle></CardHeader>
           <CardContent className="space-y-2">
             {reviewers.map((a) => (
               <div key={a.id} className="flex items-center justify-between border-b py-2 last:border-0">
@@ -396,11 +424,11 @@ export default function AuthorityRelationDetails() {
                 <div className="flex items-center gap-2">
                   <Badge variant={reviewStatusVariant(a.review_status)}>
                     {a.review_status === 'completed' && <CheckCircle2 className="h-3 w-3 mr-1" />}
-                    {a.review_status || 'na'}
+                    {t(`reviewStatus.${a.review_status || 'na'}`, { defaultValue: a.review_status || 'na' })}
                   </Badge>
                   {canWrite && (
                     <Button size="sm" variant="outline" onClick={() => setReviewFor(a.principal)}>
-                      {a.review_status === 'completed' ? 'View' : 'Review'}
+                      {a.review_status === 'completed' ? t('common:actions.view') : t('details.buttonReview')}
                     </Button>
                   )}
                 </div>
@@ -410,13 +438,14 @@ export default function AuthorityRelationDetails() {
         </Card>
       )}
 
+      {trackingLoading && !tracking && <PanelSkeleton rows={2} rowHeight="h-8" withDescription={false} />}
       {tracking && (tracking.workflows.length > 0 || tracking.reviews.some((r) => r.review_request_id)) && (
         <Card>
-          <CardHeader><CardTitle className="text-base">Review process</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">{t('details.cardReviewProcess')}</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             {tracking.workflows.length > 0 && (
               <div className="space-y-2">
-                <div className="text-xs uppercase text-muted-foreground">Workflows</div>
+                <div className="text-xs uppercase text-muted-foreground">{t('details.workflowsSection')}</div>
                 {tracking.workflows.map((w) => (
                   <div key={w.execution_id} className="flex items-center justify-between border-b py-2 last:border-0">
                     <div className="text-sm flex items-center gap-2">
@@ -425,9 +454,9 @@ export default function AuthorityRelationDetails() {
                       {w.current_step && <span className="text-muted-foreground">· {w.current_step}</span>}
                     </div>
                     <div className="flex items-center gap-2">
-                      <Badge variant="secondary">{w.status}</Badge>
+                      <Badge variant="secondary">{t(`workflowStatus.${w.status}`, { defaultValue: w.status })}</Badge>
                       <Button variant="link" size="sm" className="h-auto p-0" onClick={() => navigate(`/workflows/${w.workflow_id}`)}>
-                        Workflow <ExternalLink className="h-3 w-3 ml-1" />
+                        {t('details.linkWorkflow')} <ExternalLink className="h-3 w-3 ml-1" />
                       </Button>
                     </div>
                   </div>
@@ -435,8 +464,8 @@ export default function AuthorityRelationDetails() {
               </div>
             )}
             <div className="space-y-2">
-              <div className="text-xs uppercase text-muted-foreground">Asset Reviews</div>
-              {tracking.reviews.length === 0 && <div className="text-sm text-muted-foreground">No reviewers assigned.</div>}
+              <div className="text-xs uppercase text-muted-foreground">{t('details.assetReviewsSection')}</div>
+              {tracking.reviews.length === 0 && <div className="text-sm text-muted-foreground">{t('details.noReviewersAssigned')}</div>}
               {tracking.reviews.map((r) => (
                 <div key={r.participant_id} className="flex items-center justify-between border-b py-2 last:border-0">
                   <div className="text-sm">
@@ -444,14 +473,14 @@ export default function AuthorityRelationDetails() {
                     {r.principal}
                   </div>
                   <div className="flex items-center gap-2">
-                    <Badge variant={reviewStatusVariant(r.review_status)}>{r.review_status || 'na'}</Badge>
-                    {r.request_status && <Badge variant="secondary">review: {r.request_status}</Badge>}
+                    <Badge variant={reviewStatusVariant(r.review_status)}>{t(`reviewStatus.${r.review_status || 'na'}`, { defaultValue: r.review_status || 'na' })}</Badge>
+                    {r.request_status && <Badge variant="secondary">{t('details.reviewStatus', { status: r.request_status })}</Badge>}
                     {r.review_request_id ? (
                       <Button variant="link" size="sm" className="h-auto p-0" onClick={() => navigate(`/data-asset-reviews/${r.review_request_id}`)}>
-                        Open review <ExternalLink className="h-3 w-3 ml-1" />
+                        {t('details.linkOpenReview')} <ExternalLink className="h-3 w-3 ml-1" />
                       </Button>
                     ) : (
-                      <span className="text-xs text-muted-foreground">not started</span>
+                      <span className="text-xs text-muted-foreground">{t('details.notStarted')}</span>
                     )}
                   </div>
                 </div>
@@ -461,19 +490,22 @@ export default function AuthorityRelationDetails() {
         </Card>
       )}
 
+      {historyLoading && dnaRuns.length === 0 && decisions.length === 0 && (
+        <PanelSkeleton rows={3} rowHeight="h-8" withDescription={false} />
+      )}
       {(dnaRuns.length > 0 || decisions.length > 0) && (
         <Card>
-          <CardHeader><CardTitle className="text-base flex items-center gap-2"><History className="h-4 w-4" /> History</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><History className="h-4 w-4" /> {t('details.cardHistory')}</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             {dnaRuns.length > 0 && (
               <div className="space-y-2">
-                <div className="text-xs uppercase text-muted-foreground">DNA-Coefficient runs</div>
+                <div className="text-xs uppercase text-muted-foreground">{t('details.dnaRunsSection')}</div>
                 {dnaRuns.slice(0, 8).map((r) => (
                   <div key={r.id} className="flex items-center justify-between border-b py-2 last:border-0 text-sm">
                     <div className="flex items-center gap-2">
-                      <Badge variant={r.status === 'succeeded' ? 'default' : r.status === 'failed' ? 'destructive' : 'secondary'}>{r.status}</Badge>
+                      <Badge variant={r.status === 'succeeded' ? 'default' : r.status === 'failed' ? 'destructive' : 'secondary'}>{t(`dnaRunStatus.${r.status}`, { defaultValue: r.status })}</Badge>
                       {r.status === 'succeeded' && (
-                        <span>{formatDna(r.magnitude, r.direction)} · {r.divergent_count ?? 0}/{r.sampled_count ?? 0} divergent</span>
+                        <span>{formatDna(r.magnitude, r.direction)} · {t('details.dnaRunResult', { divergent: r.divergent_count ?? 0, total: r.sampled_count ?? 0 })}</span>
                       )}
                       {r.error_message && <span className="text-muted-foreground">{r.error_message}</span>}
                     </div>
@@ -484,13 +516,13 @@ export default function AuthorityRelationDetails() {
             )}
             {decisions.length > 0 && (
               <div className="space-y-2">
-                <div className="text-xs uppercase text-muted-foreground">Recent decisions</div>
+                <div className="text-xs uppercase text-muted-foreground">{t('details.decisionsSection')}</div>
                 {decisions.slice(0, 10).map((d) => (
                   <div key={d.id} className="flex items-center justify-between border-b py-2 last:border-0 text-sm">
                     <div className="flex items-center gap-2">
-                      <Badge variant="outline">{d.source}</Badge>
+                      <Badge variant="outline">{t(`decisionSource.${d.source}`, { defaultValue: d.source })}</Badge>
                       {d.verdict && (
-                        <Badge variant={d.verdict === 'approved' ? 'default' : d.verdict === 'denied' ? 'destructive' : 'secondary'}>{d.verdict}</Badge>
+                        <Badge variant={d.verdict === 'approved' ? 'default' : d.verdict === 'denied' ? 'destructive' : 'secondary'}>{t(`verdict.${d.verdict}`, { defaultValue: d.verdict })}</Badge>
                       )}
                       <span className="text-muted-foreground">
                         {d.actor_identity || '—'}{d.action ? ` · ${d.action}` : ''}{d.object_id ? ` · ${d.object_id}` : ''}
@@ -508,31 +540,31 @@ export default function AuthorityRelationDetails() {
 
       <div className="grid md:grid-cols-2 gap-6">
         <Card>
-          <CardHeader><CardTitle className="text-base">Authority Relation</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">{t('details.cardRelation')}</CardTitle></CardHeader>
           <CardContent className="text-sm space-y-1">
-            <div><span className="text-muted-foreground">Actor role:</span> {relation.actor_role || '—'}</div>
-            <div><span className="text-muted-foreground">Actor identity:</span> {relation.actor_identity || '—'}</div>
-            <div><span className="text-muted-foreground">Action:</span> {relation.action || '—'}</div>
-            <div><span className="text-muted-foreground">Object:</span> {relation.object_type || '—'} {relation.object_id ? `· ${relation.object_id}` : ''}</div>
-            <div className="pt-2 text-muted-foreground">Domain-Context</div>
+            <div><span className="text-muted-foreground">{t('details.labelActorRole')}:</span> {relation.actor_role || '—'}</div>
+            <div><span className="text-muted-foreground">{t('details.labelActorIdentity')}:</span> {relation.actor_identity || '—'}</div>
+            <div><span className="text-muted-foreground">{t('details.labelAction')}:</span> {relation.action || '—'}</div>
+            <div><span className="text-muted-foreground">{t('details.labelObject')}:</span> {relation.object_type || '—'} {relation.object_id ? `· ${relation.object_id}` : ''}</div>
+            <div className="pt-2 text-muted-foreground">{t('details.labelDomainContext')}</div>
             <JsonBlock data={relation.domain_context} />
-            <div className="pt-2 text-muted-foreground">Justification chain</div>
+            <div className="pt-2 text-muted-foreground">{t('details.labelJustificationChain')}</div>
             <JsonBlock data={relation.justification_chain} />
           </CardContent>
         </Card>
         <Card>
-          <CardHeader><CardTitle className="text-base">Runtime & evidence</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">{t('details.cardRuntimeEvidence')}</CardTitle></CardHeader>
           <CardContent className="text-sm space-y-1">
-            <div className="text-muted-foreground">Decision criteria</div>
+            <div className="text-muted-foreground">{t('details.labelDecisionCriteria')}</div>
             {(relation.criteria || []).length > 0 ? (
               <div className="space-y-2">
                 {(relation.criteria || []).map((c) => (
                   <div key={c.id} className="rounded border p-2 space-y-1">
                     <div className="flex items-center gap-2">
-                      <span className="font-medium">{c.name || 'Criterion'}</span>
-                      {!c.enabled && <Badge variant="outline" className="text-xs">disabled</Badge>}
+                      <span className="font-medium">{c.name || t('details.criterion')}</span>
+                      {!c.enabled && <Badge variant="outline" className="text-xs">{t('common:labels.disabled')}</Badge>}
                       <span className="ml-auto text-xs text-muted-foreground">
-                        {c.direction} · w{c.weight}
+                        {t(`direction.${c.direction}`, { defaultValue: c.direction })} · w{c.weight}
                       </span>
                     </div>
                     <div className="font-mono text-xs break-all">{c.rule}</div>
@@ -543,9 +575,9 @@ export default function AuthorityRelationDetails() {
                 ))}
               </div>
             ) : (
-              <div className="text-muted-foreground text-xs">No criteria — the gate is unconstrained (approves any request).</div>
+              <div className="text-muted-foreground text-xs">{t('details.noCriteria')}</div>
             )}
-            <div className="pt-2 text-muted-foreground">Evidence sources</div>
+            <div className="pt-2 text-muted-foreground">{t('details.labelEvidenceSources')}</div>
             {(relation.evidence_sources || []).length > 0 ? (
               <div className="space-y-1">
                 {(relation.evidence_sources || []).map((s, i) => {
@@ -555,14 +587,14 @@ export default function AuthorityRelationDetails() {
                     && (s.ref || '').split('.').length >= 3;
                   return (
                     <div key={i} className="text-xs">
-                      <Badge variant="outline" className="mr-1">{s.type}</Badge>
+                      <Badge variant="outline" className="mr-1">{t(`sourceType.${s.type}`, { defaultValue: s.type })}</Badge>
                       {linkable ? (
                         <a
                           href={`/catalog-commander?table=${encodeURIComponent(s.ref)}`}
                           className="font-mono text-primary hover:underline inline-flex items-center gap-1"
                           target="_blank"
                           rel="noopener noreferrer"
-                          title={`Open ${s.ref} in Catalog Commander`}
+                          title={t('details.linkCatalogCommander', { ref: s.ref })}
                         >
                           <Database className="h-3 w-3" />{s.ref}
                         </a>
@@ -577,33 +609,33 @@ export default function AuthorityRelationDetails() {
             ) : (
               <JsonBlock data={relation.evidence_binding} />
             )}
-            <div className="pt-2 text-muted-foreground">Governs Business Concepts</div>
+            <div className="pt-2 text-muted-foreground">{t('details.labelGovernsConceptsHint')}</div>
             <ArConceptLinks familyId={relation.version_family_id || relation.id} />
-            <div className="pt-2 text-muted-foreground">Requires (prerequisite ARs)</div>
+            <div className="pt-2 text-muted-foreground">{t('details.labelPrerequisites')}</div>
             {(relation.prerequisites || []).length > 0 ? (
               <div className="space-y-1">
                 {(relation.prerequisites || []).map((p) => (
                   <div key={p.prerequisite_family_slug} className="text-xs flex items-center gap-2">
                     <Badge variant={p.required ? 'default' : 'outline'}>
-                      {p.required ? 'required' : 'optional'}
+                      {p.required ? t('details.required') : t('details.optional')}
                     </Badge>
                     <span className="font-mono">{p.prerequisite_family_slug}</span>
                     <span className="text-muted-foreground">
-                      {p.name ? `· ${p.name}` : ''} {p.status ? `(${p.status})` : ''}
+                      {p.name ? `· ${p.name}` : ''} {p.status ? `(${t(`status.${p.status}`, { defaultValue: p.status })})` : ''}
                     </span>
                   </div>
                 ))}
               </div>
             ) : (
               <div className="text-muted-foreground text-xs">
-                None — this AR decides without walking any upstream gate.
+                {t('details.noPrerequisites')}
               </div>
             )}
             <div className="pt-2 text-muted-foreground">
-              Resource refs (typed pointers)
+              {t('details.labelResourceRefs')}
               {(relation.resource_refs || []).some((r) => r.ref_type === 'mcp_tool') && (
                 <Badge variant={relation.resolver_auth === 'app_sp' ? 'destructive' : 'outline'} className="ml-2">
-                  MCP auth: {relation.resolver_auth === 'app_sp' ? 'app service principal' : 'caller (OBO)'}
+                  {t('details.mcpAuth', { auth: t(`resolverAuth.${relation.resolver_auth}`, { defaultValue: relation.resolver_auth }) })}
                 </Badge>
               )}
             </div>
@@ -611,7 +643,7 @@ export default function AuthorityRelationDetails() {
               <div className="space-y-1">
                 {(relation.resource_refs || []).map((r) => (
                   <div key={r.id || r.field_path} className="text-xs flex items-center gap-2 flex-wrap">
-                    <Badge variant="outline">{r.ref_type}</Badge>
+                    <Badge variant="outline">{t(`refType.${r.ref_type}`, { defaultValue: r.ref_type })}</Badge>
                     <span className="font-mono">{r.field_path}</span>
                     <span className="text-muted-foreground">
                       {r.ref_type === 'literal' && r.literal_value ? `→ ${r.literal_value}` : ''}
@@ -624,11 +656,11 @@ export default function AuthorityRelationDetails() {
               </div>
             ) : (
               <div className="text-muted-foreground text-xs">
-                None — canonical fields read directly from the AR row.
+                {t('details.noResourceRefs')}
               </div>
             )}
-            <div className="pt-2"><span className="text-muted-foreground">Recompute schedule:</span> {cronLabel(relation.schedule_cron)}</div>
-            <div className="pt-2 text-muted-foreground">Domains</div>
+            <div className="pt-2"><span className="text-muted-foreground">{t('details.labelRecomputeSchedule')}:</span> {cronLabel(relation.schedule_cron, t)}</div>
+            <div className="pt-2 text-muted-foreground">{t('common:labels.domain')}</div>
             <div className="flex flex-wrap gap-1">
               {(relation.domains || []).map((d) => (
                 <Badge key={d.domain_id} variant={d.is_primary ? 'default' : 'outline'}>{d.domain_name}</Badge>
@@ -669,7 +701,7 @@ export default function AuthorityRelationDetails() {
 
       <Dialog open={!!reviewFor} onOpenChange={(o) => !o && setReviewFor(null)}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Authority Relation review</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('details.dialogTitleReview')}</DialogTitle></DialogHeader>
           {reviewFor && (
             <AuthorityRelationReview
               relationId={relationId!}
@@ -682,14 +714,13 @@ export default function AuthorityRelationDetails() {
 
       <Dialog open={versionOpen} onOpenChange={setVersionOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Create new version</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('details.dialogTitleVersion')}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Snapshots this Authority Relation into a new draft version. The rule, criteria,
-              participants, evidence and domains are copied; measured DNAco and usage counters reset.
+              {t('details.versionDialogDescription')}
             </p>
             <div className="space-y-1">
-              <Label htmlFor="ar-new-version">New version</Label>
+              <Label htmlFor="ar-new-version">{t('details.labelNewVersion')}</Label>
               <Input
                 id="ar-new-version"
                 value={newVersion}
@@ -698,19 +729,19 @@ export default function AuthorityRelationDetails() {
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="ar-change-summary">Change summary (optional)</Label>
+              <Label htmlFor="ar-change-summary">{t('details.labelChangeSummary')}</Label>
               <Input
                 id="ar-change-summary"
                 value={changeSummary}
                 onChange={(e) => setChangeSummary(e.target.value)}
-                placeholder="What changed in this version?"
+                placeholder={t('details.placeholderChangeSummary')}
               />
             </div>
             <div className="flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={() => setVersionOpen(false)}>Cancel</Button>
+              <Button variant="outline" size="sm" onClick={() => setVersionOpen(false)}>{t('common:actions.cancel')}</Button>
               <Button size="sm" onClick={createVersion} disabled={busy === 'version' || !newVersion.trim()}>
                 {busy === 'version' ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <GitBranch className="h-4 w-4 mr-1" />}
-                Create version
+                {t('details.buttonCreateVersion')}
               </Button>
             </div>
           </div>
@@ -721,6 +752,7 @@ export default function AuthorityRelationDetails() {
 }
 
 function TestResolveDialog({ open, onOpenChange, relationId }: { open: boolean; onOpenChange: (o: boolean) => void; relationId: string }) {
+  const { t } = useTranslation(['authority-resolution', 'common']);
   const { post } = useApi();
   const [actorIdentity, setActorIdentity] = useState('');
   const [action, setAction] = useState('approve');
@@ -736,7 +768,7 @@ function TestResolveDialog({ open, onOpenChange, relationId }: { open: boolean; 
     if (value.trim()) body.value = parseFloat(value);
     const { data, error } = await post<ResolveResponse>(`/api/authority/relations/${relationId}/test`, body);
     setBusy(false);
-    if (error) setResult({ verdict: 'error', reason: error });
+    if (error) setResult({ verdict: 'error' as any, reason: error });
     else setResult(data);
   };
 
@@ -746,50 +778,48 @@ function TestResolveDialog({ open, onOpenChange, relationId }: { open: boolean; 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader><DialogTitle>Test authority resolution</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{t('details.dialogTitleTest')}</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <p className="text-xs text-muted-foreground">
-            Dry-run against this Authority Relation's decision logic — works in any status and does
-            <strong> not</strong> record the decision or change the usage counters. Live decisions come
-            from the MCP <code>resolve_authority</code> tool against an <strong>active</strong> AR.
+            {t('details.testDialogDescription')}
           </p>
           <div className="space-y-1">
-            <Label>Signer (actor identity)</Label>
+            <Label>{t('details.labelSigner')}</Label>
             <Input value={actorIdentity} onChange={(e) => setActorIdentity(e.target.value)} placeholder="rsm-east@example.com" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <Label>Action</Label>
+              <Label>{t('details.labelAction')}</Label>
               <Input value={action} onChange={(e) => setAction(e.target.value)} />
             </div>
             <div className="space-y-1">
-              <Label>Value</Label>
+              <Label>{t('details.labelValue')}</Label>
               <Input value={value} onChange={(e) => setValue(e.target.value)} placeholder="0.22" />
             </div>
           </div>
           <div className="flex gap-4">
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={cosign} onChange={(e) => setCosign(e.target.checked)} /> co-sign present</label>
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={escalated} onChange={(e) => setEscalated(e.target.checked)} /> escalated</label>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={cosign} onChange={(e) => setCosign(e.target.checked)} /> {t('details.testCosignLabel')}</label>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={escalated} onChange={(e) => setEscalated(e.target.checked)} /> {t('details.testEscalatedLabel')}</label>
           </div>
           {result && (
             <Alert>
               <AlertDescription>
-                <Badge variant={verdictColor as any} className="mr-2">{result.verdict}</Badge>
+                <Badge variant={verdictColor as any} className="mr-2">{t(`verdict.${result.verdict}`, { defaultValue: result.verdict })}</Badge>
                 {result.reason}
                 {(result.prerequisite_chain || []).length > 0 && (
                   <div className="pt-2 space-y-1">
-                    <div className="text-xs text-muted-foreground">Prerequisite chain</div>
+                    <div className="text-xs text-muted-foreground">{t('details.testPrerequisiteChain')}</div>
                     {(result.prerequisite_chain || []).map((entry, i) => (
                       <div key={i} className="text-xs flex items-center gap-2">
                         <Badge
                           variant={entry.verdict === 'approved' ? 'default' : 'destructive'}
                           className="text-xs"
                         >
-                          {entry.verdict}
+                          {t(`verdict.${entry.verdict}`, { defaultValue: entry.verdict })}
                         </Badge>
                         <span className="font-mono">{entry.slug}</span>
                         {entry.version ? <span className="text-muted-foreground">v{entry.version}</span> : null}
-                        {!entry.required && <Badge variant="outline" className="text-xs">optional</Badge>}
+                        {!entry.required && <Badge variant="outline" className="text-xs">{t('details.optional')}</Badge>}
                         {entry.reason && <span className="text-muted-foreground">— {entry.reason}</span>}
                       </div>
                     ))}
@@ -797,10 +827,10 @@ function TestResolveDialog({ open, onOpenChange, relationId }: { open: boolean; 
                 )}
                 {(result.resolved_refs || []).length > 0 && (
                   <div className="pt-2 space-y-1">
-                    <div className="text-xs text-muted-foreground">Resolved resource refs</div>
+                    <div className="text-xs text-muted-foreground">{t('details.testResolvedRefs')}</div>
                     {(result.resolved_refs || []).map((entry, i) => (
                       <div key={i} className="text-xs flex items-center gap-2 flex-wrap">
-                        <Badge variant="outline" className="text-xs">{entry.source}</Badge>
+                        <Badge variant="outline" className="text-xs">{t(`sourceType.${entry.source}`, { defaultValue: entry.source })}</Badge>
                         <span className="font-mono">{entry.field_path}</span>
                         {entry.value != null && <span>→ {entry.value}</span>}
                         {entry.iri && <span className="text-muted-foreground">({entry.iri})</span>}
@@ -818,8 +848,8 @@ function TestResolveDialog({ open, onOpenChange, relationId }: { open: boolean; 
           )}
         </div>
         <div className="flex justify-end gap-2 pt-2">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
-          <Button onClick={run} disabled={busy}>{busy && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Resolve</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>{t('common:actions.close')}</Button>
+          <Button onClick={run} disabled={busy}>{busy && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}{t('details.buttonTestResolve')}</Button>
         </div>
       </DialogContent>
     </Dialog>

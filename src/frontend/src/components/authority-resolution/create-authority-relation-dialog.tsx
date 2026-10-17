@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
+import { useTranslation, Trans } from 'react-i18next';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Skeleton } from '@/components/ui/skeleton';
 import NativeSelect from '@/components/ui/native-select';
 import DomainMultiSelector from '@/components/ui/domain-multi-selector';
 import TagSelector from '@/components/ui/tag-selector';
@@ -58,11 +60,15 @@ const newEvidenceSource = (): EvidenceSourceInput => ({
 });
 
 export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCreated, relation }: Props) {
+  const { t } = useTranslation(['authority-resolution', 'common']);
   const { get, post, put } = useApi();
   const { toast } = useToast();
   const isEdit = !!relation;
   const [saving, setSaving] = useState(false);
   const [businessRoles, setBusinessRoles] = useState<BusinessRoleRead[]>([]);
+  const [rolesLoading, setRolesLoading] = useState(false);
+  const [slugsLoading, setSlugsLoading] = useState(false);
+  const [candidatesLoading, setCandidatesLoading] = useState(false);
 
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
@@ -103,19 +109,31 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
   // Load active Business Roles for the participant role picker (Settings feature).
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
     (async () => {
+      setRolesLoading(true);
       const { data } = await get<BusinessRoleRead[]>('/api/business-roles?role_status=active');
-      if (Array.isArray(data)) setBusinessRoles(data.filter((r) => r.status === 'active'));
+      if (!cancelled) {
+        if (Array.isArray(data)) setBusinessRoles(data.filter((r) => r.status === 'active'));
+        setRolesLoading(false);
+      }
     })();
+    return () => { cancelled = true; };
   }, [open, get]);
 
   // Load the catalog of AR family slugs for the Requires picker.
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
     (async () => {
+      setSlugsLoading(true);
       const { data } = await get<AuthorityRelationSlug[]>('/api/authority/relation-slugs');
-      if (Array.isArray(data)) setSlugCatalog(data);
+      if (!cancelled) {
+        if (Array.isArray(data)) setSlugCatalog(data);
+        setSlugsLoading(false);
+      }
     })();
+    return () => { cancelled = true; };
   }, [open, get]);
 
   // Prefill from the relation when editing; reset to defaults when creating.
@@ -207,7 +225,7 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
 
   const handleSubmit = async () => {
     if (!name.trim()) {
-      toast({ title: 'Name is required', variant: 'destructive' });
+      toast({ title: t('editor.validation.nameRequired'), variant: 'destructive' });
       return;
     }
 
@@ -222,16 +240,16 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
       const hasRole = !!a.role;
       if (hasPrincipal && !hasRole) {
         toast({
-          title: `Participant ${i + 1}: pick a business role`,
-          description: 'Every participant with a principal must be bound to a Business Role (from Settings).',
+          title: t('editor.affirmations.validation.roleRequired', { index: i + 1 }),
+          description: t('editor.affirmations.validation.roleRequiredDescription'),
           variant: 'destructive',
         });
         return;
       }
       if (hasRole && !hasPrincipal) {
         toast({
-          title: `Participant ${i + 1}: enter a principal`,
-          description: 'Every participant with a role must have an email or group identifier.',
+          title: t('editor.affirmations.validation.principalRequired', { index: i + 1 }),
+          description: t('editor.affirmations.validation.principalRequiredDescription'),
           variant: 'destructive',
         });
         return;
@@ -246,7 +264,7 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
         try {
           parsedMap = JSON.parse(s.columnMap);
         } catch (e) {
-          toast({ title: 'Invalid column map', description: `Column map for "${s.ref}" must be valid JSON.`, variant: 'destructive' });
+          toast({ title: t('editor.validation.invalidColumnMap'), description: t('editor.validation.columnMapError', { ref: s.ref }), variant: 'destructive' });
           return;
         }
       }
@@ -302,7 +320,7 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
       : await post<AuthorityRelation>('/api/authority/relations', payload);
     setSaving(false);
     if (error) {
-      toast({ title: isEdit ? 'Failed to save' : 'Failed to create', description: error, variant: 'destructive' });
+      toast({ title: isEdit ? t('common:actions.save') : t('common:actions.create'), description: error, variant: 'destructive' });
       return;
     }
     if (!isEdit) reset();
@@ -313,75 +331,74 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{isEdit ? 'Edit Authority Relation' : 'New Authority Relation'}</DialogTitle>
+          <DialogTitle>{isEdit ? t('editor.title.edit') : t('editor.title.new')}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <Label>Name *</Label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="EMEA-North discount approval" />
+              <Label>{t('editor.labels.name')} *</Label>
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('editor.fields.name.placeholder')} />
             </div>
             <div className="space-y-1">
-              <Label className="flex items-center gap-1.5">Slug <InfoHint>Stable key agents use to call this AR. Shared by every version of the family.</InfoHint></Label>
-              <Input value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="ar-disc-emea-north" />
+              <Label className="flex items-center gap-1.5">{t('editor.labels.slug')} <InfoHint>{t('editor.hints.slug')}</InfoHint></Label>
+              <Input value={slug} onChange={(e) => setSlug(e.target.value)} placeholder={t('editor.fields.slug.placeholder')} />
             </div>
           </div>
 
           <div className="space-y-1">
-            <Label>Description</Label>
+            <Label>{t('editor.labels.description')}</Label>
             <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
           </div>
 
-          <SectionTitle title="Authority Relation" info={<>The ARF tuple: <strong>who</strong> (actor role + signing identity) may perform which <strong>action</strong> on which <strong>object</strong>.</>} />
+          <SectionTitle title={t('editor.sections.authorityRelation')} info={<Trans i18nKey="editor.hints.authorityRelation" ns="authority-resolution" components={{ strong: <strong />, }} />} />
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <Label>Actor role</Label>
-              <Input value={actorRole} onChange={(e) => setActorRole(e.target.value)} placeholder="Regional Sales Manager – East" />
+              <Label>{t('editor.labels.actorRole')}</Label>
+              <Input value={actorRole} onChange={(e) => setActorRole(e.target.value)} placeholder={t('editor.fields.actorRole.placeholder')} />
             </div>
             <div className="space-y-1">
-              <Label>Actor identity</Label>
-              <Input value={actorIdentity} onChange={(e) => setActorIdentity(e.target.value)} placeholder="rsm-east@example.com" />
+              <Label>{t('editor.labels.actorIdentity')}</Label>
+              <Input value={actorIdentity} onChange={(e) => setActorIdentity(e.target.value)} placeholder={t('editor.fields.actorIdentity.placeholder')} />
             </div>
             <div className="space-y-1">
-              <Label>Action</Label>
+              <Label>{t('editor.labels.action')}</Label>
               <NativeSelect value={action} onChange={(e) => setAction(e.target.value)}>
-                {ACTION_VOCAB.map((a) => <option key={a} value={a}>{a}</option>)}
+                {ACTION_VOCAB.map((a) => <option key={a} value={a}>{t(`editor.actions.${a}`, { defaultValue: a })}</option>)}
               </NativeSelect>
             </div>
             <div className="space-y-1">
-              <Label>Object type</Label>
-              <Input value={objectType} onChange={(e) => setObjectType(e.target.value)} placeholder="data_product | data_contract" />
+              <Label>{t('editor.labels.objectType')}</Label>
+              <Input value={objectType} onChange={(e) => setObjectType(e.target.value)} placeholder={t('editor.fields.objectType.placeholder')} />
             </div>
             <div className="space-y-1">
-              <Label>Object id</Label>
-              <Input value={objectId} onChange={(e) => setObjectId(e.target.value)} placeholder="dp-1234" />
+              <Label>{t('editor.labels.objectId')}</Label>
+              <Input value={objectId} onChange={(e) => setObjectId(e.target.value)} placeholder={t('editor.fields.objectId.placeholder')} />
             </div>
           </div>
 
-          <SectionTitle title="Domain-Context" info="The evaluable predicate: the context (threshold, currency, market) this authority holds in. Criteria are evaluated against it." />
+          <SectionTitle title={t('editor.sections.domainContext')} info={t('editor.sectionDescriptions.domainContext')} />
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1">
-              <Label>Threshold</Label>
-              <Input value={threshold} onChange={(e) => setThreshold(e.target.value)} placeholder="0.15" />
+              <Label>{t('editor.labels.threshold')}</Label>
+              <Input value={threshold} onChange={(e) => setThreshold(e.target.value)} placeholder={t('editor.fields.threshold.placeholder')} />
             </div>
             <div className="space-y-1">
-              <Label>Currency</Label>
-              <Input value={currency} onChange={(e) => setCurrency(e.target.value)} placeholder="EUR" />
+              <Label>{t('editor.labels.currency')}</Label>
+              <Input value={currency} onChange={(e) => setCurrency(e.target.value)} placeholder={t('editor.fields.currency.placeholder')} />
             </div>
             <div className="space-y-1">
-              <Label>Market</Label>
-              <Input value={market} onChange={(e) => setMarket(e.target.value)} placeholder="emea-north" />
+              <Label>{t('editor.labels.market')}</Label>
+              <Input value={market} onChange={(e) => setMarket(e.target.value)} placeholder={t('editor.fields.market.placeholder')} />
             </div>
           </div>
           <SectionTitle
-            title="Decision criteria"
-            info={<>Author the rules the resolution gate enforces (and the DNA-Coefficient measures divergence
-            against). Each criterion is a reusable <strong>Compliance Check</strong>.</>}
+            title={t('editor.sections.decisionCriteria')}
+            info={<Trans i18nKey="editor.sectionDescriptions.decisionCriteria" ns="authority-resolution" components={{ strong: <strong />, }} />}
           />
           <CriteriaBuilder rows={criteriaRows} onChange={setCriteriaRows} />
 
-          <div className="text-sm font-semibold text-muted-foreground pt-2">Domains</div>
+          <div className="text-sm font-semibold text-muted-foreground pt-2">{t('editor.sections.domains')}</div>
           <DomainMultiSelector
             value={domainIds}
             primaryDomainId={primaryDomainId}
@@ -389,10 +406,8 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
           />
 
           <SectionTitle
-            title="Evidence sources"
-            info={<>Bind the past decisions the DNA-Coefficient is measured against. Add one or more sources —
-            a <strong>Delta table</strong>, a <strong>Data Product</strong>, or an <strong>Asset</strong>
-            (volume file, table, or view). Each maps its columns to the canonical AR elements via the column map.</>}
+            title={t('editor.sections.evidenceSources')}
+            info={<Trans i18nKey="editor.sectionDescriptions.evidenceSources" ns="authority-resolution" components={{ strong: <strong />, }} />}
           />
           {evidenceSources.map((s, idx) => (
             <div key={idx} className="rounded-md border p-3 space-y-2">
@@ -402,14 +417,14 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
                   value={s.type}
                   onChange={(e) => setEvidenceSources((prev) => prev.map((x, i) => i === idx ? { ...x, type: e.target.value } : x))}
                 >
-                  <option value="delta_table">Delta table</option>
-                  <option value="data_product">Data Product</option>
-                  <option value="asset">Asset</option>
+                  <option value="delta_table">{t('editor.evidenceSources.type.deltaTable')}</option>
+                  <option value="data_product">{t('editor.evidenceSources.type.dataProduct')}</option>
+                  <option value="asset">{t('editor.evidenceSources.type.asset')}</option>
                 </NativeSelect>
                 <Input
                   value={s.ref}
                   onChange={(e) => setEvidenceSources((prev) => prev.map((x, i) => i === idx ? { ...x, ref: e.target.value } : x))}
-                  placeholder={s.type === 'delta_table' ? 'catalog.schema.promotion_decisions' : s.type === 'data_product' ? 'data product id' : 'asset FQN (table/view/volume)'}
+                  placeholder={s.type === 'delta_table' ? t('editor.evidenceSources.placeholders.deltaTable') : s.type === 'data_product' ? t('editor.evidenceSources.placeholders.dataProduct') : t('editor.evidenceSources.placeholders.asset')}
                 />
                 <Button variant="ghost" size="icon" onClick={() => setEvidenceSources((prev) => prev.filter((_, i) => i !== idx))}>
                   <Trash2 className="h-4 w-4" />
@@ -418,10 +433,10 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
               <Input
                 value={s.label}
                 onChange={(e) => setEvidenceSources((prev) => prev.map((x, i) => i === idx ? { ...x, label: e.target.value } : x))}
-                placeholder="Optional label"
+                placeholder={t('editor.evidenceSources.placeholders.label')}
               />
               <div className="space-y-1">
-                <Label className="text-xs">Column map (JSON)</Label>
+                <Label className="text-xs">{t('editor.evidenceSources.placeholders.columnMap')}</Label>
                 <Textarea
                   value={s.columnMap}
                   onChange={(e) => setEvidenceSources((prev) => prev.map((x, i) => i === idx ? { ...x, columnMap: e.target.value } : x))}
@@ -430,20 +445,21 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
                 />
               </div>
               {s.type === 'data_product' && (
-                <p className="text-xs text-muted-foreground">Data Product sources are recorded but not yet read for DNAco (v1).</p>
+                <p className="text-xs text-muted-foreground">{t('editor.evidenceSources.messages.dataProductNotYetSupported')}</p>
               )}
             </div>
           ))}
           <Button variant="outline" size="sm" onClick={() => setEvidenceSources((prev) => [...prev, newEvidenceSource()])}>
-            <Plus className="h-4 w-4 mr-1" /> Add evidence source
+            <Plus className="h-4 w-4 mr-1" /> {t('editor.buttons.addEvidenceSource')}
           </Button>
 
           <SectionTitle
-            title="Participants"
-            info={<>The N-functional gate and review. <strong>Approvers</strong> count toward the affirmation gate.
-            <strong> Reviewers</strong> are interviewed during the review process to confirm the relation reflects
-            reality. A principal can be both.</>}
+            title={t('editor.sections.participants')}
+            info={<Trans i18nKey="editor.sectionDescriptions.participants" ns="authority-resolution" components={{ strong: <strong />, }} />}
           />
+          {rolesLoading ? (
+            <Skeleton className="h-9 w-full" />
+          ) : null}
           {affirmations.map((a, idx) => {
             // Flag the empty field on a half-authored row so the author sees
             // *which* field is missing without having to re-read the toast.
@@ -466,7 +482,7 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
                   });
                 }}
               >
-                <option value="">Select a role…</option>
+                <option value="">{t('editor.affirmations.selectRoleLabel')}</option>
                 {businessRoles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
                 {a.business_role_id && !businessRoles.some((r) => r.id === a.business_role_id) && (
                   <option value={a.business_role_id}>{a.role || a.business_role_id}</option>
@@ -477,7 +493,7 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
                 aria-invalid={principalMissing || undefined}
                 className={principalMissing ? 'border-destructive focus-visible:ring-destructive' : undefined}
                 onChange={(e) => updateAffirmation(idx, { principal: e.target.value })}
-                placeholder="principal (email or group)"
+                placeholder={t('editor.affirmations.principalPlaceholder')}
               />
               <div className="flex items-center gap-3">
                 <NativeSelect
@@ -485,16 +501,16 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
                   value={a.principal_type}
                   onChange={(e) => updateAffirmation(idx, { principal_type: e.target.value })}
                 >
-                  <option value="user">user</option>
-                  <option value="group">group</option>
+                  <option value="user">{t('editor.affirmations.principalTypeUser')}</option>
+                  <option value="group">{t('editor.affirmations.principalTypeGroup')}</option>
                 </NativeSelect>
                 <label className="flex items-center gap-1 text-xs whitespace-nowrap">
                   <input type="checkbox" checked={a.is_approver ?? true}
-                    onChange={(e) => updateAffirmation(idx, { is_approver: e.target.checked })} /> approver
+                    onChange={(e) => updateAffirmation(idx, { is_approver: e.target.checked })} /> {t('editor.affirmations.approverLabel')}
                 </label>
                 <label className="flex items-center gap-1 text-xs whitespace-nowrap">
                   <input type="checkbox" checked={a.is_reviewer ?? false}
-                    onChange={(e) => updateAffirmation(idx, { is_reviewer: e.target.checked })} /> reviewer
+                    onChange={(e) => updateAffirmation(idx, { is_reviewer: e.target.checked })} /> {t('editor.affirmations.reviewerLabel')}
                 </label>
                 <Button variant="ghost" size="icon" onClick={() => setAffirmations((prev) => prev.filter((_, i) => i !== idx))}>
                   <Trash2 className="h-4 w-4" />
@@ -507,15 +523,16 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
             variant="outline" size="sm"
             onClick={() => setAffirmations((prev) => [...prev, { role: '', principal: '', principal_type: 'user', required: true, is_approver: true, is_reviewer: false }])}
           >
-            <Plus className="h-4 w-4 mr-1" /> Add participant
+            <Plus className="h-4 w-4 mr-1" /> {t('editor.buttons.addParticipant')}
           </Button>
 
           <SectionTitle
-            title="Requires"
-            info={<>Prerequisite ARs: each must resolve <strong>approved</strong> before this one
-            decides. Keyed by the family slug (not the version) so this AR keeps working when a
-            prerequisite is version-bumped. Save requires this AR to carry a slug of its own.</>}
+            title={t('editor.sections.requires')}
+            info={<Trans i18nKey="editor.sectionDescriptions.requires" ns="authority-resolution" components={{ strong: <strong />, }} />}
           />
+          {slugsLoading ? (
+            <Skeleton className="h-9 w-full" />
+          ) : null}
           {prerequisites.map((p, idx) => {
             // Avoid offering the current AR (edit mode) or any already-picked slug.
             const takenSlugs = new Set(prerequisites.filter((_, j) => j !== idx).map((q) => q.prerequisite_family_slug));
@@ -529,12 +546,12 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
                     setPrerequisites((prev) => prev.map((x, i) => (i === idx ? { ...x, prerequisite_family_slug: e.target.value } : x)))
                   }
                 >
-                  <option value="">Select a prerequisite AR…</option>
+                  <option value="">{t('editor.prerequisites.selectPrerequisiteLabel')}</option>
                   {slugCatalog
                     .filter((s) => !takenSlugs.has(s.family_slug) || s.family_slug === p.prerequisite_family_slug)
                     .map((s) => (
                       <option key={s.family_slug} value={s.family_slug}>
-                        {s.name} ({s.family_slug}) — {s.status}
+                        {s.name} ({s.family_slug}) — {t(`status.${s.status}`, { defaultValue: s.status })}
                       </option>
                     ))}
                 </NativeSelect>
@@ -546,14 +563,14 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
                       setPrerequisites((prev) => prev.map((x, i) => (i === idx ? { ...x, required: e.target.checked } : x)))
                     }
                   />
-                  required
+                  {t('editor.prerequisites.requiredLabel')}
                 </label>
                 <Input
                   value={p.notes || ''}
                   onChange={(e) =>
                     setPrerequisites((prev) => prev.map((x, i) => (i === idx ? { ...x, notes: e.target.value } : x)))
                   }
-                  placeholder="Optional note"
+                  placeholder={t('editor.prerequisites.notePlaceholder')}
                 />
                 <Button variant="ghost" size="icon" onClick={() => setPrerequisites((prev) => prev.filter((_, i) => i !== idx))}>
                   <Trash2 className="h-4 w-4" />
@@ -570,18 +587,12 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
               ])
             }
           >
-            <Plus className="h-4 w-4 mr-1" /> Add prerequisite
+            <Plus className="h-4 w-4 mr-1" /> {t('editor.buttons.addPrerequisite')}
           </Button>
 
           <SectionTitle
-            title="Resource refs"
-            info={<>Where field values come from. Instead of a plain literal, back a canonical field (<code>actor_identity</code>,
-            <code>object_id</code>, <code>domain_context.&lt;key&gt;</code>) with a typed pointer. An
-            <strong> Ontos entity</strong> ref re-resolves against the knowledge graph at eval time so
-            the value stays current when the underlying concept, product, or domain changes.
-            <strong> MCP tool</strong> refs call a Unity Catalog MCP service at decision time; criteria can
-            compare against the resolved value as <code>obj.ref_&lt;field_path&gt;</code> (dots become
-            underscores, e.g. <code>obj.ref_actor_identity</code>).</>}
+            title={t('editor.sections.resourceRefs')}
+            info={<Trans i18nKey="editor.sectionDescriptions.resourceRefs" ns="authority-resolution" values={{ keyPlaceholder: '<key>', fieldPlaceholder: '<field_path>' }} shouldUnescape components={{ strong: <strong />, code: <code /> }} />}
           />
           {resourceRefs.map((r, idx) => {
             const candidateKey = `${r.entity_type || ''}::${idx}`;
@@ -596,7 +607,7 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
                         prev.map((x, i) => (i === idx ? { ...x, field_path: e.target.value } : x)),
                       )
                     }
-                    placeholder="actor_identity | object_id | domain_context.market"
+                    placeholder={t('editor.resourceRefs.fieldPathPlaceholder')}
                   />
                   <NativeSelect
                     className="w-44"
@@ -623,9 +634,9 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
                       )
                     }
                   >
-                    <option value="literal">Literal</option>
-                    <option value="ontos_entity">Ontos entity</option>
-                    <option value="mcp_tool">MCP tool</option>
+                    <option value="literal">{t('editor.resourceRefs.refType.literal')}</option>
+                    <option value="ontos_entity">{t('editor.resourceRefs.refType.ontosEntity')}</option>
+                    <option value="mcp_tool">{t('editor.resourceRefs.refType.mcpTool')}</option>
                   </NativeSelect>
                   <Button
                     variant="ghost" size="icon"
@@ -642,7 +653,7 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
                         prev.map((x, i) => (i === idx ? { ...x, literal_value: e.target.value } : x)),
                       )
                     }
-                    placeholder="Literal value (e.g. rsm-east@example.com)"
+                    placeholder={t('editor.resourceRefs.literalPlaceholder')}
                   />
                 )}
                 {r.ref_type === 'mcp_tool' && (
@@ -655,56 +666,66 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
                 )}
                 {r.ref_type === 'ontos_entity' && (
                   <div className="grid grid-cols-[auto_1fr] gap-2 items-center">
-                    <NativeSelect
-                      className="w-40"
-                      value={r.entity_type || ''}
-                      onChange={async (e) => {
-                        const entity_type = e.target.value || null;
-                        setResourceRefs((prev) =>
-                          prev.map((x, i) =>
-                            i === idx ? { ...x, entity_type, entity_id: null } : x,
-                          ),
-                        );
-                        if (entity_type) {
-                          const { data } = await get<EntityRefCandidate[]>(
-                            `/api/authority/entity-ref-candidates?entity_type=${entity_type}&limit=100`,
+                    {candidatesLoading && r.entity_type ? (
+                      <Skeleton className="h-9 w-full" />
+                    ) : (
+                      <NativeSelect
+                        className="w-40"
+                        value={r.entity_type || ''}
+                        onChange={async (e) => {
+                          const entity_type = e.target.value || null;
+                          setResourceRefs((prev) =>
+                            prev.map((x, i) =>
+                              i === idx ? { ...x, entity_type, entity_id: null } : x,
+                            ),
                           );
-                          if (Array.isArray(data)) {
-                            setRefCandidates((prev) => ({
-                              ...prev,
-                              [`${entity_type}::${idx}`]: data,
-                            }));
+                          if (entity_type) {
+                            setCandidatesLoading(true);
+                            const { data } = await get<EntityRefCandidate[]>(
+                              `/api/authority/entity-ref-candidates?entity_type=${entity_type}&limit=100`,
+                            );
+                            if (Array.isArray(data)) {
+                              setRefCandidates((prev) => ({
+                                ...prev,
+                                [`${entity_type}::${idx}`]: data,
+                              }));
+                            }
+                            setCandidatesLoading(false);
                           }
+                        }}
+                      >
+                        <option value="">{t('editor.resourceRefs.entityTypePlaceholder')}</option>
+                        <option value="business_concept">{t('editor.resourceRefs.entityType.businessConcept')}</option>
+                        <option value="data_product">{t('editor.resourceRefs.entityType.dataProduct')}</option>
+                        <option value="data_domain">{t('editor.resourceRefs.entityType.dataDomain')}</option>
+                      </NativeSelect>
+                    )}
+                    {candidatesLoading ? (
+                      <Skeleton className="h-9 w-full" />
+                    ) : (
+                      <NativeSelect
+                        value={r.entity_id || ''}
+                        onChange={(e) =>
+                          setResourceRefs((prev) =>
+                            prev.map((x, i) => (i === idx ? { ...x, entity_id: e.target.value } : x)),
+                          )
                         }
-                      }}
-                    >
-                      <option value="">Pick a type…</option>
-                      <option value="business_concept">Business concept</option>
-                      <option value="data_product">Data product</option>
-                      <option value="data_domain">Data domain</option>
-                    </NativeSelect>
-                    <NativeSelect
-                      value={r.entity_id || ''}
-                      onChange={(e) =>
-                        setResourceRefs((prev) =>
-                          prev.map((x, i) => (i === idx ? { ...x, entity_id: e.target.value } : x)),
-                        )
-                      }
-                      disabled={!r.entity_type}
-                    >
-                      <option value="">
-                        {r.entity_type ? 'Pick an entity…' : 'Pick a type first…'}
-                      </option>
-                      {candidates.map((c) => (
-                        <option key={c.entity_id} value={c.entity_id}>
-                          {c.label}
+                        disabled={!r.entity_type}
+                      >
+                        <option value="">
+                          {r.entity_type ? t('editor.resourceRefs.entityIdPlaceholder') : t('editor.resourceRefs.entityIdDisabledPlaceholder')}
                         </option>
-                      ))}
-                      {/* Preserve the current pick when it isn't in the fetched slice. */}
-                      {r.entity_id && !candidates.some((c) => c.entity_id === r.entity_id) && (
-                        <option value={r.entity_id}>{r.entity_id}</option>
-                      )}
-                    </NativeSelect>
+                        {candidates.map((c) => (
+                          <option key={c.entity_id} value={c.entity_id}>
+                            {c.label}
+                          </option>
+                        ))}
+                        {/* Preserve the current pick when it isn't in the fetched slice. */}
+                        {r.entity_id && !candidates.some((c) => c.entity_id === r.entity_id) && (
+                          <option value={r.entity_id}>{r.entity_id}</option>
+                        )}
+                      </NativeSelect>
+                    )}
                   </div>
                 )}
               </div>
@@ -719,17 +740,14 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
               ])
             }
           >
-            <Plus className="h-4 w-4 mr-1" /> Add resource ref
+            <Plus className="h-4 w-4 mr-1" /> {t('editor.buttons.addResourceRef')}
           </Button>
           {resourceRefs.some((r) => r.ref_type === 'mcp_tool') && (
             <div className="space-y-1">
               <Label className="flex items-center gap-1.5">
-                MCP resolver credentials
+                {t('editor.sections.mcpResolverCredentials')}
                 <InfoHint>
-                  <strong>OBO:</strong> MCP tools run with the caller&apos;s own permissions; a caller without a
-                  forwarded token gets no_authority. <strong>App service principal:</strong> tools run as the Ontos
-                  app for every caller, so the result no longer depends on who is asking. Only use this when the
-                  tool must see data callers cannot.
+                  <Trans i18nKey="editor.hints.mcpResolverCredentials" ns="authority-resolution" components={{ strong: <strong />, }} />
                 </InfoHint>
               </Label>
               <NativeSelect
@@ -737,36 +755,34 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
                 value={resolverAuth}
                 onChange={(e) => setResolverAuth(e.target.value as ResolverAuth)}
               >
-                <option value="obo">Calling user / agent (OBO) — default</option>
-                <option value="app_sp">Ontos app service principal</option>
+                <option value="obo">{t('editor.mcpResolverAuth.obo')}</option>
+                <option value="app_sp">{t('editor.mcpResolverAuth.appServicePrincipal')}</option>
               </NativeSelect>
             </div>
           )}
 
-          <SectionTitle title="DNA-Coefficient schedule" info="How often the DNA-Coefficient is recomputed against the evidence sources." />
+          <SectionTitle title={t('editor.sections.dnaSchedule')} info={t('editor.sectionDescriptions.dnaSchedule')} />
           <ScheduleSelect value={scheduleCron} onChange={setScheduleCron} />
 
-          <SectionTitle title="Tags" />
-          <TagSelector value={tags} onChange={setTags} placeholder="Search and select tags…" />
+          <SectionTitle title={t('editor.sections.tags')} />
+          <TagSelector value={tags} onChange={setTags} placeholder={t('common:actions.search')} />
 
           <div className="space-y-1 pt-2">
             <Label className="flex items-center gap-1.5">
-              Max DNA-Coefficient to activate
+              {t('editor.labels.dnaMaxThreshold')}
               <InfoHint>
-                The divergence ceiling. The DNA-Coefficient measures how far past decisions <strong>diverge</strong> from
-                this rule (0.0 = perfect match, higher = worse). The AR can be activated only while its measured value
-                stays at or below this ceiling; an active AR that later drifts above it is auto-flagged <strong>Needs Review</strong>.
+                <Trans i18nKey="editor.hints.dnaMaxThreshold" ns="authority-resolution" components={{ strong: <strong />, }} />
               </InfoHint>
             </Label>
-            <Input value={dnaMax} onChange={(e) => setDnaMax(e.target.value)} placeholder="0.3" className="max-w-[200px]" />
+            <Input value={dnaMax} onChange={(e) => setDnaMax(e.target.value)} placeholder={t('editor.fields.dnaMaxThreshold.placeholder')} className="max-w-[200px]" />
           </div>
         </div>
 
         <div className="flex justify-end gap-2 pt-4">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>{t('common:actions.cancel')}</Button>
           <Button onClick={handleSubmit} disabled={saving}>
             {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            {isEdit ? 'Save' : 'Create'}
+            {isEdit ? t('common:actions.save') : t('common:actions.create')}
           </Button>
         </div>
       </DialogContent>

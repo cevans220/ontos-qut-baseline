@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import NativeSelect from '@/components/ui/native-select';
 import { useApi } from '@/hooks/use-api';
 import { Plus, Trash2, CheckCircle2, XCircle } from 'lucide-react';
@@ -45,18 +47,18 @@ export interface CriterionRow {
   dimension: string;   // DNAco dimension (people|policy|…)
 }
 
-const PREDICATE_DEFAULTS: Record<Predicate, { field: string; direction: string; name: string; fail: string }> = {
-  allowlist: { field: 'actor_identity', direction: 'actual-exceeds-documented', name: 'Authorized signer', fail: 'Signer is not authorized.' },
-  ceiling: { field: 'value', direction: 'actual-exceeds-documented', name: 'Within threshold', fail: 'Value exceeds the threshold without escalation.' },
-  required_flag: { field: 'cosign_present', direction: 'documented-exceeds-actual', name: 'Required flag present', fail: 'A required condition is missing.' },
-  action_match: { field: 'action', direction: 'neutral', name: 'Action match', fail: 'Action is not permitted.' },
-};
+const getPREDICATE_DEFAULTS = (t: (key: string, options?: any) => string): Record<Predicate, { field: string; direction: string; name: string; fail: string }> => ({
+  allowlist: { field: 'actor_identity', direction: 'actual-exceeds-documented', name: t('criteria.predicateDefaults.allowlistName'), fail: t('criteria.predicateDefaults.allowlistFailure') },
+  ceiling: { field: 'value', direction: 'actual-exceeds-documented', name: t('criteria.predicateDefaults.ceilingName'), fail: t('criteria.predicateDefaults.ceilingFailure') },
+  required_flag: { field: 'cosign_present', direction: 'documented-exceeds-actual', name: t('criteria.predicateDefaults.requiredFlagName'), fail: t('criteria.predicateDefaults.requiredFlagFailure') },
+  action_match: { field: 'action', direction: 'neutral', name: t('criteria.predicateDefaults.actionMatchName'), fail: t('criteria.predicateDefaults.actionMatchFailure') },
+});
 
 export const emptyCriterionRow = (): CriterionRow => ({
   mode: 'builder', predicate: 'allowlist', field: 'actor_identity', values: '', max: '0.15',
   allowEscalation: true, rawRule: '', policyId: '',
-  name: PREDICATE_DEFAULTS.allowlist.name, failureMessage: PREDICATE_DEFAULTS.allowlist.fail,
-  direction: PREDICATE_DEFAULTS.allowlist.direction, weight: '1.0', dimension: 'people',
+  name: '', failureMessage: '',
+  direction: 'actual-exceeds-documented', weight: '1.0', dimension: 'people',
 });
 
 /** Existing criteria round-trip into raw rows (no rule parsing). */
@@ -123,22 +125,31 @@ interface Props {
 }
 
 export default function CriteriaBuilder({ rows, onChange }: Props) {
+  const { t } = useTranslation(['authority-resolution']);
   const { get, post } = useApi();
   const [checks, setChecks] = useState<ReusableCheck[]>([]);
+  const [checksLoading, setChecksLoading] = useState(false);
   const [validation, setValidation] = useState<Record<number, { passed: boolean; message?: string | null }>>({});
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
+      setChecksLoading(true);
       const { data } = await get<ReusableCheck[]>('/api/authority/criteria/policies');
-      if (Array.isArray(data)) setChecks(data);
+      if (!cancelled) {
+        if (Array.isArray(data)) setChecks(data);
+        setChecksLoading(false);
+      }
     })();
+    return () => { cancelled = true; };
   }, [get]);
 
   const patch = (idx: number, p: Partial<CriterionRow>) =>
     onChange(rows.map((r, i) => (i === idx ? { ...r, ...p } : r)));
 
   const setPredicate = (idx: number, predicate: Predicate) => {
-    const d = PREDICATE_DEFAULTS[predicate];
+    const defaults = getPREDICATE_DEFAULTS(t);
+    const d = defaults[predicate];
     patch(idx, { predicate, field: d.field, direction: d.direction, name: d.name, failureMessage: d.fail });
   };
 
@@ -154,9 +165,7 @@ export default function CriteriaBuilder({ rows, onChange }: Props) {
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        The gate approves only when every enabled criterion passes. A criterion that fails for a past
-        decision counts as a divergence in the DNA-Coefficient — weighted and signed by its direction.
-        One compound rule is fine; split into separate criteria only when you want per-reason divergence.
+        {t('criteria.description')}
       </p>
 
       {rows.map((r, idx) => (
@@ -168,9 +177,9 @@ export default function CriteriaBuilder({ rows, onChange }: Props) {
               value={r.mode}
               onChange={(e) => patch(idx, { mode: e.target.value as Mode })}
             >
-              <option value="builder">Structured</option>
-              <option value="raw">Raw ASSERT</option>
-              <option value="existing">Reuse existing check</option>
+              <option value="builder">{t('criteria.mode.builder')}</option>
+              <option value="raw">{t('criteria.mode.raw')}</option>
+              <option value="existing">{t('criteria.mode.existing')}</option>
             </NativeSelect>
             <div className="flex-1" />
             <Button variant="ghost" size="icon" onClick={() => onChange(rows.filter((_, i) => i !== idx))}>
@@ -179,26 +188,30 @@ export default function CriteriaBuilder({ rows, onChange }: Props) {
           </div>
 
           {r.mode === 'existing' ? (
-            <NativeSelect
-              value={r.policyId}
-              onChange={(e) => patch(idx, { policyId: e.target.value })}
-            >
-              <option value="">Select a Compliance Check…</option>
-              {checks.map((c) => <option key={c.id} value={c.id}>{c.name}{c.category ? ` (${c.category})` : ''}</option>)}
-            </NativeSelect>
+            checksLoading ? (
+              <Skeleton className="h-9 w-full" />
+            ) : (
+              <NativeSelect
+                value={r.policyId}
+                onChange={(e) => patch(idx, { policyId: e.target.value })}
+              >
+                <option value="">{t('criteria.selections.selectComplianceCheck')}</option>
+                {checks.map((c) => <option key={c.id} value={c.id}>{c.name}{c.category ? ` (${c.category})` : ''}</option>)}
+              </NativeSelect>
+            )
           ) : r.mode === 'raw' ? (
             <div className="space-y-1">
               <Input
                 value={r.name}
                 onChange={(e) => patch(idx, { name: e.target.value })}
-                placeholder="Criterion name"
+                placeholder={t('criteria.fields.criterionNamePlaceholder')}
               />
               <Textarea
                 value={r.rawRule}
                 onChange={(e) => patch(idx, { rawRule: e.target.value })}
                 rows={2}
                 className="font-mono text-xs"
-                placeholder="obj.actor_identity IN ['rsm-east'] AND (obj.value <= 0.15 OR obj.escalated = True)"
+                placeholder={t('criteria.fields.rawRulePlaceholder')}
               />
             </div>
           ) : (
@@ -208,41 +221,41 @@ export default function CriteriaBuilder({ rows, onChange }: Props) {
                   value={r.predicate}
                   onChange={(e) => setPredicate(idx, e.target.value as Predicate)}
                 >
-                  <option value="allowlist">Signer allowlist</option>
-                  <option value="ceiling">Numeric ceiling</option>
-                  <option value="required_flag">Required flag</option>
-                  <option value="action_match">Action match</option>
+                  <option value="allowlist">{t('criteria.predicate.allowlist')}</option>
+                  <option value="ceiling">{t('criteria.predicate.ceiling')}</option>
+                  <option value="required_flag">{t('criteria.predicate.requiredFlag')}</option>
+                  <option value="action_match">{t('criteria.predicate.actionMatch')}</option>
                 </NativeSelect>
-                <Input value={r.field} onChange={(e) => patch(idx, { field: e.target.value })} placeholder="field (e.g. actor_identity)" />
+                <Input value={r.field} onChange={(e) => patch(idx, { field: e.target.value })} placeholder={t('criteria.fields.fieldPlaceholder')} />
               </div>
               {r.predicate === 'allowlist' && (
-                <Input value={r.values} onChange={(e) => patch(idx, { values: e.target.value })} placeholder="rsm-east, rsm-west" />
+                <Input value={r.values} onChange={(e) => patch(idx, { values: e.target.value })} placeholder={t('criteria.fields.allowlistPlaceholder')} />
               )}
               {r.predicate === 'action_match' && (
-                <Input value={r.values} onChange={(e) => patch(idx, { values: e.target.value })} placeholder="approve" />
+                <Input value={r.values} onChange={(e) => patch(idx, { values: e.target.value })} placeholder={t('criteria.fields.actionMatchPlaceholder')} />
               )}
               {r.predicate === 'ceiling' && (
                 <div className="flex items-center gap-3">
-                  <Input value={r.max} onChange={(e) => patch(idx, { max: e.target.value })} placeholder="0.15" className="max-w-[140px]" />
+                  <Input value={r.max} onChange={(e) => patch(idx, { max: e.target.value })} placeholder={t('criteria.fields.ceilingPlaceholder')} className="max-w-[140px]" />
                   <label className="flex items-center gap-1 text-xs">
                     <input type="checkbox" checked={r.allowEscalation} onChange={(e) => patch(idx, { allowEscalation: e.target.checked })} />
-                    allow if escalated
+                    {t('criteria.fields.ceilingAllowEscalation')}
                   </label>
                 </div>
               )}
-              <div className="text-xs font-mono text-muted-foreground break-all">ASSERT {builderRule(r)}</div>
-              <Input value={r.name} onChange={(e) => patch(idx, { name: e.target.value })} placeholder="Criterion name" />
-              <Input value={r.failureMessage} onChange={(e) => patch(idx, { failureMessage: e.target.value })} placeholder="Denial message shown when this fails" />
+              <div className="text-xs font-mono text-muted-foreground break-all">{t('criteria.assertPrefix')} {builderRule(r)}</div>
+              <Input value={r.name} onChange={(e) => patch(idx, { name: e.target.value })} placeholder={t('criteria.fields.criterionNamePlaceholder')} />
+              <Input value={r.failureMessage} onChange={(e) => patch(idx, { failureMessage: e.target.value })} placeholder={t('criteria.fields.failureMessagePlaceholder')} />
             </div>
           )}
 
           {r.mode !== 'existing' && (
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => validate(idx)}>Validate</Button>
+              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => validate(idx)}>{t('criteria.validation.validateButton')}</Button>
               {validation[idx] && (
                 <span className={`text-xs flex items-center gap-1 ${validation[idx].passed ? 'text-green-600' : 'text-red-600'}`}>
                   {validation[idx].passed ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
-                  {validation[idx].passed ? 'Rule is valid' : (validation[idx].message || 'Invalid')}
+                  {validation[idx].passed ? t('criteria.validation.ruleValid') : (validation[idx].message || t('criteria.validation.ruleInvalid'))}
                 </span>
               )}
             </div>
@@ -250,32 +263,32 @@ export default function CriteriaBuilder({ rows, onChange }: Props) {
 
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1">
-              <Label className="text-xs whitespace-nowrap">Direction</Label>
+              <Label className="text-xs whitespace-nowrap">{t('criteria.divergence.direction')}</Label>
               <NativeSelect
                 className="w-56"
                 selectClassName="h-8 text-xs"
                 value={r.direction}
                 onChange={(e) => patch(idx, { direction: e.target.value })}
               >
-                {ARF_DIRECTIONS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+                {ARF_DIRECTIONS.map((d) => <option key={d.value} value={d.value}>{t(`direction.${d.value}`, { defaultValue: d.label })}</option>)}
               </NativeSelect>
             </div>
             <div className="flex items-center gap-1">
-              <Label className="text-xs">Weight</Label>
+              <Label className="text-xs">{t('criteria.divergence.weight')}</Label>
               <Input value={r.weight} onChange={(e) => patch(idx, { weight: e.target.value })} className="h-8 w-16 text-xs" />
             </div>
             <div className="flex items-center gap-1">
-              <Label className="text-xs whitespace-nowrap">Dimension</Label>
+              <Label className="text-xs whitespace-nowrap">{t('criteria.divergence.dimension')}</Label>
               <Input value={r.dimension} onChange={(e) => patch(idx, { dimension: e.target.value })}
-                     className="h-8 w-24 text-xs" placeholder="people" />
+                     className="h-8 w-24 text-xs" placeholder={t('criteria.divergence.dimensionPlaceholder')} />
             </div>
-            {r.mode === 'existing' && <Badge variant="outline" className="text-xs">reused check</Badge>}
+            {r.mode === 'existing' && <Badge variant="outline" className="text-xs">{t('criteria.divergence.reusedCheckBadge')}</Badge>}
           </div>
         </div>
       ))}
 
       <Button variant="outline" size="sm" onClick={() => onChange([...rows, emptyCriterionRow()])}>
-        <Plus className="h-4 w-4 mr-1" /> Add criterion
+        <Plus className="h-4 w-4 mr-1" /> {t('criteria.buttons.addCriterion')}
       </Button>
     </div>
   );

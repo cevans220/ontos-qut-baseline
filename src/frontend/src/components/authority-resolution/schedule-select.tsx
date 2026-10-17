@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -12,8 +13,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
  */
 
 type Frequency = 'off' | 'hourly' | 'daily' | 'weekly' | 'monthly' | 'custom';
-
-const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 interface Parsed {
   frequency: Frequency;
@@ -59,16 +58,27 @@ interface Props {
 }
 
 export default function ScheduleSelect({ value, onChange }: Props) {
+  const { t } = useTranslation(['authority-resolution']);
   const parsed = useMemo(() => parseCron(value), [value]);
   const timeStr = `${String(parsed.hour).padStart(2, '0')}:${String(parsed.minute).padStart(2, '0')}`;
+
+  const weekdays = [
+    t('schedule.dayOfWeek.sunday'),
+    t('schedule.dayOfWeek.monday'),
+    t('schedule.dayOfWeek.tuesday'),
+    t('schedule.dayOfWeek.wednesday'),
+    t('schedule.dayOfWeek.thursday'),
+    t('schedule.dayOfWeek.friday'),
+    t('schedule.dayOfWeek.saturday'),
+  ];
 
   const update = (patch: Partial<Parsed>) => {
     const next = { ...parsed, ...patch };
     onChange(buildCron(next));
   };
 
-  const onTime = (t: string) => {
-    const [hh, mm] = t.split(':');
+  const onTime = (time: string) => {
+    const [hh, mm] = time.split(':');
     update({ hour: parseInt(hh, 10) || 0, minute: parseInt(mm, 10) || 0 });
   };
 
@@ -76,7 +86,7 @@ export default function ScheduleSelect({ value, onChange }: Props) {
     <div className="space-y-2">
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1">
-          <Label>Recompute frequency</Label>
+          <Label>{t('schedule.frequency.label')}</Label>
           <Select
             value={parsed.frequency}
             onValueChange={(f) => {
@@ -86,25 +96,25 @@ export default function ScheduleSelect({ value, onChange }: Props) {
           >
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="off">Off (manual only)</SelectItem>
-              <SelectItem value="hourly">Hourly</SelectItem>
-              <SelectItem value="daily">Daily</SelectItem>
-              <SelectItem value="weekly">Weekly</SelectItem>
-              <SelectItem value="monthly">Monthly (1st)</SelectItem>
-              {parsed.frequency === 'custom' && <SelectItem value="custom">Custom</SelectItem>}
+              <SelectItem value="off">{t('schedule.frequency.off')}</SelectItem>
+              <SelectItem value="hourly">{t('schedule.frequency.hourly')}</SelectItem>
+              <SelectItem value="daily">{t('schedule.frequency.daily')}</SelectItem>
+              <SelectItem value="weekly">{t('schedule.frequency.weekly')}</SelectItem>
+              <SelectItem value="monthly">{t('schedule.frequency.monthly')}</SelectItem>
+              {parsed.frequency === 'custom' && <SelectItem value="custom">{t('schedule.frequency.custom')}</SelectItem>}
             </SelectContent>
           </Select>
         </div>
 
         {(parsed.frequency === 'daily' || parsed.frequency === 'weekly' || parsed.frequency === 'monthly') && (
           <div className="space-y-1">
-            <Label>Time</Label>
+            <Label>{t('schedule.time.label')}</Label>
             <Input type="time" value={timeStr} onChange={(e) => onTime(e.target.value)} />
           </div>
         )}
         {parsed.frequency === 'hourly' && (
           <div className="space-y-1">
-            <Label>Minute of hour</Label>
+            <Label>{t('schedule.minuteOfHour.label')}</Label>
             <Input type="number" min={0} max={59} value={parsed.minute} onChange={(e) => update({ minute: parseInt(e.target.value, 10) || 0 })} />
           </div>
         )}
@@ -112,11 +122,11 @@ export default function ScheduleSelect({ value, onChange }: Props) {
 
       {parsed.frequency === 'weekly' && (
         <div className="space-y-1">
-          <Label>Day of week</Label>
+          <Label>{t('schedule.dayOfWeek.label')}</Label>
           <Select value={String(parsed.dow)} onValueChange={(d) => update({ dow: parseInt(d, 10) })}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
-              {WEEKDAYS.map((d, i) => <SelectItem key={i} value={String(i)}>{d}</SelectItem>)}
+              {weekdays.map((d, i) => <SelectItem key={i} value={String(i)}>{d}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
@@ -124,10 +134,10 @@ export default function ScheduleSelect({ value, onChange }: Props) {
 
       <p className="text-xs text-muted-foreground">
         {parsed.frequency === 'off'
-          ? 'No automatic recompute. The DNA-Coefficient updates only when you click Compute or edit the AR.'
+          ? t('schedule.descriptions.off')
           : parsed.frequency === 'custom'
-            ? <>Custom schedule: <code>{value}</code></>
-            : <>The scheduled recompute job runs it on this cadence (stored as <code>{value}</code>).</>}
+            ? t('schedule.descriptions.custom', { cron: value })
+            : t('schedule.descriptions.scheduled', { cron: value })}
       </p>
     </div>
   );

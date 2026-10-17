@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Plus, Pencil, Trash2, Loader2, ChevronDown, ChevronRight,
   LockKeyhole, FileText, BookOpen, Activity, ShieldCheck, ExternalLink, Info,
@@ -22,6 +23,8 @@ import {
 import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/ui/hover-card';
 import { useToast } from '@/hooks/use-toast';
 import { useApi } from '@/hooks/use-api';
+import { ListItemSkeleton } from '@/components/common/list-view-skeleton';
+import { Skeleton } from '@/components/ui/skeleton';
 import type { MaturityLevel, MaturityGate } from '@/types/maturity';
 
 interface CompliancePolicy {
@@ -48,19 +51,23 @@ const COLOR_OPTIONS = ['blue', 'cyan', 'green', 'amber', 'purple', 'red', 'emera
 // doesn't define its own (data products & contracts today). Kinds with their own
 // ladder (Authority Relations) ignore it, so it is labelled "Default", not "All".
 const ENTITY_TYPE_OPTIONS = [
-  { value: 'all', label: 'Default' },
-  { value: 'DataProduct', label: 'Data Products' },
-  { value: 'DataContract', label: 'Data Contracts' },
-  { value: 'AuthorityRelation', label: 'Authority Relations' },
+  { value: 'all' },
+  { value: 'DataProduct' },
+  { value: 'DataContract' },
+  { value: 'AuthorityRelation' },
 ];
 
 // Stable display order for the type groups on the list.
 const ENTITY_TYPE_ORDER = ['all', 'DataProduct', 'DataContract', 'AuthorityRelation'];
 
 /** Friendly label for an entity_type value (falls back to the raw value). */
-function entityTypeLabel(value: string | null | undefined): string {
+function getEntityTypeLabel(t: any, value: string | null | undefined): string {
   const v = value || 'all';
-  return ENTITY_TYPE_OPTIONS.find(o => o.value === v)?.label ?? v;
+  // 'all' gets its own "Default" key; entityTypes.all ("All Entity Types") reads
+  // as if it also covered kinds with their own ladder.
+  if (v === 'all') return t('maturityLevels.entityTypes.default');
+  const optionValue = ENTITY_TYPE_OPTIONS.find(o => o.value === v)?.value ?? v;
+  return t(`maturityLevels.entityTypes.${optionValue}`, { defaultValue: optionValue });
 }
 
 const KIND_FILTER_STORAGE_KEY = 'ontos.maturityLevels.kindFilter';
@@ -77,6 +84,7 @@ const COLOR_CLASSES: Record<string, string> = {
 };
 
 export default function MaturityLevelsSettings() {
+  const { t } = useTranslation(['settings', 'common']);
   const { toast } = useToast();
   const { get, post, put, delete: apiDelete } = useApi();
 
@@ -167,7 +175,7 @@ export default function MaturityLevelsSettings() {
           entity_type: formData.entity_type,
         });
         if (error) throw new Error(error);
-        toast({ title: 'Updated', description: `Maturity level "${formData.name}" updated.` });
+        toast({ title: t('common:toast.updated'), description: t('maturityLevels.messages.updated', { name: formData.name }) });
       } else {
         const maxOrder = levels.length > 0 ? Math.max(...levels.map(l => l.level_order)) : 0;
         const { error } = await post('/api/maturity-levels', {
@@ -179,12 +187,12 @@ export default function MaturityLevelsSettings() {
           level_order: maxOrder + 1,
         });
         if (error) throw new Error(error);
-        toast({ title: 'Created', description: `Maturity level "${formData.name}" created.` });
+        toast({ title: t('common:toast.created'), description: t('maturityLevels.messages.created', { name: formData.name }) });
       }
       setDialogOpen(false);
       fetchLevels();
     } catch (err: any) {
-      toast({ title: 'Error', description: err?.message || 'Failed to save', variant: 'destructive' });
+      toast({ title: t('common:status.error'), description: err?.message || t('common:errors.saveFailed'), variant: 'destructive' });
     } finally {
       setSaving(false);
     }
@@ -194,9 +202,9 @@ export default function MaturityLevelsSettings() {
     if (!deletingLevel) return;
     const { error } = await apiDelete(`/api/maturity-levels/${deletingLevel.id}`);
     if (error) {
-      toast({ title: 'Cannot delete', description: error, variant: 'destructive' });
+      toast({ title: t('maturityLevels.messages.cannotDeleteTitle'), description: error, variant: 'destructive' });
     } else {
-      toast({ title: 'Deleted', description: `Maturity level "${deletingLevel.name}" deleted.` });
+      toast({ title: t('common:toast.deleted'), description: t('maturityLevels.messages.deleted', { name: deletingLevel.name }) });
       setDeletingLevel(null);
       fetchLevels();
     }
@@ -232,7 +240,7 @@ export default function MaturityLevelsSettings() {
       display_order: maxOrder,
     });
     if (error) {
-      toast({ title: 'Error', description: error, variant: 'destructive' });
+      toast({ title: t('common:status.error'), description: error, variant: 'destructive' });
     } else {
       setAddingGateToLevel(null);
       setSelectedPolicyId('');
@@ -265,8 +273,8 @@ export default function MaturityLevelsSettings() {
     ? groups
     : groups.filter(g => g.type === kindFilter);
   const kindFilterOptions = [
-    { value: 'all_kinds', label: 'All' },
-    ...groups.map(g => ({ value: g.type, label: entityTypeLabel(g.type) })),
+    { value: 'all_kinds', label: t('maturityLevels.filter.allKinds') },
+    ...groups.map(g => ({ value: g.type, label: getEntityTypeLabel(t, g.type) })),
   ];
 
   const renderLevelRow = (level: MaturityLevel, groupLevels: MaturityLevel[], idxInGroup: number) => {
@@ -291,9 +299,9 @@ export default function MaturityLevelsSettings() {
             </Badge>
             <span className="text-sm text-muted-foreground flex-1">{level.description || ''}</span>
             <Badge variant="secondary" className="text-xs">
-              {entityTypeLabel(level.entity_type)}
+              {getEntityTypeLabel(t, level.entity_type)}
             </Badge>
-            <span className="text-xs text-muted-foreground">{level.gates?.length || 0} gate(s)</span>
+            <span className="text-xs text-muted-foreground">{t('maturityLevels.gateCount', { count: level.gates?.length || 0 })}</span>
           </button>
           <div className="flex gap-1">
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleOpenEdit(level)}>
@@ -309,7 +317,7 @@ export default function MaturityLevelsSettings() {
         {isExpanded && (
           <div className="border-t px-4 py-3 bg-muted/30 space-y-2">
             <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Compliance Policy Gates
+              {t('maturityLevels.complianceGates')}
             </div>
             {(level.gates || []).map((gate: MaturityGate) => {
               const policy = policies.find(p => p.id === gate.compliance_policy_id);
@@ -328,7 +336,7 @@ export default function MaturityLevelsSettings() {
                         <p className="text-sm font-semibold">{gate.compliance_policy_name}</p>
                         {(policy?.description || gate.compliance_policy_rule) && (
                           <p className="text-xs text-muted-foreground">
-                            {policy?.description || 'No description'}
+                            {policy?.description || t('maturityLevels.noDescription')}
                           </p>
                         )}
                         {gate.compliance_policy_rule && (
@@ -341,19 +349,19 @@ export default function MaturityLevelsSettings() {
                             <Badge variant="outline" className="text-xs capitalize">{policy.severity}</Badge>
                           )}
                           <Badge variant="outline" className="text-xs">
-                            {gate.required ? 'Required' : 'Advisory'}
+                            {gate.required ? t('maturityLevels.required') : t('maturityLevels.advisory')}
                           </Badge>
                         </div>
                         <a href={`/compliance?policy=${gate.compliance_policy_id}`}
                           className="inline-flex items-center gap-1 text-xs text-primary hover:underline pt-1">
                           <ExternalLink className="h-3 w-3" />
-                          View in Compliance
+                          {t('maturityLevels.viewInCompliance')}
                         </a>
                       </div>
                     </HoverCardContent>
                   </HoverCard>
                   <Badge variant="outline" className="text-xs shrink-0">
-                    {gate.required ? 'Required' : 'Advisory'}
+                    {gate.required ? t('maturityLevels.required') : t('maturityLevels.advisory')}
                   </Badge>
                   <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive shrink-0"
                     onClick={() => handleRemoveGate(level.id, gate.id)}>
@@ -367,27 +375,33 @@ export default function MaturityLevelsSettings() {
               <div className="flex items-center gap-2 pl-4 pt-2">
                 <Select value={selectedPolicyId} onValueChange={setSelectedPolicyId}>
                   <SelectTrigger className="flex-1 h-8 text-sm">
-                    <SelectValue placeholder="Select compliance policy..." />
+                    <SelectValue placeholder={t('maturityLevels.selectPolicyPlaceholder')} />
                   </SelectTrigger>
                   <SelectContent>
-                    {policies.map(p => (
-                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                    ))}
+                    {policies.length === 0 ? (
+                      <SelectItem value="" disabled>
+                        {t('maturityLevels.noPoliciesAvailable')}
+                      </SelectItem>
+                    ) : (
+                      policies.map(p => (
+                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                      ))
+                    )}
                   </SelectContent>
                 </Select>
                 <div className="flex items-center gap-1.5">
                   <Switch checked={gateRequired} onCheckedChange={setGateRequired} id="gate-req" />
-                  <Label htmlFor="gate-req" className="text-xs">Required</Label>
+                  <Label htmlFor="gate-req" className="text-xs">{t('maturityLevels.required')}</Label>
                 </div>
                 <Button size="sm" variant="outline" className="h-8"
-                  onClick={() => handleAddGate(level.id)} disabled={!selectedPolicyId}>Add</Button>
+                  onClick={() => handleAddGate(level.id)} disabled={!selectedPolicyId}>{t('common:actions.add')}</Button>
                 <Button size="sm" variant="ghost" className="h-8"
-                  onClick={() => { setAddingGateToLevel(null); setSelectedPolicyId(''); }}>Cancel</Button>
+                  onClick={() => { setAddingGateToLevel(null); setSelectedPolicyId(''); }}>{t('common:actions.cancel')}</Button>
               </div>
             ) : (
               <Button variant="ghost" size="sm" className="ml-4 text-xs"
                 onClick={() => { setAddingGateToLevel(level.id); setSelectedPolicyId(''); setGateRequired(true); }}>
-                <Plus className="h-3 w-3 mr-1" /> Add Gate
+                <Plus className="h-3 w-3 mr-1" /> {t('maturityLevels.addGate')}
               </Button>
             )}
           </div>
@@ -398,8 +412,19 @@ export default function MaturityLevelsSettings() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[200px]">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      <div className="space-y-6">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-7 w-48" />
+            <Skeleton className="h-4 w-96" />
+          </div>
+          <Skeleton className="h-9 w-32 shrink-0" />
+        </div>
+        <div className="space-y-2">
+          {[1, 2, 3].map((i) => (
+            <ListItemSkeleton key={i} />
+          ))}
+        </div>
       </div>
     );
   }
@@ -408,10 +433,9 @@ export default function MaturityLevelsSettings() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">Maturity Levels</h2>
+          <h2 className="text-lg font-semibold">{t('maturityLevels.title')}</h2>
           <p className="text-sm text-muted-foreground">
-            Define the maturity ladder per entity kind (data products, contracts, authority relations).
-            Each level is gated by compliance policies; ordering is per kind.
+            {t('maturityLevels.descriptionPerKind')}
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -426,18 +450,18 @@ export default function MaturityLevelsSettings() {
             </SelectContent>
           </Select>
           <Button onClick={handleOpenCreate} size="sm">
-            <Plus className="h-4 w-4 mr-1" /> Add Level
+            <Plus className="h-4 w-4 mr-1" /> {t('maturityLevels.addLevel')}
           </Button>
         </div>
       </div>
 
       {levels.length === 0 ? (
         <div className="text-center text-muted-foreground py-8 border rounded-lg">
-          No maturity levels configured. Click "Add Level" to create one.
+          {t('maturityLevels.emptyState')}
         </div>
       ) : visibleGroups.length === 0 ? (
         <div className="text-center text-muted-foreground py-8 border rounded-lg">
-          No maturity levels for this kind. Change the filter or add one.
+          {t('maturityLevels.noLevelsForKind')}
         </div>
       ) : (
         <div className="space-y-6">
@@ -445,10 +469,10 @@ export default function MaturityLevelsSettings() {
             <div key={group.type} className="space-y-2">
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-                  {entityTypeLabel(group.type)}
+                  {getEntityTypeLabel(t, group.type)}
                 </h3>
                 <span className="text-xs text-muted-foreground">
-                  {group.items.length} level{group.items.length === 1 ? '' : 's'}
+                  {t('maturityLevels.levelCount', { count: group.items.length })}
                 </span>
               </div>
               {group.items.map((level, idxInGroup) => renderLevelRow(level, group.items, idxInGroup))}
@@ -461,42 +485,41 @@ export default function MaturityLevelsSettings() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editingLevel ? 'Edit' : 'Add'} Maturity Level</DialogTitle>
+            <DialogTitle>{editingLevel ? t('maturityLevels.dialog.editTitle') : t('maturityLevels.dialog.createTitle')}</DialogTitle>
             <DialogDescription>
-              {editingLevel ? 'Update the maturity level details.' : 'Create a new maturity level.'}
+              {editingLevel ? t('maturityLevels.dialog.editDescription') : t('maturityLevels.dialog.createDescription')}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
-              <Label htmlFor="mat-name">Name</Label>
+              <Label htmlFor="mat-name">{t('common:labels.name')}</Label>
               <Input id="mat-name" value={formData.name}
                 onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                placeholder="e.g., Trusted" />
+                placeholder={t('maturityLevels.form.namePlaceholder')} />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="mat-desc">Description</Label>
+              <Label htmlFor="mat-desc">{t('common:labels.description')}</Label>
               <Textarea id="mat-desc" value={formData.description}
                 onChange={e => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                placeholder="What this level represents..." rows={2} />
+                placeholder={t('maturityLevels.form.descriptionPlaceholder')} rows={2} />
             </div>
             <div className="space-y-2">
-              <Label>Entity Type</Label>
+              <Label>{t('maturityLevels.form.entityTypeLabel')}</Label>
               <Select value={formData.entity_type}
                 onValueChange={v => setFormData(prev => ({ ...prev, entity_type: v }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {ENTITY_TYPE_OPTIONS.map(o => (
-                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                    <SelectItem key={o.value} value={o.value}>{getEntityTypeLabel(t, o.value)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                <strong>Default</strong> applies to any kind without its own ladder (data products &amp; contracts).
-                Kinds that define their own levels (e.g. Authority Relations) ignore Default.
+                {t('maturityLevels.form.entityTypeHelp')}
               </p>
             </div>
             <div className="space-y-2">
-              <Label>Icon</Label>
+              <Label>{t('maturityLevels.form.iconLabel')}</Label>
               <div className="flex flex-wrap gap-2">
                 {ICON_OPTIONS.map(ic => {
                   const Ic = ICON_MAP[ic];
@@ -511,7 +534,7 @@ export default function MaturityLevelsSettings() {
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Color</Label>
+              <Label>{t('maturityLevels.form.colorLabel')}</Label>
               <div className="flex flex-wrap gap-2">
                 {COLOR_OPTIONS.map(c => (
                   <button key={c}
@@ -523,20 +546,20 @@ export default function MaturityLevelsSettings() {
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Preview</Label>
+              <Label>{t('maturityLevels.form.previewLabel')}</Label>
               <div>
                 <Badge variant="outline" className={getColorClass(formData.color)}>
                   {(() => { const Ic = getIcon(formData.icon); return <Ic className="h-3 w-3 mr-1" />; })()}
-                  {formData.name || 'Level Name'}
+                  {formData.name || t('maturityLevels.form.levelNamePreview')}
                 </Badge>
               </div>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>{t('common:actions.cancel')}</Button>
             <Button onClick={handleSave} disabled={saving || !formData.name.trim()}>
               {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
-              {editingLevel ? 'Update' : 'Create'}
+              {editingLevel ? t('common:actions.update') : t('common:actions.create')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -546,16 +569,15 @@ export default function MaturityLevelsSettings() {
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete maturity level?</AlertDialogTitle>
+            <AlertDialogTitle>{t('maturityLevels.delete.title')}</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete "{deletingLevel?.name}"? This cannot be undone.
-              If snapshots reference this level, deletion will be blocked.
+              {t('maturityLevels.delete.description', { name: deletingLevel?.name })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('common:actions.cancel')}</AlertDialogCancel>
             <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground">
-              Delete
+              {t('common:actions.delete')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
