@@ -59,8 +59,9 @@ TRANSITIONS: Dict[str, Tuple[str, ...]] = {
     STATUS_DEPRECATED: (STATUS_ACTIVE, STATUS_RETIRED),
     STATUS_RETIRED: (),
 }
-# Content edits are only allowed before a version is approved; later changes need a new version.
-EDITABLE_STATUSES = (STATUS_DRAFT, STATUS_UNDER_REVIEW, STATUS_NEEDS_REVIEW)
+# Content (rules / membership) is only editable in draft: what gets reviewed is what gets
+# activated. Under review → send back to draft to change it; approved and later → new version.
+EDITABLE_STATUSES = (STATUS_DRAFT,)
 DELETABLE_STATUSES = (STATUS_DRAFT, STATUS_RETIRED)
 
 
@@ -285,6 +286,13 @@ class AccessPoliciesManager:
             raise AccessPolicyError(f"{self.spec(kind).label} not found", 404)
         return row
 
+    def require_visible(self, db: Session, kind: str, entity_id: str, viewer: Optional[str], is_admin: bool) -> Any:
+        """Like :meth:`require`, but other users' personal drafts are reported as not found."""
+        row = self.require(db, kind, entity_id)
+        if not self._visible(row, viewer, is_admin):
+            raise AccessPolicyError(f"{self.spec(kind).label} not found", 404)
+        return row
+
     def list(self, db: Session, kind: str, *, include_history: bool = False, status: Optional[str] = None,
              viewer: Optional[str] = None, is_admin: bool = False) -> List[Any]:
         rows = [r for r in repo_for(kind).list_all(db) if self._visible(r, viewer, is_admin)]
@@ -400,24 +408,37 @@ class AccessPoliciesManager:
     # --------------------------------------------------------------- lifecycle
 
     def change_status(self, db: Session, kind: str, entity_id: str, new_status: str,
-                      current_user: Optional[str], comment: Optional[str] = None) -> Any:
+                      current_user: Optional[str], comment: Optional[str] = None, *, is_admin: bool = False) -> Any:
         row = self.require(db, kind, entity_id)
         allowed = TRANSITIONS.get(row.status, ())
         if new_status not in allowed:
             raise AccessPolicyError(
                 f"Can't move from {row.status} to {new_status} (allowed: {', '.join(allowed) or 'none'}).", 409)
+        if new_status == STATUS_APPROVED and not is_admin:
+            # Separation of duties: whoever submitted (or authored) a version can't approve it.
+            me = (current_user or "").lower()
+            authors = {(row.submitted_by or "").lower(), (row.created_by or "").lower()} - {""}
+            if not me or me in authors:
+                raise AccessPolicyError(
+                    "A version can't be approved by its author or submitter — ask another steward.", 403)
         if new_status == STATUS_ACTIVE:
             problems = self.activation_problems(db, kind, row)
             if problems:
                 raise AccessPolicyError("Not ready to activate: " + "; ".join(problems), 409, details=problems)
-        if new_status == STATUS_RETIRED and kind != KIND_POLICY:
+        if new_status in (STATUS_DEPRECATED, STATUS_RETIRED) and kind != KIND_POLICY:
+            # Taking an audience/collection out of service silently disables every rule that uses it.
             live = [p for p in self.policies_referencing(db, row.uid) if p.status == STATUS_ACTIVE]
             if live and not self._other_active_version(db, kind, row):
                 raise AccessPolicyError(
-                    "Still used by active policies: " + ", ".join(p.name for p in live[:5]), 409)
+                    "Still used by active policies (deprecate or re-point them first): "
+                    + ", ".join(p.name for p in live[:5]), 409)
         old = row.status
         row.status = new_status
         row.updated_by = current_user
+        if new_status == STATUS_UNDER_REVIEW:
+            row.submitted_by = current_user
+        elif new_status == STATUS_APPROVED:
+            row.approved_by = current_user
         if new_status == STATUS_ACTIVE:
             row.draft_owner_id = None
             # One active version per family: the previously active one is deprecated.
@@ -555,10 +576,11 @@ class AccessPoliciesManager:
                 logger.warning(f"Principal attribute source {source.name} failed: {e}")
         return attrs
 
-    def check_access(self, db: Session, request: Any) -> Dict[str, Any]:
+    def check_access(self, db: Session, request: Any, *, viewer: Optional[str] = None, is_admin: bool = True) -> Dict[str, Any]:
         what_if = bool(request.policy_ids)
         if what_if:
-            policies = [p for p in (repo_for(KIND_POLICY).get(db, pid) for pid in request.policy_ids) if p]
+            policies = [p for p in (repo_for(KIND_POLICY).get(db, pid) for pid in request.policy_ids)
+                        if p and self._visible(p, viewer, is_admin)]
         else:
             policies = [p for p in repo_for(KIND_POLICY).list_all(db) if p.status == STATUS_ACTIVE]
         docs: List[Dict[str, Any]] = []
@@ -621,6 +643,7 @@ class AccessPoliciesManager:
             "domains": [d.dict() if hasattr(d, "dict") else d for d in domains],
             "tags": tags,
             "created_by": row.created_by, "updated_by": row.updated_by,
+            "submitted_by": row.submitted_by, "approved_by": row.approved_by,
             "created_at": row.created_at, "updated_at": row.updated_at,
         }
         if kind == KIND_POLICY:

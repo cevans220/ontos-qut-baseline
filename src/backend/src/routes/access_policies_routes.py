@@ -73,9 +73,10 @@ async def validate_policy(db: DBSessionDep, payload: PolicyValidateRequest = Bod
 
 
 @router.post("/check-access")
-async def check_access(db: DBSessionDep, payload: CheckAccessRequest = Body(...), _: bool = _READ):
+async def check_access(request: Request, db: DBSessionDep, current_user: AuditCurrentUserDep,
+                       payload: CheckAccessRequest = Body(...), _: bool = _READ):
     """Evaluate "can principal do action on asset?" against active policies (or a what-if set)."""
-    return manager.check_access(db, payload)
+    return manager.check_access(db, payload, viewer=_email(current_user), is_admin=await _is_admin(request, current_user))
 
 
 @router.post("/policies/import", status_code=201)
@@ -89,18 +90,20 @@ async def import_policy(db: DBSessionDep, current_user: AuditCurrentUserDep,
 
 
 @router.get("/policies/{entity_id}/jsonld")
-async def export_policy(entity_id: str, db: DBSessionDep, _: bool = _READ):
+async def export_policy(entity_id: str, request: Request, db: DBSessionDep, current_user: AuditCurrentUserDep,
+                        _: bool = _READ):
     try:
-        row = manager.require(db, KIND_POLICY, entity_id)
+        row = manager.require_visible(db, KIND_POLICY, entity_id, _email(current_user), await _is_admin(request, current_user))
     except AccessPolicyError as e:
         raise _http(e)
     return manager.to_jsonld(db, row)
 
 
 @router.get("/policies/{entity_id}/validation")
-async def policy_validation(entity_id: str, db: DBSessionDep, _: bool = _READ):
+async def policy_validation(entity_id: str, request: Request, db: DBSessionDep, current_user: AuditCurrentUserDep,
+                            _: bool = _READ):
     try:
-        row = manager.require(db, KIND_POLICY, entity_id)
+        row = manager.require_visible(db, KIND_POLICY, entity_id, _email(current_user), await _is_admin(request, current_user))
     except AccessPolicyError as e:
         raise _http(e)
     issues = manager.validate_body(db, row.policy_type, row.conflict, row.inherit_from or [], row.body or {})
@@ -116,6 +119,9 @@ async def policy_validation(entity_id: str, db: DBSessionDep, _: bool = _READ):
 def _register_kind(segment: str, kind: str, create_model: Any, update_model: Any) -> None:
     """Register list/get/create/update/delete/versions/status for one entity kind."""
 
+    async def _visible_row(request: Request, db: Any, current_user: Any, entity_id: str) -> Any:
+        return manager.require_visible(db, kind, entity_id, _email(current_user), await _is_admin(request, current_user))
+
     async def list_entities(
         request: Request, db: DBSessionDep, current_user: AuditCurrentUserDep,
         include_history: bool = Query(False, description="Return every version instead of one per family"),
@@ -127,10 +133,12 @@ def _register_kind(segment: str, kind: str, create_model: Any, update_model: Any
                             viewer=_email(current_user), is_admin=is_admin)
         return [manager.to_read_dict(db, kind, r) for r in rows]
 
-    async def get_entity(entity_id: str, db: DBSessionDep, _: bool = _READ):
-        row = manager.get(db, kind, entity_id)
-        if not row:
-            raise HTTPException(status_code=404, detail=f"{manager.spec(kind).label} not found")
+    async def get_entity(entity_id: str, request: Request, db: DBSessionDep, current_user: AuditCurrentUserDep,
+                         _: bool = _READ):
+        try:
+            row = await _visible_row(request, db, current_user, entity_id)
+        except AccessPolicyError as e:
+            raise _http(e)
         return manager.to_read_dict(db, kind, row)
 
     async def create_entity(db: DBSessionDep, current_user: AuditCurrentUserDep,
@@ -141,24 +149,31 @@ def _register_kind(segment: str, kind: str, create_model: Any, update_model: Any
             raise _http(e)
         return manager.to_read_dict(db, kind, row)
 
-    async def update_entity(entity_id: str, db: DBSessionDep, current_user: AuditCurrentUserDep,
+    async def update_entity(entity_id: str, request: Request, db: DBSessionDep, current_user: AuditCurrentUserDep,
                             payload: update_model = Body(...), _: bool = _WRITE):  # type: ignore[valid-type]
         try:
+            await _visible_row(request, db, current_user, entity_id)
             row = manager.update(db, kind, entity_id, payload, _email(current_user))
         except AccessPolicyError as e:
             raise _http(e)
         return manager.to_read_dict(db, kind, row)
 
-    async def delete_entity(entity_id: str, db: DBSessionDep, current_user: AuditCurrentUserDep, _: bool = _WRITE):
+    async def delete_entity(entity_id: str, request: Request, db: DBSessionDep, current_user: AuditCurrentUserDep,
+                            _: bool = _WRITE):
         try:
+            await _visible_row(request, db, current_user, entity_id)
             manager.delete(db, kind, entity_id, _email(current_user))
         except AccessPolicyError as e:
             raise _http(e)
         return {"deleted": entity_id}
 
-    async def list_versions(entity_id: str, db: DBSessionDep, _: bool = _READ):
+    async def list_versions(entity_id: str, request: Request, db: DBSessionDep, current_user: AuditCurrentUserDep,
+                            _: bool = _READ):
         try:
-            rows = manager.versions(db, kind, entity_id)
+            await _visible_row(request, db, current_user, entity_id)
+            is_admin = await _is_admin(request, current_user)
+            rows = [r for r in manager.versions(db, kind, entity_id)
+                    if manager._visible(r, _email(current_user), is_admin)]
         except AccessPolicyError as e:
             raise _http(e)
         return [
@@ -171,19 +186,22 @@ def _register_kind(segment: str, kind: str, create_model: Any, update_model: Any
             for r in rows
         ]
 
-    async def new_version(entity_id: str, db: DBSessionDep, current_user: AuditCurrentUserDep,
+    async def new_version(entity_id: str, request: Request, db: DBSessionDep, current_user: AuditCurrentUserDep,
                           payload: NewVersionRequest = Body(...), _: bool = _WRITE):
         try:
+            await _visible_row(request, db, current_user, entity_id)
             row = manager.create_new_version(db, kind, entity_id, payload.new_version,
                                              payload.change_summary, _email(current_user))
         except AccessPolicyError as e:
             raise _http(e)
         return manager.to_read_dict(db, kind, row)
 
-    async def change_status(entity_id: str, db: DBSessionDep, current_user: AuditCurrentUserDep,
+    async def change_status(entity_id: str, request: Request, db: DBSessionDep, current_user: AuditCurrentUserDep,
                             payload: StatusChangeRequest = Body(...), _: bool = _WRITE):
         try:
-            row = manager.change_status(db, kind, entity_id, payload.status, _email(current_user), payload.comment)
+            await _visible_row(request, db, current_user, entity_id)
+            row = manager.change_status(db, kind, entity_id, payload.status, _email(current_user), payload.comment,
+                                        is_admin=await _is_admin(request, current_user))
         except AccessPolicyError as e:
             raise _http(e)
         return manager.to_read_dict(db, kind, row)

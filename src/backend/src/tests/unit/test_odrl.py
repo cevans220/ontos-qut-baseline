@@ -239,3 +239,45 @@ def test_odrl_profile_ttl_in_sync():
     assert operands == {k for k in odrl.LEFT_OPERANDS if k.startswith("ontos:")}
     for k in actions:
         assert (ONTOS[k.split(":", 1)[1]], ODRL.includedIn, ODRL.use) in g
+
+
+def test_typed_principal_matches_typed_members():
+    aud = CollectionDef(uid="urn:ontos:audience:a", name="A", members=["user:alice@x.com", "group:Eng"])
+    r = Resolver(audiences={aud.uid: aud})
+    pol = _pol({"uid": "p", "conflict": "prohibit", "permission": [{"target": "uc:main", "action": "read", "assignee": aud.uid}]})
+    assert odrl.evaluate([pol], _req(principal="user:Alice@x.com"), r).verdict == "allow"
+    assert odrl.evaluate([pol], _req(principal="bob@x.com", principal_groups=["group:eng"]), r).verdict == "allow"
+
+
+def test_empty_collections_match_nothing():
+    empty = CollectionDef(uid="urn:ontos:audience:e", name="Empty")
+    r = Resolver(audiences={empty.uid: empty})
+    pol = _pol({"uid": "p", "conflict": "prohibit", "permission": [{"target": "uc:main", "action": "read", "assignee": empty.uid}]})
+    assert odrl.evaluate([pol], _req(), r).verdict == "not_applicable"
+    inline = _pol({"uid": "q", "conflict": "prohibit", "permission": [{
+        "target": "uc:main", "action": "read", "assignee": {"@type": "PartyCollection", "members": []}}]})
+    assert odrl.evaluate([inline], _req()).verdict == "not_applicable"
+
+
+def test_unresolved_named_refs_fail_closed_for_prohibitions():
+    # Audience without an active version: permissions don't match, prohibitions still apply.
+    pol = _pol({"uid": "p", "conflict": "prohibit",
+                "permission": [{"target": "uc:main", "action": "read"}],
+                "prohibition": [{"target": "uc:main.hr", "action": "read", "assignee": "urn:ontos:audience:gone"}]})
+    d = odrl.evaluate([pol], _req(asset="uc:main.hr.salaries"))
+    assert d.verdict == "deny" and d.unresolved_refs == ["urn:ontos:audience:gone"]
+    grant = _pol({"uid": "g", "conflict": "prohibit", "permission": [
+        {"target": "uc:main", "action": "read", "assignee": "urn:ontos:audience:gone"}]})
+    assert odrl.evaluate([grant], _req()).verdict == "not_applicable"
+
+
+def test_normalize_is_idempotent():
+    doc = {"uid": "p", "permission": [{
+        "target": "uc:a", "action": [{"rdf:value": {"@id": "odrl:read"}, "refinement": [
+            {"leftOperand": "purpose", "operator": "eq", "rightOperand": "x"}]}],
+        "constraint": [{"xone": {"@list": [
+            {"leftOperand": "spatial", "operator": "eq", "rightOperand": "EU"},
+            {"leftOperand": "purpose", "operator": "eq", "rightOperand": "y"}]}}]}]}
+    once = _pol(doc)
+    twice = _pol({"uid": "p", **{k: once[k] for k in odrl.RULE_KINDS}})
+    assert twice["permission"] == once["permission"]

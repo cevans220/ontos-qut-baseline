@@ -30,7 +30,7 @@ import type {
 import { KIND_SEGMENT } from '@/types/access-policy';
 import ConstraintEditor from './constraint-editor';
 import RuleBuilder from './rule-builder';
-import { constraintToForm, formToConstraint, formToRules, rulesToForm, type FormConstraint, type FormRule } from './odrl-helpers';
+import { constraintToForm, formRuleProblems, formToConstraint, formToRules, rulesToForm, type FormConstraint, type FormRule } from './odrl-helpers';
 
 interface Props {
   kind: AccessKind;
@@ -187,6 +187,11 @@ export default function AccessEntityFormDialog({ kind, open, onOpenChange, entit
     }
     if (!contentLocked) {
       if (kind === 'policy') {
+        const problems = rulesTab === 'builder' ? formRuleProblems(rules) : [];
+        if (problems.length) {
+          toast({ title: t('access-policies:form.incompleteRules'), description: problems.join(' · '), variant: 'destructive' });
+          return;
+        }
         const r = currentRules();
         if (!r) return;
         Object.assign(base, { policy_type: policyType, conflict, inherit_from: inheritFrom ? [inheritFrom] : [], rules: r });

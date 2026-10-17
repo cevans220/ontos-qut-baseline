@@ -48,6 +48,9 @@ class GovernedEntityMixin:
 
     created_by = Column(String, nullable=True)
     updated_by = Column(String, nullable=True)
+    # Review trail of the current version (separation of duties: approver != submitter/author).
+    submitted_by = Column(String, nullable=True)
+    approved_by = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 

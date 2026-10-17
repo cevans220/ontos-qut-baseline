@@ -32,6 +32,8 @@ export interface FormRule {
   constraints: FormConstraint[];
   /** Duty actions (permission) or remedy actions (prohibition). */
   duties: string[];
+  /** ODRL rule uid, preserved so external references keep resolving. */
+  uid?: string;
 }
 
 let keySeq = 0;
@@ -82,8 +84,11 @@ export function rulesToForm(rules: OdrlRules | undefined): FormRule[] | null {
         if (!fc) return null;
         constraints.push(fc);
       }
+      // Anything the builder can't round-trip goes to the JSON editor instead of being dropped.
+      if (kind === 'obligation' && (r.duty?.length || r.remedy?.length || r.consequence?.length)) return null;
+      if (r.consequence?.length) return null;
       const subs = kind === 'prohibition' ? r.remedy : r.duty;
-      if (subs?.some((d) => d.constraint?.length || d.target)) return null;
+      if (subs?.some((d) => d.constraint?.length || d.target || d.assignee || d.assigner || d.consequence?.length || d.uid)) return null;
       const target = (r.target as string) || '';
       const assignee = (r.assignee as string) || '';
       out.push({
@@ -96,6 +101,7 @@ export function rulesToForm(rules: OdrlRules | undefined): FormRule[] | null {
         assignee,
         constraints,
         duties: (subs || []).map((d) => d.action || '').filter(Boolean),
+        uid: r.uid,
       });
     }
   }
@@ -106,6 +112,7 @@ export function formToRules(rules: FormRule[]): OdrlRules {
   const out: OdrlRules = { permission: [], prohibition: [], obligation: [] };
   for (const r of rules) {
     const rule: OdrlRule = { action: r.action };
+    if (r.uid) rule.uid = r.uid;
     if (r.target.trim()) rule.target = r.target.trim();
     if (r.assigneeMode !== 'everyone' && r.assignee.trim()) rule.assignee = r.assignee.trim();
     const cons = r.constraints.filter((c) => c.leftOperand && c.value.trim()).map(formToConstraint);
@@ -118,6 +125,17 @@ export function formToRules(rules: FormRule[]): OdrlRules {
     out[r.kind]!.push(rule);
   }
   return out;
+}
+
+/** Builder-level checks the backend can't catch (an empty picker silently means "everyone"). */
+export function formRuleProblems(rules: FormRule[]): string[] {
+  const problems: string[] = [];
+  rules.forEach((r, i) => {
+    const n = i + 1;
+    if (r.kind !== 'obligation' && !r.target.trim()) problems.push(`Rule ${n}: pick a target`);
+    if (r.assigneeMode !== 'everyone' && !r.assignee.trim()) problems.push(`Rule ${n}: pick an assignee or choose "Everyone"`);
+  });
+  return problems;
 }
 
 export function formatValue(v: unknown): string {

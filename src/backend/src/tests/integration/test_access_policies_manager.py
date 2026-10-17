@@ -19,6 +19,7 @@ from src.models.access_policies import (
 )
 
 USER = "steward@example.com"
+APPROVER = "approver@example.com"
 
 
 class StaticRoles(PrincipalAttributeSource):
@@ -37,9 +38,14 @@ def mgr():
 
 
 def _activate(mgr, db, kind, row):
-    for s in ("under_review", "approved", "active"):
-        row = mgr.change_status(db, kind, row.id, s, USER)
-    return row
+    row = mgr.change_status(db, kind, row.id, "under_review", USER)
+    row = mgr.change_status(db, kind, row.id, "approved", APPROVER)
+    return mgr.change_status(db, kind, row.id, "active", USER)
+
+
+def _approve(mgr, db, kind, row):
+    mgr.change_status(db, kind, row.id, "under_review", USER)
+    return mgr.change_status(db, kind, row.id, "approved", APPROVER)
 
 
 def _audience(mgr, db, **kw):
@@ -81,8 +87,7 @@ def test_status_transitions_and_edit_lock(mgr, db_session: Session):
 def test_activation_requires_valid_body_and_active_references(mgr, db_session: Session):
     aud = _audience(mgr, db_session)
     p = _policy(mgr, db_session, {"permission": [{"target": "uc:main.sales", "action": "read", "assignee": aud.uid}]})
-    for s in ("under_review", "approved"):
-        mgr.change_status(db_session, KIND_POLICY, p.id, s, USER)
+    _approve(mgr, db_session, KIND_POLICY, p)
     with pytest.raises(AccessPolicyError) as e:
         mgr.change_status(db_session, KIND_POLICY, p.id, "active", USER)
     assert "has no active version" in str(e.value)
@@ -90,8 +95,7 @@ def test_activation_requires_valid_body_and_active_references(mgr, db_session: S
     assert mgr.change_status(db_session, KIND_POLICY, p.id, "active", USER).status == "active"
 
     bad = _policy(mgr, db_session, {"permission": [{"target": "uc:x", "action": "teleport"}]}, name="Bad")
-    for s in ("under_review", "approved"):
-        mgr.change_status(db_session, KIND_POLICY, bad.id, s, USER)
+    _approve(mgr, db_session, KIND_POLICY, bad)
     with pytest.raises(AccessPolicyError) as e:
         mgr.change_status(db_session, KIND_POLICY, bad.id, "active", USER)
     assert "Unknown action" in str(e.value)
@@ -159,3 +163,62 @@ def test_jsonld_export_import_round_trip(mgr, db_session: Session):
     assert imported.body == p.body and imported.name == p.name and imported.uid != p.uid
     with pytest.raises(AccessPolicyError):
         mgr.import_jsonld(db_session, PolicyImportRequest(document={**doc, "profile": "http://other/profile"}), USER)
+
+
+# ------------------------------------------------------------ review findings
+
+def test_author_cannot_approve_own_version_but_admin_can(mgr, db_session: Session):
+    p = _policy(mgr, db_session, {"permission": [{"target": "uc:main", "action": "read"}]})
+    mgr.change_status(db_session, KIND_POLICY, p.id, "under_review", USER)
+    with pytest.raises(AccessPolicyError) as e:
+        mgr.change_status(db_session, KIND_POLICY, p.id, "approved", USER)
+    assert e.value.status_code == 403
+    row = mgr.change_status(db_session, KIND_POLICY, p.id, "approved", USER, is_admin=True)
+    assert row.status == "approved"
+
+
+def test_content_only_editable_in_draft(mgr, db_session: Session):
+    p = _policy(mgr, db_session, {"permission": [{"target": "uc:main", "action": "read"}]})
+    mgr.change_status(db_session, KIND_POLICY, p.id, "under_review", USER)
+    with pytest.raises(AccessPolicyError):
+        mgr.update(db_session, KIND_POLICY, p.id, AccessPolicyUpdate(rules={}), USER)
+    p = _activate(mgr, db_session, KIND_POLICY, mgr.change_status(db_session, KIND_POLICY, p.id, "draft", USER))
+    mgr.change_status(db_session, KIND_POLICY, p.id, "needs_review", USER)
+    with pytest.raises(AccessPolicyError):
+        mgr.update(db_session, KIND_POLICY, p.id, AccessPolicyUpdate(rules={}), USER)
+
+
+def test_referenced_audience_cannot_be_deprecated(mgr, db_session: Session):
+    aud = _activate(mgr, db_session, KIND_AUDIENCE, _audience(mgr, db_session))
+    _activate(mgr, db_session, KIND_POLICY, _policy(mgr, db_session, {
+        "prohibition": [{"target": "uc:hr", "action": "read", "assignee": aud.uid}]}))
+    with pytest.raises(AccessPolicyError) as e:
+        mgr.change_status(db_session, KIND_AUDIENCE, aud.id, "deprecated", USER)
+    assert "Still used by active policies" in str(e.value)
+
+
+def test_personal_drafts_hidden_from_other_users(mgr, db_session: Session):
+    p = mgr.create(db_session, KIND_POLICY, AccessPolicyCreate(
+        name="Mine", personal_draft=True, rules={"permission": [{"target": "uc:main", "action": "use"}]}), USER)
+    assert mgr.require_visible(db_session, KIND_POLICY, p.id, USER, False).id == p.id
+    with pytest.raises(AccessPolicyError) as e:
+        mgr.require_visible(db_session, KIND_POLICY, p.id, "other@example.com", False)
+    assert e.value.status_code == 404
+    req = CheckAccessRequest(principal="x@example.com", action="read", asset="uc:main.a", policy_ids=[p.id])
+    assert mgr.check_access(db_session, req, viewer="other@example.com", is_admin=False)["evaluated_policies"] == []
+
+
+def test_stored_logical_constraints_and_refinements_survive_resave(mgr, db_session: Session):
+    doc = {"@type": "Set", "uid": "http://example.com/p:1", "conflict": "prohibit", "permission": [{
+        "target": "uc:main", "assignee": "group:analysts",
+        "action": [{"rdf:value": {"@id": "odrl:read"}, "refinement": [
+            {"leftOperand": "purpose", "operator": "eq", "rightOperand": "analytics"}]}],
+        "constraint": [{"or": {"@list": [
+            {"leftOperand": "spatial", "operator": "eq", "rightOperand": "EU"},
+            {"leftOperand": "spatial", "operator": "eq", "rightOperand": "UK"}]}}]}]}
+    p = mgr.import_jsonld(db_session, PolicyImportRequest(document=doc), USER)
+    rule = p.body["permission"][0]
+    assert rule["constraint"][0]["logical"] == "or" and len(rule["constraint"][0]["constraints"]) == 2
+    assert rule["action_refinement"][0]["leftOperand"] == "purpose"
+    p = mgr.update(db_session, KIND_POLICY, p.id, AccessPolicyUpdate(rules=p.body), USER)  # JSON-tab round trip
+    assert p.body["permission"][0] == rule

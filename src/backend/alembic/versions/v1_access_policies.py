@@ -1,13 +1,13 @@
 """Add Access Policies (W3C ODRL): policies, policy index, audiences, asset collections
 
-Revision ID: ap1_access_policies
+Revision ID: v1_access_policies
 Revises: b2_contract_deploy_default
 Create Date: 2026-10-17
 """
 import sqlalchemy as sa
 from alembic import op
 
-revision = 'ap1_access_policies'
+revision = 'v1_access_policies'
 down_revision = 'b2_contract_deploy_default'
 branch_labels = None
 depends_on = None
@@ -28,6 +28,8 @@ def _governed_columns(table: str):
         sa.Column('maturity_evaluated_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('created_by', sa.String(), nullable=True),
         sa.Column('updated_by', sa.String(), nullable=True),
+        sa.Column('submitted_by', sa.String(), nullable=True),
+        sa.Column('approved_by', sa.String(), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column('owner_team_id', sa.String(), sa.ForeignKey('teams.id', ondelete='SET NULL'), nullable=True),

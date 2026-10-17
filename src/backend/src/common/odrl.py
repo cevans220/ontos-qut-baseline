@@ -240,6 +240,10 @@ def normalize_constraint(c: Any) -> Dict[str, Any]:
     """Normalize a Constraint or LogicalConstraint to a plain dict."""
     if not isinstance(c, dict):
         return {"invalid": True, "raw": c}
+    # Already-normalized logical form (re-normalizing a stored body must be a no-op).
+    if c.get("logical") in LOGICAL_OPERANDS:
+        return {"logical": c["logical"], "constraints": [normalize_constraint(x) for x in _as_list(c.get("constraints"))],
+                **({"uid": c["uid"]} if c.get("uid") else {})}
     for op in LOGICAL_OPERANDS:
         if op in c:
             return {"logical": op, "constraints": [normalize_constraint(x) for x in _as_list(c[op])],
@@ -299,6 +303,8 @@ def _atomize_rule(rule: Dict[str, Any], shared: Dict[str, Any], kind: str) -> Li
     atoms: List[Dict[str, Any]] = []
     for action, target, assignee, assigner in itertools.product(actions, targets, assignees, assigners):
         act, refinement = _normalize_action(action)
+        # Already-atomic rules keep their refinement in ``action_refinement``.
+        refinement = refinement or [normalize_constraint(x) for x in _as_list(merged.get("action_refinement"))]
         atom: Dict[str, Any] = {
             "action": act,
             "target": _normalize_collection(target, "Asset") if target is not None else None,
@@ -637,8 +643,24 @@ def _asset_ref_matches(ref: str, asset: str) -> bool:
     return _uc_covers(ref, asset)
 
 
+def strip_principal_prefix(value: str) -> str:
+    """``user:a@x`` / ``mailto:a@x`` / ``sp:id`` / ``group:g`` → bare lower-case identifier."""
+    low = (value or "").strip().lower()
+    for prefix in ("user:", "mailto:", "sp:", "group:"):
+        if low.startswith(prefix):
+            return low[len(prefix):]
+    return low
+
+
 class Resolver:
-    """Resolves named Audiences / Asset Collections for evaluation."""
+    """Resolves named Audiences / Asset Collections for evaluation.
+
+    Fail-safe semantics:
+    * A collection with neither members nor refinement is the empty set.
+    * A named reference that can't be resolved (unknown, or no active version)
+      never widens access: it matches nothing for permissions but still
+      matches for prohibitions (``fail_closed``), and is reported in ``unresolved``.
+    """
 
     def __init__(
         self,
@@ -647,18 +669,28 @@ class Resolver:
     ):
         self.audiences = audiences or {}
         self.asset_collections = asset_collections or {}
+        self.unresolved: List[str] = []
+
+    def _unresolved(self, ref: str, trail: List[str], fail_closed: bool) -> bool:
+        if ref not in self.unresolved:
+            self.unresolved.append(ref)
+        trail.append(f"{ref} has no active definition — treated as {'matching (prohibition)' if fail_closed else 'not matching'}")
+        return fail_closed
 
     # -- parties
-    def party_matches(self, ref: Any, req: AccessRequest, trail: List[str], depth: int = 0) -> bool:
+    def party_matches(self, ref: Any, req: AccessRequest, trail: List[str], depth: int = 0,
+                      fail_closed: bool = False) -> bool:
         if ref is None:
             return True  # No assignee: the rule applies to every party.
         if depth > 8:
             return False
         if isinstance(ref, dict):
             source = ref.get("source") or ref.get("uid")
+            if not source and not ref.get("members") and not ref.get("refinement"):
+                return False  # Empty collection.
             members_ok = True
             if source:
-                members_ok = self.party_matches(source, req, trail, depth + 1)
+                members_ok = self.party_matches(source, req, trail, depth + 1, fail_closed)
             elif ref.get("members"):
                 members_ok = any(self._principal_is(m, req) for m in ref["members"])
             if not members_ok:
@@ -670,6 +702,9 @@ class Resolver:
             return True
         if ref in self.audiences:
             aud = self.audiences[ref]
+            if not aud.members and not aud.refinement:
+                trail.append(f"audience '{aud.name}' is empty")
+                return False
             if aud.members and not any(self._principal_is(m, req) for m in aud.members):
                 trail.append(f"not a member of audience '{aud.name}'")
                 return False
@@ -680,20 +715,21 @@ class Resolver:
                     return False
             trail.append(f"member of audience '{aud.name}'")
             return True
+        if isinstance(ref, str) and ref.startswith(AUDIENCE_IRI_PREFIX):
+            return self._unresolved(ref, trail, fail_closed)
         return self._principal_is(ref, req)
 
     @staticmethod
     def _principal_is(ref: str, req: AccessRequest) -> bool:
-        r = (ref or "").strip()
-        low = r.lower()
-        for prefix in ("user:", "mailto:"):
+        low = (ref or "").strip().lower()
+        principal = strip_principal_prefix(req.principal)
+        groups = {strip_principal_prefix(g) for g in req.principal_groups}
+        for prefix in ("user:", "mailto:", "sp:"):
             if low.startswith(prefix):
-                return low[len(prefix):] == req.principal.lower()
+                return low[len(prefix):] == principal
         if low.startswith("group:"):
-            return low[len("group:"):] in {g.lower() for g in req.principal_groups}
-        if low.startswith("sp:"):
-            return low[len("sp:"):] == req.principal.lower()
-        return low == req.principal.lower() or low in {g.lower() for g in req.principal_groups}
+            return low[len("group:"):] in groups
+        return low == principal or low in groups
 
     @staticmethod
     def _party_env(req: AccessRequest) -> Dict[str, Any]:
@@ -702,16 +738,19 @@ class Resolver:
         return env
 
     # -- assets
-    def asset_matches(self, ref: Any, req: AccessRequest, trail: List[str], depth: int = 0) -> bool:
+    def asset_matches(self, ref: Any, req: AccessRequest, trail: List[str], depth: int = 0,
+                      fail_closed: bool = False) -> bool:
         if ref is None:
             return False
         if depth > 8:
             return False
         if isinstance(ref, dict):
             source = ref.get("source") or ref.get("uid")
+            if not source and not ref.get("members") and not ref.get("refinement"):
+                return False  # Empty collection.
             members_ok = True
             if source:
-                members_ok = self.asset_matches(source, req, trail, depth + 1)
+                members_ok = self.asset_matches(source, req, trail, depth + 1, fail_closed)
             elif ref.get("members"):
                 members_ok = any(_asset_ref_matches(m, req.asset) for m in ref["members"])
             if not members_ok:
@@ -723,6 +762,8 @@ class Resolver:
             return True
         if ref in self.asset_collections:
             col = self.asset_collections[ref]
+            if not col.members and not col.refinement:
+                return False
             if col.members and not any(_asset_ref_matches(m, req.asset) for m in col.members):
                 return False
             if col.refinement:
@@ -732,6 +773,8 @@ class Resolver:
                     return False
             trail.append(f"in asset collection '{col.name}'")
             return True
+        if isinstance(ref, str) and ref.startswith(ASSET_COLLECTION_IRI_PREFIX):
+            return self._unresolved(ref, trail, fail_closed)
         return _asset_ref_matches(ref, req.asset)
 
 
@@ -766,12 +809,13 @@ class Decision:
     matches: List[RuleMatch]
     void_policies: List[str]
     pending_duties: List[str]
+    unresolved_refs: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "verdict": self.verdict, "allowed": self.allowed, "explanation": self.explanation,
             "matches": [m.to_dict() for m in self.matches], "void_policies": self.void_policies,
-            "pending_duties": self.pending_duties,
+            "pending_duties": self.pending_duties, "unresolved_refs": self.unresolved_refs,
         }
 
 
@@ -825,9 +869,10 @@ def evaluate(
                 if not act or not action_covers(act, request.action):
                     continue
                 trail: List[str] = []
-                if not resolver.asset_matches(rule.get("target"), request, trail):
+                fail_closed = kind == "prohibition"
+                if not resolver.asset_matches(rule.get("target"), request, trail, fail_closed=fail_closed):
                     continue
-                if not resolver.party_matches(rule.get("assignee"), request, trail):
+                if not resolver.party_matches(rule.get("assignee"), request, trail, fail_closed=fail_closed):
                     continue
                 cons = list(rule.get("constraint") or []) + list(rule.get("action_refinement") or [])
                 cres = evaluate_constraints(cons, env)
@@ -886,7 +931,9 @@ def evaluate(
     else:
         verdict = VERDICT_NOT_APPLICABLE
         explanation.append("No applicable permission — denied by default.")
-    return Decision(verdict, verdict == VERDICT_ALLOW, explanation, all_matches, void, pending)
+    if resolver.unresolved:
+        explanation.append("Unresolved references (no active definition): " + ", ".join(resolver.unresolved))
+    return Decision(verdict, verdict == VERDICT_ALLOW, explanation, all_matches, void, pending, list(resolver.unresolved))
 
 
 # ---------------------------------------------------------------- index / IO
