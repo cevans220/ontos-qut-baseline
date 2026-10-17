@@ -17,7 +17,7 @@ export default function GrantLedgerPanel({ canAdmin }: { canAdmin: boolean }) {
   const { get, post } = useApi();
   const { toast } = useToast();
   const [rows, setRows] = useState<LedgerEntry[]>([]);
-  const [status, setStatus] = useState<'active' | 'revoked'>('active');
+  const [status, setStatus] = useState<LedgerEntry['status']>('active');
   const [loading, setLoading] = useState(true);
   const [revoking, setRevoking] = useState(false);
 
@@ -80,6 +80,11 @@ export default function GrantLedgerPanel({ canAdmin }: { canAdmin: boolean }) {
                 {t('access-policies:ledger.implied')}
               </Badge>
             )}
+            {row.original.preexisting && (
+              <Badge variant="outline" className="ml-1 text-[10px]" title={t('access-policies:ledger.preexistingTitle')}>
+                {t('access-policies:ledger.preexisting')}
+              </Badge>
+            )}
           </span>
         ),
       },
@@ -109,7 +114,7 @@ export default function GrantLedgerPanel({ canAdmin }: { canAdmin: boolean }) {
         id: 'release',
         header: t('access-policies:ledger.release'),
         cell: ({ row }) => {
-          const id = row.original.status === 'revoked' ? row.original.revoked_release_id : row.original.granted_release_id;
+          const id = row.original.status === 'active' ? row.original.granted_release_id : row.original.revoked_release_id;
           return id ? (
             <Link className="text-xs text-primary hover:underline" to={`/access-policies/releases/${id}`} onClick={(e) => e.stopPropagation()}>
               {t('access-policies:ledger.viewRelease')}
@@ -132,13 +137,14 @@ export default function GrantLedgerPanel({ canAdmin }: { canAdmin: boolean }) {
         storageKey="access-grant-ledger-list"
         toolbarActions={
           <div className="flex items-center gap-2">
-            <Select value={status} onValueChange={(v) => setStatus(v as 'active' | 'revoked')}>
+            <Select value={status} onValueChange={(v) => setStatus(v as LedgerEntry['status'])}>
               <SelectTrigger className="h-8 w-[140px]" aria-label={t('common:labels.status')}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="active">{t('access-policies:ledger.statusActive')}</SelectItem>
                 <SelectItem value="revoked">{t('access-policies:ledger.statusRevoked')}</SelectItem>
+                <SelectItem value="released">{t('access-policies:ledger.statusReleased')}</SelectItem>
               </SelectContent>
             </Select>
             {canAdmin && status === 'active' && (

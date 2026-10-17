@@ -13,6 +13,7 @@ desired grant needs it anymore.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from src.common import odrl
@@ -82,20 +83,27 @@ class UCGrant:
     expires_at: Optional[str] = None
     implied: bool = False
     sources: List[Dict[str, Any]] = field(default_factory=list)
+    # Ledger only: the grant already existed on the platform when Ontos first applied it,
+    # so Ontos stops tracking it instead of revoking it.
+    preexisting: bool = False
 
     @property
     def key(self) -> GrantKey:
         return (self.principal, self.securable_type, self.securable_name, self.privilege)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"principal": self.principal, "securable_type": self.securable_type,
-                "securable_name": self.securable_name, "privilege": self.privilege,
-                "expires_at": self.expires_at, "implied": self.implied, "sources": self.sources}
+        out = {"principal": self.principal, "securable_type": self.securable_type,
+               "securable_name": self.securable_name, "privilege": self.privilege,
+               "expires_at": self.expires_at, "implied": self.implied, "sources": self.sources}
+        if self.preexisting:
+            out["preexisting"] = True
+        return out
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "UCGrant":
         return cls(d["principal"], d["securable_type"], d["securable_name"], d["privilege"],
-                   d.get("expires_at"), bool(d.get("implied")), list(d.get("sources") or []))
+                   d.get("expires_at"), bool(d.get("implied")), list(d.get("sources") or []),
+                   bool(d.get("preexisting")))
 
 
 def uc_principal(typed: str) -> str:
@@ -114,11 +122,16 @@ def securable_kind(name: str, resolve_object_kind: Optional[ObjectKindResolver] 
     return kind if kind in (KIND_TABLE, KIND_VOLUME, KIND_FUNCTION, KIND_MODEL) else KIND_TABLE
 
 
+def _parse_iso(value: str) -> datetime:
+    d = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+
 def _merge_expiry(a: Optional[str], b: Optional[str]) -> Optional[str]:
-    """Unbounded wins; otherwise the later expiry."""
+    """Unbounded wins; otherwise the later expiry (compared as instants, not strings)."""
     if a is None or b is None:
         return None
-    return max(a, b)
+    return a if _parse_iso(a) >= _parse_iso(b) else b
 
 
 def build_grants(plan: EntitlementPlan, resolve_object_kind: Optional[ObjectKindResolver] = None) -> List[UCGrant]:
@@ -170,21 +183,28 @@ def build_grants(plan: EntitlementPlan, resolve_object_kind: Optional[ObjectKind
 class GrantDiff:
     add: List[UCGrant] = field(default_factory=list)
     remove: List[UCGrant] = field(default_factory=list)
+    # No longer desired but pre-existing on the platform: dropped from the ledger, never revoked.
+    untrack: List[UCGrant] = field(default_factory=list)
     # Same grant, different expiry: ledger-only update, no platform action.
     update: List[UCGrant] = field(default_factory=list)
     unchanged: int = 0
 
     @property
     def empty(self) -> bool:
-        return not (self.add or self.remove or self.update)
+        return not (self.add or self.remove or self.update or self.untrack)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"add": [g.to_dict() for g in self.add], "remove": [g.to_dict() for g in self.remove],
-                "update": [g.to_dict() for g in self.update], "unchanged": self.unchanged}
+                "update": [g.to_dict() for g in self.update], "untrack": [g.to_dict() for g in self.untrack],
+                "unchanged": self.unchanged}
 
 
 def diff_grants(desired: Iterable[UCGrant], current: Iterable[UCGrant]) -> GrantDiff:
-    """Desired state vs. what Ontos believes is applied (the Grant Ledger). Never touches unmanaged grants."""
+    """Desired state vs. what Ontos believes is applied (the Grant Ledger).
+
+    Never touches unmanaged grants: grants that were already on the platform before
+    Ontos applied them (``preexisting``) are only dropped from the ledger.
+    """
     want = {g.key: g for g in desired}
     have = {g.key: g for g in current}
     out = GrantDiff()
@@ -196,8 +216,10 @@ def diff_grants(desired: Iterable[UCGrant], current: Iterable[UCGrant]) -> Grant
             out.update.append(g)
         else:
             out.unchanged += 1
-    out.remove = [g for key, g in have.items() if key not in want]
-    for lst in (out.add, out.remove, out.update):
+    gone = [g for key, g in have.items() if key not in want]
+    out.remove = [g for g in gone if not g.preexisting]
+    out.untrack = [g for g in gone if g.preexisting]
+    for lst in (out.add, out.remove, out.update, out.untrack):
         lst.sort(key=lambda g: g.key)
     return out
 

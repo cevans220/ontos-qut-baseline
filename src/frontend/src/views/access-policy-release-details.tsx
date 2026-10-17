@@ -339,6 +339,11 @@ export default function AccessPolicyReleaseDetails() {
               <TabsTrigger value="update">
                 {t('access-policies:releases.expiryUpdates')} ({release.counts.update})
               </TabsTrigger>
+              {release.counts.untrack > 0 && (
+                <TabsTrigger value="untrack">
+                  {t('access-policies:releases.untrack')} ({release.counts.untrack})
+                </TabsTrigger>
+              )}
               <TabsTrigger value="sql">{t('access-policies:releases.sql')}</TabsTrigger>
               <TabsTrigger value="desired">
                 {t('access-policies:releases.desiredGrants')} ({release.counts.grants})
@@ -352,6 +357,10 @@ export default function AccessPolicyReleaseDetails() {
             </TabsContent>
             <TabsContent value="update">
               <GrantTable grants={release.changes.update || []} empty={t('access-policies:releases.none')} />
+            </TabsContent>
+            <TabsContent value="untrack">
+              <p className="py-2 text-sm text-muted-foreground">{t('access-policies:releases.untrackHint')}</p>
+              <GrantTable grants={release.changes.untrack || []} empty={t('access-policies:releases.none')} />
             </TabsContent>
             <TabsContent value="sql">
               <div className="mb-2 flex justify-end">

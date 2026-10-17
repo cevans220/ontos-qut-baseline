@@ -19,6 +19,7 @@ class AccessPolicyReleaseFileModel(FileModel[AccessPolicyReleaseDb]):
     SUBDIRECTORY = "access-policies/releases"
     ONE_FILE_PER_RECORD = True
 
+    # ``entity`` is the release row or the delivery snapshot (same attributes, ``changes`` = what ships).
     @classmethod
     def get_filename(cls, entity: AccessPolicyReleaseDb) -> str:
         return f"{entity.target}-release-{entity.sequence:05d}.yaml"
@@ -42,6 +43,8 @@ class AccessPolicyReleaseFileModel(FileModel[AccessPolicyReleaseDb]):
                 'grant': changes.get('add') or [],
                 'revoke': changes.get('remove') or [],
                 'updateExpiry': changes.get('update') or [],
+                # Pre-existing platform grants Ontos stops tracking; never revoke these.
+                'untrack': changes.get('untrack') or [],
             },
             'sql': changes.get('sql') or [],
             'grants': (entity.plan or {}).get('grants') or [],

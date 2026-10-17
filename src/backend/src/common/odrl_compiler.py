@@ -158,15 +158,24 @@ class PartySet:
 
 
 def typed_principal(ref: str) -> str:
-    """``user:``/``mailto:``/``sp:``/``group:`` refs keep their kind; bare refs are users if they look like an email."""
+    """``user:``/``mailto:``/``sp:``/``group:`` refs keep their kind; bare refs are users if they look like an email.
+
+    User emails are lower-cased; group / SP names keep their case for display."""
     s = (ref or "").strip()
     low = s.lower()
     if low.startswith("mailto:"):
-        return "user:" + s[len("mailto:"):]
-    for prefix in ("user:", "sp:", "group:"):
+        return "user:" + low[len("mailto:"):]
+    if low.startswith("user:"):
+        return low  # Emails are case-insensitive.
+    for prefix in ("sp:", "group:"):
         if low.startswith(prefix):
             return prefix + s[len(prefix):]
-    return ("user:" if "@" in s else "group:") + s
+    return ("user:" + low) if "@" in s else ("group:" + s)
+
+
+def principal_key(typed: str) -> str:
+    """Comparison key: principals match case-insensitively (UC resolves them that way)."""
+    return typed.lower()
 
 
 def _split_party_refinement(refinement: List[Dict[str, Any]]) -> Tuple[Optional[Set[str]], List[Dict[str, Any]], bool]:
@@ -243,7 +252,7 @@ class _Parties:
         groups, others, unsupported = _split_party_refinement(refinement)
         if unsupported:
             return PartySet(inexact=f"{label}: group constraint needs a directory to expand")
-        attrs_by_user = {typed_principal(p).lower(): a for p, a in self.directory()}
+        attrs_by_user = {principal_key(typed_principal(p)): a for p, a in self.directory()} if others else {}
         out = PartySet(inexact=base.inexact)
         for p in base.principals:
             kind = p.split(":", 1)[0]
@@ -257,7 +266,7 @@ class _Parties:
             if groups is not None:
                 out.inexact = f"{label}: group refinement can't be checked for {p} without a directory"
                 continue
-            if odrl.evaluate_constraints(others, attrs_by_user.get(p.lower(), {})).satisfied:
+            if not others or odrl.evaluate_constraints(others, attrs_by_user.get(principal_key(p), {})).satisfied:
                 out.principals.add(p)
         return out
 
@@ -542,7 +551,7 @@ def _overlap(e: Entitlement, pro: _Prohibition) -> Optional[str]:
     else:
         return None
 
-    if pro.parties.everyone or e.principal in pro.parties.principals:
+    if pro.parties.everyone or principal_key(e.principal) in {principal_key(p) for p in pro.parties.principals}:
         party_full = True
     elif not pro.parties.principals:
         return None

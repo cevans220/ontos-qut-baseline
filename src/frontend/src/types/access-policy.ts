@@ -241,6 +241,7 @@ export interface UcGrant {
   privilege: string;
   expires_at?: string | null;
   implied?: boolean;
+  preexisting?: boolean;
   sources?: RuleSource[];
 }
 
@@ -261,6 +262,8 @@ export interface ReleaseChanges {
   add: UcGrant[];
   remove: UcGrant[];
   update: UcGrant[];
+  /** Pre-existing platform grants no longer desired: dropped from the ledger, never revoked. */
+  untrack: UcGrant[];
   unchanged: number;
   sql: string[];
 }
@@ -298,6 +301,7 @@ export interface AccessRelease {
     add: number;
     remove: number;
     update: number;
+    untrack: number;
     unchanged: number;
     grants: number;
     gated: number;
@@ -327,7 +331,7 @@ export interface LedgerEntry extends UcGrant {
   target: string;
   expired: boolean;
   legal_basis?: string | null;
-  status: 'active' | 'revoked';
+  status: 'active' | 'revoked' | 'released';
   granted_release_id?: string | null;
   revoked_release_id?: string | null;
   granted_at: string;

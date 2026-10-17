@@ -131,8 +131,6 @@ def test_indirect_writes_ontos_yaml_and_waits_for_confirmation(policies, rm, db_
     subdir, filename, doc = git.saved[0]
     assert subdir == "access-policies/releases" and filename == "uc-release-00001.yaml"
     assert doc["kind"] == "AccessPolicyRelease" and len(doc["spec"]["changes"]["grant"]) == 3 and doc["spec"]["sql"]
-    with pytest.raises(AccessPolicyError):
-        rm.deliver(db_session, r.id, ADMIN, Delivery([DeliveryMode.INDIRECT], git=git))
     r = rm.confirm_applied(db_session, r.id, ADMIN, "merged PR #42")
     assert r.status == "applied" and len(rm.ledger(db_session, "uc")) == 3
 
@@ -144,8 +142,11 @@ def test_deprecating_policy_revokes_only_managed_grants(policies, rm, db_session
     policies.change_status(db_session, KIND_POLICY, p.id, "deprecated", AUTHOR)
     grants.calls.clear()
     r = rm.deliver(db_session, _approved_release(rm, db_session).id, ADMIN, Delivery([DeliveryMode.DIRECT], grants))
-    assert r.status == "applied" and all(c[0] == "revoke" and c[3] for c in grants.calls)
-    assert rm.ledger(db_session, "uc") == [] and len(rm.ledger(db_session, "uc", status="revoked")) == 3
+    # Live state unreadable (fake has no get_grants): implied USE grants are treated as pre-existing.
+    assert r.status == "applied" and grants.calls == [("revoke", "analysts", "main.sales.orders", ("SELECT",))]
+    assert rm.ledger(db_session, "uc") == []
+    assert len(rm.ledger(db_session, "uc", status="revoked")) == 1
+    assert len(rm.ledger(db_session, "uc", status="released")) == 2
 
 
 def test_partial_direct_failure_then_redeliver_remaining(policies, rm, db_session: Session):
@@ -192,3 +193,82 @@ def test_live_diff_reports_drift(policies, rm, db_session: Session):
     assert {m["privilege"] for m in report["missing"]} == {"USE_CATALOG", "USE_SCHEMA"}
     assert report["unmanaged"] == [{"principal": "someone", "securable_type": "table",
                                     "securable_name": "main.sales.orders", "privilege": "MODIFY"}]
+
+
+# ------------------------------------------------------------ review findings
+
+class LiveGrants(FakeGrants):
+    """Fake with readable live state: ``live[(type, name)] = [{"principal", "privileges"}]``."""
+
+    def __init__(self, live):
+        super().__init__()
+        self.live = live
+
+    def get_grants(self, securable_type, securable_name):
+        return {"success": True, "grants": self.live.get((securable_type, securable_name), [])}
+
+
+def test_grants_that_existed_before_ontos_are_never_revoked(policies, rm, db_session: Session):
+    p = _active_policy(policies, db_session, {"permission": [{"target": "uc:main.sales.orders", "action": "read"}]})
+    grants = LiveGrants({("catalog", "main"): [{"principal": "account users", "privileges": ["USE_CATALOG"]}],
+                         ("schema", "main.sales"): [], ("table", "main.sales.orders"): []})
+    rm.deliver(db_session, _approved_release(rm, db_session).id, ADMIN, Delivery([DeliveryMode.DIRECT], grants))
+    flags = {x["privilege"]: x["preexisting"] for x in rm.ledger(db_session, "uc")}
+    assert flags == {"USE_CATALOG": True, "USE_SCHEMA": False, "SELECT": False}
+    policies.change_status(db_session, KIND_POLICY, p.id, "deprecated", AUTHOR)
+    grants.calls.clear()
+    rm.deliver(db_session, _approved_release(rm, db_session).id, ADMIN, Delivery([DeliveryMode.DIRECT], grants))
+    assert {c[3][0] for c in grants.calls} == {"USE_SCHEMA", "SELECT"}  # USE CATALOG left alone
+
+
+def test_revoke_expired_writes_nothing_when_delivery_is_unavailable_and_never_stacks(policies, rm, db_session: Session):
+    from src.db_models.access_policies import AccessPolicyReleaseDb
+    _active_policy(policies, db_session, {"permission": [{
+        "target": "uc:main.sales", "action": "read", "assignee": "group:temps",
+        "constraint": [{"leftOperand": "dateTime", "operator": "lteq", "rightOperand": "2099-01-01T00:00:00Z"}]}]})
+    rm.deliver(db_session, _approved_release(rm, db_session).id, ADMIN, Delivery([DeliveryMode.DIRECT], FakeGrants()))
+    later = datetime(2099, 1, 2, tzinfo=timezone.utc)
+    before = db_session.query(AccessPolicyReleaseDb).count()
+    with pytest.raises(AccessPolicyError):
+        rm.revoke_expired(db_session, "uc", "system", Delivery([]), now=later)
+    assert db_session.query(AccessPolicyReleaseDb).count() == before
+    git = FakeGit()
+    first = rm.revoke_expired(db_session, "uc", "system", Delivery([DeliveryMode.INDIRECT], git=git), now=later)
+    second = rm.revoke_expired(db_session, "uc", "system", Delivery([DeliveryMode.INDIRECT], git=git), now=later)
+    assert first.id == second.id and first.status == "delivered" and len(git.saved) == 1
+
+
+def test_delivered_release_can_be_discarded(policies, rm, db_session: Session):
+    _active_policy(policies, db_session, SALES)
+    r = rm.deliver(db_session, _approved_release(rm, db_session).id, ADMIN, Delivery([DeliveryMode.INDIRECT], git=FakeGit()))
+    assert rm.change_status(db_session, r.id, "discarded", ADMIN).status == "discarded"
+
+
+def test_indirect_redelivery_ships_only_remaining_changes(policies, rm, db_session: Session):
+    _active_policy(policies, db_session, SALES)
+    r = rm.deliver(db_session, _approved_release(rm, db_session).id, ADMIN,
+                   Delivery([DeliveryMode.DIRECT], FakeGrants(fail_on={"main.sales.orders"})))
+    git = FakeGit()
+    rm.deliver(db_session, r.id, ADMIN, Delivery([DeliveryMode.INDIRECT], git=git))
+    spec = git.saved[0][2]["spec"]
+    assert [g["securable_name"] for g in spec["changes"]["grant"]] == ["main.sales.orders"]
+    assert spec["sql"] == ["GRANT SELECT ON TABLE `main`.`sales`.`orders` TO `analysts`;"]
+
+
+def test_ledger_principal_filter_is_exact(policies, rm, db_session: Session):
+    _active_policy(policies, db_session, {"permission": [
+        {"target": "uc:main.s.t", "action": "read", "assignee": "group:data_eng"},
+        {"target": "uc:main.s.t", "action": "read", "assignee": "group:dataXeng"}]})
+    rm.deliver(db_session, _approved_release(rm, db_session).id, ADMIN, Delivery([DeliveryMode.DIRECT], FakeGrants()))
+    assert {x["principal"] for x in rm.ledger(db_session, "uc", principal="DATA_ENG")} == {"data_eng"}
+    assert rm.ledger(db_session, "uc", principal="%") == []
+
+
+def test_timeline_logging_does_not_commit(policies, rm, db_session: Session, monkeypatch):
+    _active_policy(policies, db_session, SALES)
+    commits = []
+    monkeypatch.setattr(db_session, "commit", lambda: commits.append(1))
+    r = rm.create_release(db_session, "uc", AUTHOR)
+    assert commits == []
+    from src.db_models.comments import CommentDb
+    assert db_session.query(CommentDb).filter(CommentDb.entity_id == r.id).count() == 1

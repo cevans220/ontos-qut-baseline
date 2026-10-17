@@ -188,6 +188,27 @@ def test_live_diff_reports_missing_unmanaged_and_stale():
 
 
 def test_typed_principal():
-    assert typed_principal("mailto:A@x.com") == "user:A@x.com"
+    assert typed_principal("mailto:A@x.com") == "user:a@x.com"
     assert typed_principal("data-eng") == "group:data-eng"
     assert typed_principal("x@y.z") == "user:x@y.z"
+
+
+# ------------------------------------------------------------ review findings
+
+def test_prohibition_matches_principals_case_insensitively():
+    plan = _compile(_policy({
+        "permission": [{"target": "uc:main.hr", "action": "read", "assignee": "user:Alice@corp.com"}],
+        "prohibition": [{"target": "uc:main.hr", "action": "read", "assignee": "alice@corp.com"}]}))
+    assert plan.entitlements == []
+
+
+def test_expiry_merge_compares_instants_not_strings():
+    assert uc._merge_expiry("2026-12-31T23:59:59Z", "2026-12-31T23:59:59.500000Z") == "2026-12-31T23:59:59.500000Z"
+
+
+def test_preexisting_ledger_grants_are_untracked_not_revoked():
+    shared = uc.UCGrant("account users", "catalog", "main", "USE_CATALOG", implied=True, preexisting=True)
+    own = uc.UCGrant("account users", "table", "main.s.t", "SELECT")
+    diff = uc.diff_grants([], [shared, own])
+    assert [g.privilege for g in diff.remove] == ["SELECT"] and [g.privilege for g in diff.untrack] == ["USE_CATALOG"]
+    assert uc.render_sql(diff) == ["REVOKE SELECT ON TABLE `main`.`s`.`t` FROM `account users`;"]

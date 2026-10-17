@@ -53,6 +53,7 @@ def upgrade() -> None:
         sa.Column('securable_name', sa.String(), nullable=False),
         sa.Column('privilege', sa.String(), nullable=False),
         sa.Column('implied', sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column('preexisting', sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column('expires_at', sa.String(), nullable=True),
         sa.Column('sources', sa.JSON(), nullable=False),
         sa.Column('legal_basis', sa.String(), nullable=True),

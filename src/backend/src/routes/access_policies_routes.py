@@ -150,8 +150,10 @@ async def list_targets(delivery_service: Any = Depends(get_delivery_service), _:
     return {"targets": [{"key": t, "label": "Unity Catalog"} for t in TARGETS], "delivery_modes": modes}
 
 
+# Endpoints below that call the Databricks SDK (grants, object-kind lookups) are plain ``def``
+# so FastAPI runs them in the threadpool instead of blocking the event loop.
 @router.post("/releases/preview")
-async def preview_release(db: DBSessionDep, payload: ReleasePreviewRequest = Body(...),
+def preview_release(db: DBSessionDep, payload: ReleasePreviewRequest = Body(...),
                           delivery_service: Any = Depends(get_delivery_service), _: bool = _READ):
     """Compile active policies for a target and diff against the Grant Ledger, without saving."""
     try:
@@ -167,7 +169,7 @@ async def list_releases(db: DBSessionDep, target: Optional[str] = Query(None), s
 
 
 @router.post("/releases", status_code=201)
-async def create_release(db: DBSessionDep, current_user: AuditCurrentUserDep,
+def create_release(db: DBSessionDep, current_user: AuditCurrentUserDep,
                          payload: ReleaseCreateRequest = Body(...),
                          delivery_service: Any = Depends(get_delivery_service), _: bool = _WRITE):
     try:
@@ -187,7 +189,7 @@ async def get_release(release_id: str, db: DBSessionDep, _: bool = _READ):
 
 
 @router.post("/releases/{release_id}/recompile")
-async def recompile_release(release_id: str, db: DBSessionDep, current_user: AuditCurrentUserDep,
+def recompile_release(release_id: str, db: DBSessionDep, current_user: AuditCurrentUserDep,
                             delivery_service: Any = Depends(get_delivery_service), _: bool = _WRITE):
     try:
         row = releases.recompile(db, release_id, _email(current_user), resolve_object_kind=_kind_resolver(delivery_service))
@@ -208,7 +210,7 @@ async def change_release_status(release_id: str, request: Request, db: DBSession
 
 
 @router.post("/releases/{release_id}/deliver")
-async def deliver_release(release_id: str, db: DBSessionDep, current_user: AuditCurrentUserDep,
+def deliver_release(release_id: str, db: DBSessionDep, current_user: AuditCurrentUserDep,
                           payload: ReleaseDeliverRequest = Body(default_factory=ReleaseDeliverRequest),
                           delivery_service: Any = Depends(get_delivery_service), _: bool = _ADMIN):
     """Ship an approved release through the chosen Delivery Modes."""
@@ -220,7 +222,7 @@ async def deliver_release(release_id: str, db: DBSessionDep, current_user: Audit
 
 
 @router.post("/releases/{release_id}/confirm-applied")
-async def confirm_release_applied(release_id: str, db: DBSessionDep, current_user: AuditCurrentUserDep,
+def confirm_release_applied(release_id: str, db: DBSessionDep, current_user: AuditCurrentUserDep,
                                   payload: ReleaseConfirmRequest = Body(default_factory=ReleaseConfirmRequest),
                                   _: bool = _ADMIN):
     """Confirm an Indirect / Manual release was applied on the target; updates the Grant Ledger."""
@@ -232,7 +234,7 @@ async def confirm_release_applied(release_id: str, db: DBSessionDep, current_use
 
 
 @router.post("/releases/{release_id}/live-diff")
-async def release_live_diff(release_id: str, db: DBSessionDep,
+def release_live_diff(release_id: str, db: DBSessionDep,
                             delivery_service: Any = Depends(get_delivery_service), _: bool = _WRITE):
     """Compare the release's desired grants with live Unity Catalog grants (report-only)."""
     gm = _grant_manager(delivery_service)
@@ -253,7 +255,7 @@ async def get_ledger(db: DBSessionDep, target: Optional[str] = Query(None),
 
 
 @router.post("/ledger/revoke-expired")
-async def revoke_expired(db: DBSessionDep, current_user: AuditCurrentUserDep,
+def revoke_expired(db: DBSessionDep, current_user: AuditCurrentUserDep,
                          payload: RevokeExpiredRequest = Body(default_factory=RevokeExpiredRequest),
                          delivery_service: Any = Depends(get_delivery_service), _: bool = _ADMIN):
     """Create and deliver a revocation release for every expired ledger grant (schedule this as a job)."""

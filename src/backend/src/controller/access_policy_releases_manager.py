@@ -18,6 +18,7 @@ release through the same Delivery Modes.
 """
 import hashlib
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sqlalchemy import func
@@ -33,6 +34,7 @@ from src.controller.access_policies_manager import (
     STATUS_ACTIVE,
     AccessPoliciesManager,
     AccessPolicyError,
+    log_timeline,
 )
 from src.db_models.access_policies import (
     ENTITY_TYPE_RELEASE,
@@ -62,17 +64,20 @@ RELEASE_TRANSITIONS: Dict[str, Tuple[str, ...]] = {
     R_DRAFT: (R_UNDER_REVIEW, R_DISCARDED),
     R_UNDER_REVIEW: (R_APPROVED, R_DRAFT),
     R_APPROVED: (R_DRAFT, R_DISCARDED),
-    R_DELIVERED: (),
+    # A delivered release that was never applied (CI didn't run, runbook rejected) can be discarded.
+    R_DELIVERED: (R_DISCARDED,),
     R_FAILED: (R_DISCARDED,),
     R_APPLIED: (),
     R_SUPERSEDED: (),
     R_DISCARDED: (),
 }
 OPEN_STATUSES = (R_DRAFT, R_UNDER_REVIEW, R_APPROVED, R_DELIVERED, R_FAILED)
-DELIVERABLE_STATUSES = (R_APPROVED, R_FAILED)
+DELIVERABLE_STATUSES = (R_APPROVED, R_DELIVERED, R_FAILED)
 
 LEDGER_ACTIVE = "active"
 LEDGER_REVOKED = "revoked"
+# Pre-existing platform grant no longer desired: Ontos stops tracking it but never revokes it.
+LEDGER_RELEASED = "released"
 
 LIVE_DIFF_MAX_SECURABLES = 200
 
@@ -93,7 +98,11 @@ def _parse_iso(value: Optional[str]) -> Optional[datetime]:
 
 def _ledger_grant(row: AccessGrantLedgerDb) -> uc.UCGrant:
     return uc.UCGrant(row.principal, row.securable_type, row.securable_name, row.privilege,
-                      row.expires_at, bool(row.implied), list(row.sources or []))
+                      row.expires_at, bool(row.implied), list(row.sources or []), bool(row.preexisting))
+
+
+def _key(row: Any) -> uc.GrantKey:
+    return (row.principal, row.securable_type, row.securable_name, row.privilege)
 
 
 class PolicyReleaseManager:
@@ -115,15 +124,9 @@ class PolicyReleaseManager:
         return row
 
     def _log_timeline(self, db: Session, row: AccessPolicyReleaseDb, message: str, user: Optional[str]) -> None:
-        try:
-            from src.controller.comments_manager import CommentsManager
-            from src.models.comments import CommentCreate
-            CommentsManager().create_comment(
-                db, data=CommentCreate(entity_type=ENTITY_TYPE_RELEASE, entity_id=row.id, comment=message),
-                user_email=user or "system@ontos", is_admin=True,
-            )
-        except Exception as e:  # pragma: no cover - timeline logging is best-effort
-            logger.warning(f"Could not write timeline comment for release {row.id}: {e}")
+        # Via the repository (flush only) inside a savepoint: CommentsManager.create_comment commits,
+        # which would make a half-done request (e.g. a release created before delivery fails) permanent.
+        log_timeline(db, ENTITY_TYPE_RELEASE, row.id, message, user)
 
     def active_ledger(self, db: Session, target: str) -> List[AccessGrantLedgerDb]:
         return (db.query(AccessGrantLedgerDb)
@@ -241,7 +244,7 @@ class PolicyReleaseManager:
     @staticmethod
     def _is_empty(row: AccessPolicyReleaseDb) -> bool:
         ch = row.changes or {}
-        return not (ch.get("add") or ch.get("remove") or ch.get("update"))
+        return not (ch.get("add") or ch.get("remove") or ch.get("update") or ch.get("untrack"))
 
     @staticmethod
     def _summary(row: AccessPolicyReleaseDb) -> str:
@@ -251,16 +254,66 @@ class PolicyReleaseManager:
 
     # ------------------------------------------------------------ delivery
 
-    def _remaining(self, db: Session, row: AccessPolicyReleaseDb) -> Tuple[List[uc.UCGrant], List[uc.UCGrant]]:
+    def _remaining(self, db: Session, row: AccessPolicyReleaseDb) -> Tuple[List[uc.UCGrant], List[uc.UCGrant], List[uc.UCGrant]]:
         """Changes not yet reflected in the ledger (all of them on first delivery; the rest on re-delivery)."""
-        have = {(r.principal, r.securable_type, r.securable_name, r.privilege) for r in self.active_ledger(db, row.target)}
+        have = {_key(r) for r in self.active_ledger(db, row.target)}
         ch = row.changes or {}
         adds = [g for g in (uc.UCGrant.from_dict(d) for d in ch.get("add") or []) if g.key not in have]
         removes = [g for g in (uc.UCGrant.from_dict(d) for d in ch.get("remove") or []) if g.key in have]
-        return adds, removes
+        untracks = [g for g in (uc.UCGrant.from_dict(d) for d in ch.get("untrack") or []) if g.key in have]
+        return adds, removes, untracks
+
+    @staticmethod
+    def _preexisting(adds: List[uc.UCGrant], get_grants: Optional[Callable[[str, str], Dict[str, Any]]]) -> Tuple[List[str], bool]:
+        """Which grants to add already exist on the platform (→ never revoked by Ontos later).
+
+        Securables whose live grants can't be read fall back to the conservative rule: implied
+        ``USE CATALOG`` / ``USE SCHEMA`` count as pre-existing (they are commonly granted outside
+        Ontos, e.g. to ``account users``), explicit privileges as Ontos-made.
+        """
+        live: Dict[Tuple[str, str], Optional[set]] = {}
+        securables = sorted({(g.securable_type, g.securable_name) for g in adds})
+        for stype, sname in securables[:LIVE_DIFF_MAX_SECURABLES] if get_grants else []:
+            try:
+                res = get_grants(stype, sname) or {}
+            except Exception as e:  # pragma: no cover - platform read is best-effort
+                logger.warning(f"Could not read live grants on {stype} {sname}: {e}")
+                res = {}
+            if res.get("success"):
+                live[(stype, sname)] = {(row.get("principal") or "").lower() + "|" + str(p).upper().replace(" ", "_")
+                                        for row in res.get("grants") or [] for p in row.get("privileges") or []}
+        out: List[str] = []
+        for g in adds:
+            granted = live.get((g.securable_type, g.securable_name))
+            known = granted is not None
+            if (known and f"{g.principal.lower()}|{g.privilege}" in granted) or (not known and g.implied):
+                out.append("|".join(g.key))
+        return out, bool(live) and len(live) == len(securables)
+
+    @staticmethod
+    def _delivery_modes(delivery_service: Any, modes: Optional[List[str]]) -> List[Any]:
+        from src.controller.delivery_service import DeliveryMode
+
+        if delivery_service is None:
+            raise AccessPolicyError("Delivery service is not configured", 503)
+        active = delivery_service.get_active_modes()
+        if modes:
+            try:
+                chosen = [DeliveryMode(m) for m in modes]
+            except ValueError as e:
+                raise AccessPolicyError(str(e), 400) from e
+            not_enabled = [m.value for m in chosen if m not in active]
+            if not_enabled:
+                raise AccessPolicyError(f"Delivery mode(s) not enabled in Settings: {', '.join(not_enabled)}", 400)
+        else:
+            chosen = active
+        if not chosen:
+            raise AccessPolicyError("No delivery mode is enabled in Settings → Delivery", 409)
+        return chosen
 
     def deliver(self, db: Session, release_id: str, user: Optional[str], delivery_service: Any,
-                modes: Optional[List[str]] = None) -> AccessPolicyReleaseDb:
+                modes: Optional[List[str]] = None,
+                get_grants: Optional[Callable[[str, str], Dict[str, Any]]] = None) -> AccessPolicyReleaseDb:
         from src.controller.delivery_service import (
             DeliveryChangeType,
             DeliveryMode,
@@ -269,37 +322,38 @@ class PolicyReleaseManager:
 
         row = self.require(db, release_id)
         if row.status not in DELIVERABLE_STATUSES:
-            raise AccessPolicyError(f"Only approved (or failed) releases can be delivered; this one is '{row.status}'", 409)
+            raise AccessPolicyError(f"Only approved, delivered or failed releases can be delivered; this one is '{row.status}'", 409)
         if row.status == R_APPROVED and row.ledger_fingerprint != self._fingerprint(db, row.target):
             raise AccessPolicyError("The Grant Ledger changed since this release was compiled — recompile it", 409)
-        if delivery_service is None:
-            raise AccessPolicyError("Delivery service is not configured", 503)
-        active = delivery_service.get_active_modes()
-        if modes:
-            chosen = [DeliveryMode(m) for m in modes]
-            not_enabled = [m.value for m in chosen if m not in active]
-            if not_enabled:
-                raise AccessPolicyError(f"Delivery mode(s) not enabled in Settings: {', '.join(not_enabled)}", 400)
-        else:
-            chosen = active
-        if not chosen:
-            raise AccessPolicyError("No delivery mode is enabled in Settings → Delivery", 409)
+        chosen = self._delivery_modes(delivery_service, modes)
+        if get_grants is None:
+            get_grants = getattr(getattr(delivery_service, "_grant_manager", None), "get_grants", None)
 
-        adds, removes = self._remaining(db, row)
-        diff = uc.GrantDiff(add=adds, remove=removes)
+        adds, removes, untracks = self._remaining(db, row)
+        preexisting, live_checked = self._preexisting(adds, get_grants)
+        diff = uc.GrantDiff(add=adds, remove=removes, untrack=untracks)
+        changes = diff.to_dict()
+        changes["sql"] = uc.render_sql(diff)
+        # Indirect mode serializes this snapshot, so the Git artifact matches what Direct/Manual ship.
+        entity = SimpleNamespace(
+            id=row.id, name=f"{row.target}-release-{row.sequence}", target=row.target, sequence=row.sequence,
+            release_kind=row.release_kind, approved_by=row.approved_by, notes=row.notes,
+            source_policies=row.source_policies, plan=row.plan, changes=changes,
+            created_at=row.created_at, updated_at=row.updated_at,
+        )
         payload = DeliveryPayload(
             change_type=DeliveryChangeType.POLICY_RELEASE,
             entity_type="AccessPolicyRelease",
             entity_id=row.id,
             data={
-                "entity": row,
+                "entity": entity,
                 "target": row.target,
                 "sequence": row.sequence,
                 "summary": f"Access Policy release #{row.sequence} for {row.target}: "
                            f"{len(adds)} to grant, {len(removes)} to revoke.",
                 "grant": uc.group_for_apply(adds),
                 "revoke": uc.group_for_apply(removes),
-                "sql": uc.render_sql(diff),
+                "sql": changes["sql"],
                 "link": f"/access-policies/releases/{row.id}",
             },
             user=user,
@@ -309,14 +363,16 @@ class PolicyReleaseManager:
         result_dicts = [r.to_dict() for r in results.results]
         row.delivery_modes = [m.value for m in chosen]
         row.delivery_results = (row.delivery_results or []) + [{"at": _now().isoformat(), "by": user,
-                                                                "results": result_dicts}]
+                                                                "results": result_dicts,
+                                                                "preexisting": preexisting,
+                                                                "live_checked": live_checked}]
         row.delivered_by, row.delivered_at = user, _now()
 
         direct = next((r for r in results.results if r.mode == DeliveryMode.DIRECT), None)
         applied_directly = direct is not None and not direct.details.get("dry_run") and not direct.details.get("skipped")
         if applied_directly:
             ok_add, ok_remove = self._succeeded_items(direct.details.get("items") or [], adds, removes)
-            self._apply_to_ledger(db, row, ok_add, ok_remove, user)
+            self._apply_to_ledger(db, row, ok_add, ok_remove, untracks, set(preexisting))
             if len(ok_add) == len(adds) and len(ok_remove) == len(removes):
                 self._mark_applied(db, row, user, "applied directly via the Databricks SDK")
             else:
@@ -348,8 +404,9 @@ class PolicyReleaseManager:
         row = self.require(db, release_id)
         if row.status != R_DELIVERED:
             raise AccessPolicyError("Only delivered releases can be confirmed as applied", 409)
-        adds, removes = self._remaining(db, row)
-        self._apply_to_ledger(db, row, adds, removes, user)
+        adds, removes, untracks = self._remaining(db, row)
+        last = (row.delivery_results or [{}])[-1]
+        self._apply_to_ledger(db, row, adds, removes, untracks, set(last.get("preexisting") or []))
         self._mark_applied(db, row, user, "confirmed applied" + (f": {comment}" if comment else ""))
         db.flush()
         return row
@@ -364,20 +421,21 @@ class PolicyReleaseManager:
         self._log_timeline(db, row, f"Release {how}", user)
 
     def _apply_to_ledger(self, db: Session, row: AccessPolicyReleaseDb, adds: List[uc.UCGrant],
-                         removes: List[uc.UCGrant], user: Optional[str]) -> None:
-        active = {(r.principal, r.securable_type, r.securable_name, r.privilege): r for r in self.active_ledger(db, row.target)}
+                         removes: List[uc.UCGrant], untracks: List[uc.UCGrant], preexisting: set) -> None:
+        active = {_key(r): r for r in self.active_ledger(db, row.target)}
         now = _now()
-        for g in removes:
-            r = active.pop(g.key, None)
-            if r:
-                r.status, r.revoked_at, r.revoked_release_id = LEDGER_REVOKED, now, row.id
+        for status, grants in ((LEDGER_REVOKED, removes), (LEDGER_RELEASED, untracks)):
+            for g in grants:
+                r = active.pop(g.key, None)
+                if r:
+                    r.status, r.revoked_at, r.revoked_release_id = status, now, row.id
         for g in adds:
             if g.key in active:
                 continue
             entry = AccessGrantLedgerDb(target=row.target, principal=g.principal, securable_type=g.securable_type,
                                         securable_name=g.securable_name, privilege=g.privilege, implied=g.implied,
                                         expires_at=g.expires_at, sources=g.sources, status=LEDGER_ACTIVE,
-                                        granted_release_id=row.id)
+                                        preexisting="|".join(g.key) in preexisting, granted_release_id=row.id)
             db.add(entry)
             active[g.key] = entry
         # Ledger-only refresh (expiry, provenance) for every desired grant that is applied.
@@ -402,10 +460,22 @@ class PolicyReleaseManager:
         expired = self.expired_grants(db, target, now)
         if not expired:
             return None
-        expired_keys = {(r.principal, r.securable_type, r.securable_name, r.privilege) for r in expired}
-        remaining = [_ledger_grant(r) for r in self.active_ledger(db, target)
-                     if (r.principal, r.securable_type, r.securable_name, r.privilege) not in expired_keys]
-        diff = uc.GrantDiff(remove=sorted((_ledger_grant(r) for r in expired), key=lambda g: g.key))
+        # Validate delivery before writing anything, so a misconfiguration leaves no orphaned release.
+        self._delivery_modes(delivery_service, None)
+        in_flight = (db.query(AccessPolicyReleaseDb)
+                     .filter(AccessPolicyReleaseDb.target == target,
+                             AccessPolicyReleaseDb.release_kind == KIND_REVOCATION,
+                             AccessPolicyReleaseDb.status.in_((R_APPROVED, R_DELIVERED, R_FAILED)))
+                     .order_by(AccessPolicyReleaseDb.sequence.desc()).first())
+        if in_flight is not None:
+            # Don't stack revocation releases: an Indirect/Manual one awaits confirmation, a failed one is retried.
+            if in_flight.status == R_DELIVERED:
+                return in_flight
+            return self.deliver(db, in_flight.id, user, delivery_service)
+        expired_keys = {_key(r) for r in expired}
+        remaining = [_ledger_grant(r) for r in self.active_ledger(db, target) if _key(r) not in expired_keys]
+        gone = sorted((_ledger_grant(r) for r in expired), key=lambda g: g.key)
+        diff = uc.GrantDiff(remove=[g for g in gone if not g.preexisting], untrack=[g for g in gone if g.preexisting])
         changes = diff.to_dict()
         changes["sql"] = uc.render_sql(diff)
         seq = (db.query(func.max(AccessPolicyReleaseDb.sequence))
@@ -466,7 +536,7 @@ class PolicyReleaseManager:
         if status:
             q = q.filter(AccessGrantLedgerDb.status == status)
         if principal:
-            q = q.filter(AccessGrantLedgerDb.principal.ilike(principal))
+            q = q.filter(func.lower(AccessGrantLedgerDb.principal) == principal.strip().lower())
         now = _now()
         out = []
         for r in q.order_by(AccessGrantLedgerDb.securable_name, AccessGrantLedgerDb.principal,
@@ -476,6 +546,7 @@ class PolicyReleaseManager:
                 "id": r.id, "target": r.target, "principal": r.principal, "securable_type": r.securable_type,
                 "securable_name": r.securable_name, "privilege": r.privilege, "implied": bool(r.implied),
                 "expires_at": r.expires_at, "expired": bool(exp and exp <= now), "sources": r.sources or [],
+                "preexisting": bool(r.preexisting),
                 "legal_basis": r.legal_basis, "status": r.status,
                 "granted_release_id": r.granted_release_id, "revoked_release_id": r.revoked_release_id,
                 "granted_at": r.granted_at, "revoked_at": r.revoked_at,
@@ -493,7 +564,8 @@ class PolicyReleaseManager:
             "deliverable": row.status in DELIVERABLE_STATUSES,
             "confirmable": row.status == R_DELIVERED,
             "counts": {"add": len(ch.get("add") or []), "remove": len(ch.get("remove") or []),
-                       "update": len(ch.get("update") or []), "unchanged": ch.get("unchanged", 0),
+                       "update": len(ch.get("update") or []), "untrack": len(ch.get("untrack") or []),
+                       "unchanged": ch.get("unchanged", 0),
                        "grants": len((row.plan or {}).get("grants") or []),
                        "gated": len((row.plan or {}).get("gated") or []),
                        "errors": sum(1 for i in issues if i.get("severity") == "error"),

@@ -200,11 +200,13 @@ class AccessGrantLedgerDb(Base):
     securable_name = Column(String, nullable=False, index=True)
     privilege = Column(String, nullable=False)
     implied = Column(Boolean, nullable=False, default=False)
+    # Already on the platform when Ontos applied it → Ontos stops tracking it but never revokes it.
+    preexisting = Column(Boolean, nullable=False, default=False)
     expires_at = Column(String, nullable=True, index=True)  # ISO 8601 UTC ("...Z"), compared lexically
     sources = Column(JSON, nullable=False, default=list)
     # Legal basis / originating agreement for GDPR tracking (Agreements, Phase 3).
     legal_basis = Column(String, nullable=True)
-    status = Column(String, nullable=False, default="active", index=True)  # active | revoked
+    status = Column(String, nullable=False, default="active", index=True)  # active | revoked | released
     granted_release_id = Column(String, ForeignKey("access_policy_releases.id", ondelete="SET NULL"), nullable=True)
     revoked_release_id = Column(String, ForeignKey("access_policy_releases.id", ondelete="SET NULL"), nullable=True)
     granted_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

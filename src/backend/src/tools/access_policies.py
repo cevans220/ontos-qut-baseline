@@ -150,9 +150,16 @@ class PreviewAccessReleaseTool(BaseTool):
     required_scope = "access-policies:read"
 
     async def execute(self, ctx: ToolContext, target: str = "uc", **_: Any) -> ToolResult:
-        from src.controller.access_policy_releases_manager import PolicyReleaseManager
+        from src.controller.access_policy_releases_manager import PolicyReleaseManager, uc_object_kind_resolver
         try:
-            out = PolicyReleaseManager(_manager()).compile(ctx.db, target or "uc")
+            resolver = None
+            try:
+                from src.controller.grant_manager import get_grant_manager
+                ws = get_grant_manager().workspace_client
+                resolver = uc_object_kind_resolver(ws) if ws else None
+            except RuntimeError:
+                pass  # No grant manager (e.g. tests): 3-part names default to tables, like the routes.
+            out = PolicyReleaseManager(_manager()).compile(ctx.db, target or "uc", resolve_object_kind=resolver)
             return ToolResult(success=True, data={k: out[k] for k in ("target", "changes", "issues", "has_errors",
                                                                       "source_policies")}
                               | {"gated": out["plan"]["gated"], "grant_count": len(out["plan"]["grants"])})
