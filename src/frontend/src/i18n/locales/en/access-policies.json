@@ -229,6 +229,14 @@
     "deleteTitle": "Delete",
     "deleteConfirm": "Delete {{name}} v{{version}}? This cannot be undone.",
     "deleted": "Deleted",
-    "deleteFailed": "Could not delete"
+    "deleteFailed": "Could not delete",
+    "personalDraftMessage": "Only you (and admins) can see this personal draft until it is activated.",
+    "noDescription": "No description.",
+    "versionsInFamily": "{{count}} versions",
+    "created": "Created",
+    "updated": "Updated",
+    "noTags": "No tags",
+    "linkedConcepts": "Linked concepts",
+    "linkFailed": "Could not update concept link"
   }
 }

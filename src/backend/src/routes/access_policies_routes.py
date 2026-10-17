@@ -164,7 +164,10 @@ def _register_kind(segment: str, kind: str, create_model: Any, update_model: Any
         return [
             {"id": r.id, "name": r.name, "version": r.version, "status": r.status,
              "parent_id": r.parent_id, "change_summary": r.change_summary,
-             "created_at": r.created_at, "created_by": r.created_by}
+             "created_at": r.created_at, "created_by": r.created_by,
+             # camelCase twins for the shared VersionSelector (EntityVersionRow).
+             "versionFamilyId": r.version_family_id, "changeSummary": r.change_summary,
+             "draftOwnerId": r.draft_owner_id, "createdAt": r.created_at}
             for r in rows
         ]
 

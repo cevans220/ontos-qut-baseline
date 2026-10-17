@@ -9,8 +9,11 @@ import {
   Copy,
   Download,
   GitBranch,
+  Layers,
   Pencil,
+  ShieldCheck,
   Trash2,
+  Users,
 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -19,13 +22,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import DomainBadgeList from '@/components/ui/domain-badge-list';
 import TagChip from '@/components/ui/tag-chip';
 import { DetailViewSkeleton } from '@/components/common/list-view-skeleton';
 import { CommentSidebar } from '@/components/comments';
 import EntityMetadataPanel from '@/components/metadata/entity-metadata-panel';
+import { OwnershipPanel } from '@/components/common/ownership-panel';
+import VersionNavigator from '@/components/common/version-navigator';
+import LinkedConceptChips from '@/components/semantic/linked-concept-chips';
+import ConceptSelectDialog from '@/components/semantic/concept-select-dialog';
+import type { EntitySemanticLink } from '@/types/semantic-link';
 import { useApi } from '@/hooks/use-api';
 import { useToast } from '@/hooks/use-toast';
 import { useTeams } from '@/hooks/use-teams';
@@ -59,6 +66,19 @@ function bumpMinor(v: string): string {
   return m ? `${m[1]}.${Number(m[2]) + 1}.0` : `${v}-next`;
 }
 
+const KIND_ICON = { policy: ShieldCheck, audience: Users, asset_collection: Layers } as const;
+
+function InfoItem({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex min-w-0 items-center gap-2">
+      <Label className="min-w-[4rem] shrink-0 text-xs text-muted-foreground">{label}:</Label>
+      {children}
+    </div>
+  );
+}
+
+const Dash = () => <span className="text-xs text-muted-foreground">—</span>;
+
 export default function AccessPolicyDetails() {
   const { t } = useTranslation(['access-policies', 'common']);
   const { segment = 'policies', entityId } = useParams<{ segment: string; entityId: string }>();
@@ -89,6 +109,9 @@ export default function AccessPolicyDetails() {
   const [statusTarget, setStatusTarget] = useState<AccessStatus | null>(null);
   const [statusComment, setStatusComment] = useState('');
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [links, setLinks] = useState<EntitySemanticLink[]>([]);
+  const [iriDialogOpen, setIriDialogOpen] = useState(false);
+  const [policyNames, setPolicyNames] = useState<Record<string, string>>({});
 
   const base = `/api/access-policies/${KIND_SEGMENT[kind]}/${entityId}`;
 
@@ -110,8 +133,16 @@ export default function AccessPolicyDetails() {
     }
     setEntity(res.data);
     setDynamicTitle(res.data.name);
-    const v = await get<VersionRow[]>(`${base}/versions`);
+    const [v, l] = await Promise.all([
+      get<VersionRow[]>(`${base}/versions`),
+      get<EntitySemanticLink[]>(`/api/semantic-links/entity/${KIND_ENTITY_TYPE[kind]}/${entityId}`),
+    ]);
     setVersions(Array.isArray(v.data) ? v.data : []);
+    setLinks(Array.isArray(l.data) ? l.data : []);
+    if (kind === 'policy' && (res.data as AccessPolicy).inherit_from?.length) {
+      const all = await get<AccessPolicy[]>('/api/access-policies/policies');
+      setPolicyNames(Object.fromEntries((Array.isArray(all.data) ? all.data : []).map((p) => [p.uid, p.name])));
+    }
     if (kind === 'policy') {
       const [val, doc] = await Promise.all([get<PolicyValidation>(`${base}/validation`), get<unknown>(`${base}/jsonld`)]);
       setValidation(val.data || null);
@@ -174,6 +205,31 @@ export default function AccessPolicyDetails() {
     navigate(`/access-policies/${KIND_SEGMENT[kind]}/${res.data.id}`);
   };
 
+  const addIri = async (iri: string) => {
+    const res = await post<EntitySemanticLink>('/api/semantic-links/', {
+      entity_id: entityId,
+      entity_type: KIND_ENTITY_TYPE[kind],
+      iri,
+    });
+    setIriDialogOpen(false);
+    if (res.error) {
+      toast({ title: t('access-policies:details.linkFailed'), description: res.error, variant: 'destructive' });
+      return;
+    }
+    load();
+  };
+
+  const removeLink = async (linkId: string) => {
+    const res = await del(`/api/semantic-links/${linkId}`);
+    if (res.error) {
+      toast({ title: t('access-policies:details.linkFailed'), description: res.error, variant: 'destructive' });
+      return;
+    }
+    setLinks((cur) => cur.filter((x) => x.id !== linkId));
+  };
+
+  const nameForPolicy = (uid: string) => policyNames[uid] || uid;
+
   const doDelete = async () => {
     const res = await del(base);
     setDeleteOpen(false);
@@ -220,6 +276,7 @@ export default function AccessPolicyDetails() {
   const policy = kind === 'policy' ? (entity as AccessPolicy) : null;
   const collection = kind !== 'policy' ? (entity as AccessCollection) : null;
   const canDelete = canWrite && (entity.status === 'draft' || entity.status === 'retired');
+  const KindIcon = KIND_ICON[kind];
 
   const renderRule = (r: OdrlRule, kindName: string, idx: number) => {
     const enforcement = Array.from(new Set((r.constraint || []).flatMap(enforcementOf)));
@@ -271,9 +328,17 @@ export default function AccessPolicyDetails() {
   return (
     <div className="space-y-6 py-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Button variant="outline" size="sm" onClick={() => navigate(`/access-policies?tab=${KIND_SEGMENT[kind]}`)}>
-          <ArrowLeft className="mr-2 h-4 w-4" /> {t('access-policies:details.back')}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => navigate(`/access-policies?tab=${KIND_SEGMENT[kind]}`)}>
+            <ArrowLeft className="mr-2 h-4 w-4" /> {t('access-policies:details.back')}
+          </Button>
+          <VersionNavigator
+            entityKind={KIND_ENTITY_TYPE[kind]}
+            currentEntityId={entity.id}
+            currentVersion={entity.version}
+            onVersionChange={(id) => navigate(`/access-policies/${KIND_SEGMENT[kind]}/${id}`)}
+          />
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           {canWrite &&
             entity.allowed_transitions.map((s) => (
@@ -320,235 +385,307 @@ export default function AccessPolicyDetails() {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-3xl font-bold">{entity.name}</h1>
-        <AccessStatusBadge status={entity.status} />
-        {versions.length > 1 ? (
-          <Select value={entity.id} onValueChange={(id) => navigate(`/access-policies/${KIND_SEGMENT[kind]}/${id}`)}>
-            <SelectTrigger className="h-8 w-44" aria-label={t('common:labels.version')}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {versions.map((v) => (
-                <SelectItem key={v.id} value={v.id}>
-                  v{v.version} · {t(`access-policies:status.${v.status}`)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ) : (
-          <Badge variant="outline">v{entity.version}</Badge>
-        )}
-        {policy && <Badge variant="outline">{t(`access-policies:policyTypes.${policy.policy_type}`)}</Badge>}
-        {entity.draft_owner_id && <Badge variant="outline">{t('access-policies:list.personalDraft')}</Badge>}
-      </div>
-      {entity.description && <p className="max-w-4xl text-muted-foreground">{entity.description}</p>}
+      {entity.draft_owner_id && (
+        <Alert className="border-blue-300 bg-blue-50 dark:border-blue-800 dark:bg-blue-950">
+          <AlertCircle className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+          <AlertDescription className="text-blue-800 dark:text-blue-200">
+            <strong>{t('access-policies:list.personalDraft')}</strong> — {t('access-policies:details.personalDraftMessage')}
+          </AlertDescription>
+        </Alert>
+      )}
+      {!entity.editable && (
+        <Alert className="border-yellow-300 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-950">
+          <AlertCircle className="h-4 w-4 text-yellow-600 dark:text-yellow-400" />
+          <AlertDescription className="text-yellow-800 dark:text-yellow-200">
+            {t('access-policies:form.contentLocked', { status: t(`access-policies:status.${entity.status}`) })}
+          </AlertDescription>
+        </Alert>
+      )}
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-1">
+      {/* Info panel: identity, lifecycle, ownership, classification */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <CardTitle className="flex items-center text-2xl font-bold">
+                <KindIcon className="mr-3 h-7 w-7 shrink-0 text-primary" />
+                <span className="truncate">{entity.name}</span>
+              </CardTitle>
+              <CardDescription className="pt-1">
+                {entity.description || t('access-policies:details.noDescription')}
+              </CardDescription>
+            </div>
+            <div className="flex shrink-0 items-end gap-5">
+              <div className="flex flex-col items-center gap-1">
+                <AccessStatusBadge status={entity.status} />
+                <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{t('common:labels.status')}</span>
+              </div>
+              {policy && (
+                <div className="flex flex-col items-center gap-1">
+                  <Badge variant="outline">{t(`access-policies:policyTypes.${policy.policy_type}`)}</Badge>
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{t('access-policies:list.type')}</span>
+                </div>
+              )}
+              {policy && (
+                <div className="flex flex-col items-center gap-1">
+                  <span className="text-sm leading-none">
+                    <span className="text-emerald-700 dark:text-emerald-400">{policy.rule_counts.permission}✓</span>{' '}
+                    <span className="text-red-700 dark:text-red-400">{policy.rule_counts.prohibition}✗</span>{' '}
+                    <span className="text-amber-700 dark:text-amber-400">{policy.rule_counts.obligation}!</span>
+                  </span>
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{t('access-policies:list.rules')}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid gap-x-6 gap-y-2 md:grid-cols-3">
+            <InfoItem label={t('common:labels.version')}>
+              <Badge variant="outline" className="text-xs">{entity.version}</Badge>
+              {versions.length > 1 && (
+                <span className="text-xs text-muted-foreground">{t('access-policies:details.versionsInFamily', { count: versions.length })}</span>
+              )}
+            </InfoItem>
+            <InfoItem label={t('access-policies:form.ownerTeam')}>
+              {entity.owner_team_id && teamName ? (
+                <span className="cursor-pointer truncate text-xs text-primary hover:underline" onClick={() => navigate(`/teams/${entity.owner_team_id}`)}>
+                  {teamName}
+                </span>
+              ) : (
+                <Dash />
+              )}
+            </InfoItem>
+            <InfoItem label={t('access-policies:form.project')}>
+              {entity.project_id ? (
+                <span className="cursor-pointer truncate text-xs text-primary hover:underline" onClick={() => navigate(`/projects/${entity.project_id}`)}>
+                  {projectName || entity.project_id}
+                </span>
+              ) : (
+                <Dash />
+              )}
+            </InfoItem>
+            <InfoItem label={t('access-policies:form.domains')}>
+              {entity.domains.length ? <DomainBadgeList domains={entity.domains as any} /> : <Dash />}
+            </InfoItem>
+            {policy && (
+              <InfoItem label={t('access-policies:form.conflict')}>
+                <span className="truncate text-xs">{t(`access-policies:conflicts.${policy.conflict}`)}</span>
+              </InfoItem>
+            )}
+            {policy && (
+              <InfoItem label={t('access-policies:form.inheritFrom')}>
+                {policy.inherit_from.length ? (
+                  <span className="truncate text-xs">{policy.inherit_from.map((p) => nameForPolicy(p)).join(', ')}</span>
+                ) : (
+                  <Dash />
+                )}
+              </InfoItem>
+            )}
+            <InfoItem label={t('access-policies:details.created')}>
+              <span className="truncate text-xs text-muted-foreground">
+                {entity.created_at ? new Date(entity.created_at).toLocaleString() : '—'}
+                {entity.created_by ? ` · ${entity.created_by}` : ''}
+              </span>
+            </InfoItem>
+            <InfoItem label={t('access-policies:details.updated')}>
+              <span className="truncate text-xs text-muted-foreground">
+                {entity.updated_at ? new Date(entity.updated_at).toLocaleString() : '—'}
+              </span>
+            </InfoItem>
+            <InfoItem label={t('access-policies:details.iri')}>
+              <code className="truncate text-xs" title={entity.uid}>{entity.uid}</code>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 shrink-0"
+                aria-label={t('access-policies:details.copyIri')}
+                onClick={() => navigator.clipboard?.writeText(entity.uid)}
+              >
+                <Copy className="h-3 w-3" />
+              </Button>
+            </InfoItem>
+          </div>
+          {entity.change_summary && (
+            <div className="text-xs">
+              <span className="text-muted-foreground">{t('access-policies:details.changeSummary')}:</span> {entity.change_summary}
+            </div>
+          )}
+
+          <div className="border-t pt-2">
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <div className="min-w-0 flex-1">
+                <Label className="mb-1.5 block text-xs text-muted-foreground">{t('access-policies:form.tags')}:</Label>
+                <div className="flex flex-wrap gap-1">
+                  {entity.tags.length ? (
+                    entity.tags.map((tag, i) => <TagChip key={i} tag={tag} size="sm" />)
+                  ) : (
+                    <span className="text-xs text-muted-foreground">{t('access-policies:details.noTags')}</span>
+                  )}
+                </div>
+              </div>
+              <div className="min-w-0 flex-1">
+                <Label className="mb-1.5 block text-xs text-muted-foreground">{t('access-policies:details.linkedConcepts')}:</Label>
+                <LinkedConceptChips
+                  links={links}
+                  onRemove={canWrite ? removeLink : undefined}
+                  trailing={
+                    canWrite ? (
+                      <Button size="sm" variant="outline" className="h-6 text-xs" onClick={() => setIriDialogOpen(true)}>
+                        {t('common:actions.add')}
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t pt-2">
+            <OwnershipPanel
+              objectType={KIND_ENTITY_TYPE[kind]}
+              objectId={entity.id}
+              canAssign={canWrite}
+              ownerTeamId={entity.owner_team_id || undefined}
+              ownerTeamName={teamName}
+              className="border-0 bg-transparent shadow-none [&>div]:px-0"
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {policy && (
+        <Card>
           <CardHeader>
-            <CardTitle className="text-base">{t('access-policies:details.overview')}</CardTitle>
+            <CardTitle className="text-base">{t('access-policies:details.rules')}</CardTitle>
+            <CardDescription>{t('access-policies:details.rulesHint')}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {RULE_KINDS.flatMap((k) => (policy.rules[k] || []).map((r, i) => renderRule(r, k, i)))}
+            {RULE_KINDS.every((k) => !(policy.rules[k] || []).length) && (
+              <p className="text-sm text-muted-foreground">{t('access-policies:rules.empty')}</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {policy && validation && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">{t('access-policies:details.validation')}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1 text-sm" data-testid="policy-validation">
+            {validation.issues.length === 0 && (validation.activation_problems || []).length === 0 ? (
+              <p className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400">
+                <CheckCircle2 className="h-4 w-4" /> {t('access-policies:details.readyToActivate')}
+              </p>
+            ) : (
+              <>
+                {validation.issues.map((i, idx) => (
+                  <p key={idx} className={i.severity === 'error' ? 'text-destructive' : 'text-amber-700 dark:text-amber-400'}>
+                    <AlertTriangle className="mr-1 inline h-3 w-3" />
+                    <code className="text-xs">{i.path || 'policy'}</code> — {i.message}
+                  </p>
+                ))}
+                {(validation.activation_problems || [])
+                  .filter((p) => !validation.issues.some((i) => i.message === p))
+                  .map((p, idx) => (
+                    <p key={`a${idx}`} className="text-amber-700 dark:text-amber-400">
+                      <AlertTriangle className="mr-1 inline h-3 w-3" />
+                      {p}
+                    </p>
+                  ))}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {collection && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">
+              {kind === 'audience' ? t('access-policies:details.audienceDefinition') : t('access-policies:details.collectionDefinition')}
+            </CardTitle>
+            <CardDescription>
+              {kind === 'audience' ? t('access-policies:details.audienceSemantics') : t('access-policies:details.collectionSemantics')}
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
             <div>
-              <div className="text-xs text-muted-foreground">{t('access-policies:details.iri')}</div>
-              <div className="flex items-center gap-1">
-                <code className="break-all text-xs">{entity.uid}</code>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  aria-label={t('access-policies:details.copyIri')}
-                  onClick={() => navigator.clipboard?.writeText(entity.uid)}
-                >
-                  <Copy className="h-3 w-3" />
-                </Button>
+              <div className="text-xs text-muted-foreground">
+                {kind === 'audience' ? t('access-policies:form.principals') : t('access-policies:form.assets')}
               </div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground">{t('access-policies:form.ownerTeam')}</div>
-              <div>{teamName || t('access-policies:form.none')}</div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground">{t('access-policies:form.project')}</div>
-              <div>{projectName || (entity.project_id ? entity.project_id : t('access-policies:form.none'))}</div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground">{t('access-policies:form.domains')}</div>
-              {entity.domains.length ? <DomainBadgeList domains={entity.domains as any} /> : <div>{t('access-policies:form.none')}</div>}
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground">{t('access-policies:form.tags')}</div>
-              <div className="flex flex-wrap gap-1">
-                {entity.tags.length ? entity.tags.map((tag, i) => <TagChip key={i} tag={tag} size="sm" />) : t('access-policies:form.none')}
-              </div>
-            </div>
-            {policy && (
-              <>
-                <div>
-                  <div className="text-xs text-muted-foreground">{t('access-policies:form.conflict')}</div>
-                  <div>{t(`access-policies:conflicts.${policy.conflict}`)}</div>
+              {collection.members.length ? (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {collection.members.map((m) => (
+                    <Badge key={m} variant="secondary" className="font-mono text-xs">
+                      {m}
+                    </Badge>
+                  ))}
                 </div>
-                {policy.inherit_from.length > 0 && (
-                  <div>
-                    <div className="text-xs text-muted-foreground">{t('access-policies:form.inheritFrom')}</div>
-                    {policy.inherit_from.map((p) => (
-                      <code key={p} className="block break-all text-xs">
-                        {p}
-                      </code>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-            {entity.change_summary && (
-              <div>
-                <div className="text-xs text-muted-foreground">{t('access-policies:details.changeSummary')}</div>
-                <div>{entity.change_summary}</div>
-              </div>
-            )}
-            <div className="text-xs text-muted-foreground">
-              {t('access-policies:details.createdBy', { user: entity.created_by || '?' })}
-              {entity.updated_at ? ` · ${new Date(entity.updated_at).toLocaleString()}` : ''}
+              ) : (
+                <div className="text-muted-foreground">
+                  {kind === 'audience' ? t('access-policies:details.allPrincipals') : t('access-policies:details.allAssets')}
+                </div>
+              )}
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">{t('access-policies:form.refinement')}</div>
+              {collection.refinement.length ? (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {collection.refinement.map((c, i) => (
+                    <code key={i} className="rounded bg-muted px-1 text-xs">
+                      {describeConstraint(c, operandLabel)}
+                    </code>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-muted-foreground">{t('access-policies:form.none')}</div>
+              )}
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">{t('access-policies:details.usedBy')}</div>
+              {collection.used_by.length ? (
+                <ul className="mt-1 space-y-1">
+                  {collection.used_by.map((p) => (
+                    <li key={p.id} className="flex items-center gap-2">
+                      <Link to={`/access-policies/policies/${p.id}`} className="text-primary hover:underline">
+                        {p.name}
+                      </Link>
+                      <span className="text-xs text-muted-foreground">v{p.version}</span>
+                      <AccessStatusBadge status={p.status} />
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="text-muted-foreground">{t('access-policies:details.notUsed')}</div>
+              )}
             </div>
           </CardContent>
         </Card>
+      )}
 
-        <div className="space-y-6 lg:col-span-2">
-          {policy && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">{t('access-policies:details.rules')}</CardTitle>
-                <CardDescription>{t('access-policies:details.rulesHint')}</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {RULE_KINDS.flatMap((k) => (policy.rules[k] || []).map((r, i) => renderRule(r, k, i)))}
-                {RULE_KINDS.every((k) => !(policy.rules[k] || []).length) && (
-                  <p className="text-sm text-muted-foreground">{t('access-policies:rules.empty')}</p>
-                )}
-              </CardContent>
-            </Card>
-          )}
+      {policy && <CheckAccessPanel policyId={policy.id} />}
 
-          {policy && validation && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">{t('access-policies:details.validation')}</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-1 text-sm" data-testid="policy-validation">
-                {validation.issues.length === 0 && (validation.activation_problems || []).length === 0 ? (
-                  <p className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400">
-                    <CheckCircle2 className="h-4 w-4" /> {t('access-policies:details.readyToActivate')}
-                  </p>
-                ) : (
-                  <>
-                    {validation.issues.map((i, idx) => (
-                      <p key={idx} className={i.severity === 'error' ? 'text-destructive' : 'text-amber-700 dark:text-amber-400'}>
-                        <AlertTriangle className="mr-1 inline h-3 w-3" />
-                        <code className="text-xs">{i.path || 'policy'}</code> — {i.message}
-                      </p>
-                    ))}
-                    {(validation.activation_problems || [])
-                      .filter((p) => !validation.issues.some((i) => i.message === p))
-                      .map((p, idx) => (
-                        <p key={`a${idx}`} className="text-amber-700 dark:text-amber-400">
-                          <AlertTriangle className="mr-1 inline h-3 w-3" />
-                          {p}
-                        </p>
-                      ))}
-                  </>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {collection && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">
-                  {kind === 'audience' ? t('access-policies:details.audienceDefinition') : t('access-policies:details.collectionDefinition')}
-                </CardTitle>
-                <CardDescription>
-                  {kind === 'audience' ? t('access-policies:details.audienceSemantics') : t('access-policies:details.collectionSemantics')}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                <div>
-                  <div className="text-xs text-muted-foreground">
-                    {kind === 'audience' ? t('access-policies:form.principals') : t('access-policies:form.assets')}
-                  </div>
-                  {collection.members.length ? (
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {collection.members.map((m) => (
-                        <Badge key={m} variant="secondary" className="font-mono text-xs">
-                          {m}
-                        </Badge>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-muted-foreground">
-                      {kind === 'audience' ? t('access-policies:details.allPrincipals') : t('access-policies:details.allAssets')}
-                    </div>
-                  )}
-                </div>
-                <div>
-                  <div className="text-xs text-muted-foreground">{t('access-policies:form.refinement')}</div>
-                  {collection.refinement.length ? (
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {collection.refinement.map((c, i) => (
-                        <code key={i} className="rounded bg-muted px-1 text-xs">
-                          {describeConstraint(c, operandLabel)}
-                        </code>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-muted-foreground">{t('access-policies:form.none')}</div>
-                  )}
-                </div>
-                <div>
-                  <div className="text-xs text-muted-foreground">{t('access-policies:details.usedBy')}</div>
-                  {collection.used_by.length ? (
-                    <ul className="mt-1 space-y-1">
-                      {collection.used_by.map((p) => (
-                        <li key={p.id} className="flex items-center gap-2">
-                          <Link to={`/access-policies/policies/${p.id}`} className="text-primary hover:underline">
-                            {p.name}
-                          </Link>
-                          <span className="text-xs text-muted-foreground">v{p.version}</span>
-                          <AccessStatusBadge status={p.status} />
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <div className="text-muted-foreground">{t('access-policies:details.notUsed')}</div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {policy && <CheckAccessPanel policyId={policy.id} />}
-
-          {policy && jsonld != null && (
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0">
-                <div>
-                  <CardTitle className="text-base">{t('access-policies:details.jsonld')}</CardTitle>
-                  <CardDescription>{t('access-policies:details.jsonldHint')}</CardDescription>
-                </div>
-                <Button size="sm" variant="outline" onClick={downloadJsonld}>
-                  <Download className="mr-1 h-4 w-4" /> {t('access-policies:details.download')}
-                </Button>
-              </CardHeader>
-              <CardContent>
-                <pre className="max-h-96 overflow-auto rounded bg-muted p-3 text-xs" data-testid="policy-jsonld">
-                  {JSON.stringify(jsonld, null, 2)}
-                </pre>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      </div>
+      {policy && jsonld != null && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <div>
+              <CardTitle className="text-base">{t('access-policies:details.jsonld')}</CardTitle>
+              <CardDescription>{t('access-policies:details.jsonldHint')}</CardDescription>
+            </div>
+            <Button size="sm" variant="outline" onClick={downloadJsonld}>
+              <Download className="mr-1 h-4 w-4" /> {t('access-policies:details.download')}
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <pre className="max-h-96 overflow-auto rounded bg-muted p-3 text-xs" data-testid="policy-jsonld">
+              {JSON.stringify(jsonld, null, 2)}
+            </pre>
+          </CardContent>
+        </Card>
+      )}
 
       <EntityMetadataPanel entityId={entity.id} entityType={KIND_ENTITY_TYPE[kind]} />
 
@@ -616,6 +753,8 @@ export default function AccessPolicyDetails() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConceptSelectDialog isOpen={iriDialogOpen} onOpenChange={setIriDialogOpen} onSelect={addIri} />
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent>

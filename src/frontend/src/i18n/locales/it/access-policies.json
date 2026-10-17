@@ -229,6 +229,14 @@
     "deleteTitle": "__TODO__ Delete",
     "deleteConfirm": "__TODO__ Delete {{name}} v{{version}}? This cannot be undone.",
     "deleted": "__TODO__ Deleted",
-    "deleteFailed": "__TODO__ Could not delete"
+    "deleteFailed": "__TODO__ Could not delete",
+    "personalDraftMessage": "__TODO__ Only you (and admins) can see this personal draft until it is activated.",
+    "noDescription": "__TODO__ No description.",
+    "versionsInFamily": "__TODO__ {{count}} versions",
+    "created": "__TODO__ Created",
+    "updated": "__TODO__ Updated",
+    "noTags": "__TODO__ No tags",
+    "linkedConcepts": "__TODO__ Linked concepts",
+    "linkFailed": "__TODO__ Could not update concept link"
   }
 }
