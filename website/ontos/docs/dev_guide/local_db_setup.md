@@ -92,6 +92,7 @@ To roll back, set `SEARCH_BACKEND=memory` and restart: the in-memory index is re
 
 - **`pg_trgm`** (typo-tolerant fallback when a query has no matches) ships with Postgres. It's a trusted extension, so the app creates it itself when the app user has `CREATE` on the database, which the grants above include.
 - **`pgvector`** (vector search, coming in a later release) needs a separate install: `brew install pgvector`.
+- **Lakebase Search** (`lakebase` engine only): the app creates `lakebase_text` and `lakebase_vector` (with `CASCADE`, which pulls in `vector`) once Lakebase Search is enabled on the project. It then builds one `lakebase_bm25` index per field (title, description, tags/domains/owner) and rebuilds them after each startup reconcile, because BM25 corpus statistics only update on rebuild or `VACUUM`. Keyword results still come from the Settings-driven ranking; BM25 is an extra ranked list that hybrid fusion will combine with it.
 
 To run the Postgres search tests against your local server:
 
@@ -102,3 +103,10 @@ SEARCH_TEST_PG_URL="postgresql+psycopg2:///postgres?host=/tmp" \
 ```
 
 The tests create and drop their own throwaway schema.
+
+The `lakebase` engine tests also need a Lakebase branch with Lakebase Search enabled. Use a throwaway branch, never the app's `production` branch. The password is a short-lived OAuth token from `databricks postgres generate-database-credential <endpoint>`, URL-encoded together with the user name:
+
+```bash
+SEARCH_TEST_LAKEBASE_URL="postgresql+psycopg2://<user>:<token>@<endpoint-host>/databricks_postgres?sslmode=require" \
+  hatch -e dev run pytest backend/src/tests/integration/test_search_bm25_pg.py backend/src/tests/integration/test_search_engine_pg.py
+```

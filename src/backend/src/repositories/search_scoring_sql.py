@@ -268,3 +268,20 @@ def disabled_where_only(config: SearchConfig) -> tuple[str, dict[str, Any]]:
     collide with ``build_scoring_sql``'s ``ss`` params in the same statement."""
     b = _Binder(ns="ssd")
     return disabled_types_sql(config, b), b.params
+
+
+def field_boost_sql(config: SearchConfig, field_name: str, ns: str = "bmb") -> tuple[str, dict[str, Any]]:
+    """Per-row Settings boost of one field (0 where the type doesn't index it),
+    as a CASE over the same type branches as the scorer. Used to weight the
+    per-field BM25 scores (lakebase engine)."""
+    b = _Binder(ns=ns)
+    whens: list[str] = []
+    for cond, fcs in _branches(config):
+        for name in config.asset_types:
+            ph = f"{{ty:{name}}}"
+            if ph in cond:
+                cond = cond.replace(ph, b.bind(name, "ty"))
+        fc = fcs.get(field_name)
+        boost = fc.boost if fc is not None and fc.indexed else 0.0
+        whens.append(f"WHEN {cond} THEN {_f8(boost)}")
+    return "CASE " + " ".join(whens) + " END", b.params

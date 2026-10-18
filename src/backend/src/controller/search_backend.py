@@ -147,6 +147,20 @@ class PostgresBackend(SearchBackend):
                 engine=self.engine, trgm_threshold=self._trgm_threshold,
             )
 
+    def bm25_rank(self, query, *, type_filter=None, filters=None, allowed_features=None,
+                  limit=100) -> List[Tuple[str, float]]:
+        """BM25 ranked list (lakebase engine only, else ``[]``); input for hybrid fusion (#1061)."""
+        from src.repositories import search_repository
+        with self._session_factory() as db:
+            return search_repository.bm25_rank(
+                db, query, config=self._config(), engine=self.engine, type_filter=type_filter,
+                filters=filters, allowed_features=allowed_features, limit=limit,
+            )
+
+    def refresh_bm25_statistics(self) -> Dict[str, Any]:
+        from src.repositories.search_engine import refresh_bm25_statistics
+        return refresh_bm25_statistics(self._session_factory, self.engine)
+
     def upsert(self, items: Iterable[SearchIndexItem]) -> None:
         from src.repositories import search_repository
         rows = list(items)
@@ -236,6 +250,13 @@ class PostgresBackend(SearchBackend):
                 else:
                     with self._session_factory() as db:
                         stats["removed"] = repo.delete_stale(db, t0)
+                # BM25 corpus statistics are fixed at index build time; refresh
+                # them after loading rows (no-op off the lakebase engine).
+                if stats["upserted"] or stats["removed"]:
+                    try:
+                        stats["bm25_refresh"] = self.refresh_bm25_statistics()
+                    except Exception as e:
+                        logger.warning(f"Search reconcile: BM25 refresh failed: {e}")
             finally:
                 repo.release_reconcile_lock(lock_db)
         stats["seconds"] = round(time.monotonic() - started, 2)

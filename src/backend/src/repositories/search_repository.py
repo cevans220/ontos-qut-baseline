@@ -447,6 +447,75 @@ def search_index_items(
     return items
 
 
+# Field tsvector -> the Settings field whose boost weights it. aux_text carries
+# tags + domains + owner + concept labels, weighted like tags.
+_BM25_FIELDS = (("title_tsv", "title"), ("description_tsv", "description"), ("aux_tsv", "tags"))
+
+
+def bm25_rank(
+    db: Session,
+    query: str,
+    *,
+    config: Optional[SearchConfig] = None,
+    engine: Optional[SearchEngine] = None,
+    type_filter: Optional[str] = None,
+    filters: Optional[Dict[str, Optional[str]]] = None,
+    allowed_features: Optional[Iterable[str]] = None,
+    limit: int = 100,
+) -> List[tuple[str, float]]:
+    """BM25 ranked list ``[(search_documents.id, score)]``, best first (lakebase engine).
+
+    One top-K query per field, so each uses its ``lakebase_bm25`` index order
+    (Block-Max WAND pushdown), then the per-field BM25 scores are combined as
+    sum(Settings field boost for the row's type x BM25). It applies the same
+    filters, permissions and disabled types as ``search``. This is a ranking
+    *signal* for hybrid fusion (#1061); keyword results are unaffected.
+    Returns ``[]`` off the lakebase engine or for a query without terms.
+    """
+    from src.repositories.search_engine import BM25_INDEXES
+
+    if engine is None or not engine.has_bm25:
+        return []
+    q = (query or "").strip()
+    if is_list_query(q) or not tokenize(q):
+        return []
+    config = config or _default_config()
+    limit = max(1, min(limit, 1000))
+    per_field_k = min(max(limit * 3, 100), 1000)
+
+    disabled, dparams = search_scoring_sql.disabled_where_only(config)
+    where, params = _where(type_filter, filters, allowed_features, disabled)
+    params = {**params, **dparams, "bm25_q": q, "bm25_k": per_field_k, "bm25_limit": limit}
+    to_query = engine.bm25("to_bm25query")
+    op = engine.bm25_op()
+
+    ctes, terms = [], []
+    for i, (col, field_name) in enumerate(_BM25_FIELDS):
+        boost_sql, bparams = search_scoring_sql.field_boost_sql(config, field_name, ns=f"bmb{i}")
+        params.update(bparams)
+        dist = f"{col} {op} {to_query}(to_tsvector('english', :bm25_q), '{BM25_INDEXES[col]}'::regclass)"
+        ctes.append(
+            f"f{i} AS (SELECT id, ({boost_sql}) * -({dist}) AS s FROM search_documents{where} "
+            f"ORDER BY {dist} LIMIT :bm25_k)"
+        )
+        terms.append(f"SELECT id, s FROM f{i}")
+    sql = (
+        "WITH " + ", ".join(ctes) + " "
+        f"SELECT id, sum(s) AS score FROM ({' UNION ALL '.join(terms)}) u "
+        "GROUP BY id HAVING sum(s) > 0 ORDER BY score DESC, id ASC LIMIT :bm25_limit"
+    )
+    ext_schema = engine.ext_schemas.get("lakebase_text")
+    if ext_schema:
+        # lakebase_text's own SQL functions name their types unqualified, so the
+        # extension schema must be on search_path, which the app pins to its own
+        # schema. Append it for this transaction only (is_local=true).
+        db.execute(
+            text("SELECT set_config('search_path', current_setting('search_path') || ', ' || :s, true)"),
+            {"s": '"' + ext_schema.replace('"', '""') + '"'},
+        )
+    return [(r._mapping["id"], float(r._mapping["score"])) for r in db.execute(text(sql), params)]
+
+
 def replace_all(db: Session, items: Iterable[SearchIndexItem]) -> int:
     """Full rebuild: clear the table and re-insert all items (one transaction)."""
     db.execute(text("DELETE FROM search_documents"))

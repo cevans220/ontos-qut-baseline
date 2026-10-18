@@ -101,3 +101,18 @@ def test_branch_order_mirrors_get_all_field_configs():
 def test_non_finite_boost_is_neutralised():
     assert ss._f8(float("inf")) == "CAST(0.0 AS float8)"
     assert ss._f8(1.5) == "CAST(1.5 AS float8)"
+
+
+def test_field_boost_sql_follows_type_overrides():
+    from src.repositories.search_scoring_sql import field_boost_sql
+    from src.models.search_config import AssetTypeConfig, FieldConfig
+
+    cfg = _config()
+    cfg.asset_types["data-product"] = AssetTypeConfig(
+        enabled=True, inherit_defaults=True, fields={"title": FieldConfig(boost=7.0)},
+    )
+    sql, params = field_boost_sql(cfg, "title")
+    assert "CAST(7.0 AS float8)" in sql                    # per-type override
+    assert f"CAST({cfg.defaults.fields.title.boost!r} AS float8)" in sql  # defaults branch
+    assert "data-product" in params.values()               # type names are bound, not inlined
+    assert all(k.startswith("bmb_") for k in params)

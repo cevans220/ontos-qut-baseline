@@ -6,16 +6,20 @@ One backend, two engines, chosen by what the database actually has installed
 - ``pg``       — portable: works on local Postgres, CI, and a Lakebase project
                  without Lakebase Search. Uses ``pg_trgm`` (and later pgvector).
 - ``lakebase`` — Lakebase Search enabled: ``lakebase_text`` (BM25) +
-                 ``lakebase_vector`` (ANN). Engine-specific ranking lands in
-                 #1059 / #1060; until then it behaves like ``pg``.
+                 ``lakebase_vector`` (ANN). Keyword results still come from the
+                 Settings-driven scorer, exactly as on ``pg``; BM25 is an extra
+                 ranked list (``search_repository.bm25_rank``, #1059) that hybrid
+                 fusion (#1061) combines with it and the vector list (#1060).
 
 ``pg_trgm`` is available on Lakebase too, so typo tolerance works everywhere
 the extension can be created.
 """
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
+from typing import Any, Dict, Optional
 
 from sqlalchemy import text
 
@@ -29,6 +33,10 @@ PORTABLE_EXTENSIONS = ("pg_trgm",)
 VALID_ENGINES = ("auto", "pg", "lakebase")
 
 TITLE_TRGM_INDEX = "ix_search_documents_title_trgm"
+# lakebase engine: one lakebase_bm25 index per field tsvector (#1059).
+BM25_INDEXES = {
+    col: f"ix_search_documents_{col}_bm25" for col in ("title_tsv", "description_tsv", "aux_tsv")
+}
 
 
 class SearchEngineUnavailable(RuntimeError):
@@ -59,6 +67,19 @@ class SearchEngine:
     def trgm_op(self, op: str) -> str:
         schema = self.ext_schemas.get("pg_trgm")
         return f"OPERATOR({_qident(schema)}.{op})" if schema else op
+
+    @property
+    def has_bm25(self) -> bool:
+        """BM25 ranking (lakebase_text) is used only on the lakebase engine."""
+        return self.name == "lakebase" and "lakebase_text" in self.installed
+
+    def bm25(self, obj: str) -> str:
+        schema = self.ext_schemas.get("lakebase_text")
+        return f"{_qident(schema)}.{obj}" if schema else obj
+
+    def bm25_op(self) -> str:
+        schema = self.ext_schemas.get("lakebase_text")
+        return f"OPERATOR({_qident(schema)}.<@>)" if schema else "<@>"
 
 
 def choose_engine(
@@ -106,10 +127,16 @@ def prepare_engine(session_factory: Callable, requested: str) -> SearchEngine:
     with session_factory() as db:
         available = _available(db)
         installed = _installed(db)
-    for ext in PORTABLE_EXTENSIONS:
+    wanted = list(PORTABLE_EXTENSIONS)
+    if (requested or "auto").strip().lower() in ("auto", "lakebase"):
+        # Only offered once Lakebase Search is enabled on the project (that switch
+        # is the irreversible step; creating the extensions is not).
+        wanted += sorted(LAKEBASE_EXTENSIONS)
+    for ext in wanted:
         if ext in installed or ext not in available:
             continue
-        _try_ddl(session_factory, f"CREATE EXTENSION IF NOT EXISTS {ext}", f"extension {ext}")
+        # CASCADE: lakebase_vector requires pgvector's ``vector`` extension.
+        _try_ddl(session_factory, f"CREATE EXTENSION IF NOT EXISTS {ext} CASCADE", f"extension {ext}")
     with session_factory() as db:
         installed = _installed(db)
 
@@ -134,6 +161,45 @@ def ensure_search_indexes(session_factory: Callable, engine: SearchEngine) -> No
             f"ON search_documents USING gin (lower(title) {engine.trgm('gin_trgm_ops')})",
             "trigram index on search_documents.title",
         )
+    if engine.has_bm25:
+        for col, name in BM25_INDEXES.items():
+            _try_ddl(
+                session_factory,
+                f"CREATE INDEX IF NOT EXISTS {name} ON search_documents USING lakebase_bm25 ({col})",
+                f"BM25 index on search_documents.{col}",
+            )
+        # Lakebase guidance for text-search tables: VACUUM (which refreshes BM25
+        # statistics) should follow inserts at a fixed threshold, not a growing one.
+        _try_ddl(
+            session_factory,
+            "ALTER TABLE search_documents SET (autovacuum_vacuum_insert_scale_factor = 0)",
+            "autovacuum setting on search_documents",
+        )
+
+
+def refresh_bm25_statistics(session_factory: Callable, engine: Optional[SearchEngine]) -> Dict[str, Any]:
+    """Rebuild the BM25 indexes so their corpus statistics (IDF, average length)
+    reflect the current rows. BM25 statistics are computed at index build time,
+    so run this after a bulk load (the startup reconcile) or on a schedule.
+    Returns {index: seconds}; no-op off the lakebase engine."""
+    if engine is None or not engine.has_bm25:
+        return {}
+    out: Dict[str, Any] = {}
+    with session_factory() as db:
+        bind = db.get_bind()
+    for name in BM25_INDEXES.values():
+        started = time.monotonic()
+        try:
+            # REINDEX CONCURRENTLY can't run inside a transaction block.
+            with bind.connect() as conn:
+                conn = conn.execution_options(isolation_level="AUTOCOMMIT")
+                conn.execute(text(f"REINDEX INDEX CONCURRENTLY {name}"))
+            out[name] = round(time.monotonic() - started, 3)
+        except Exception as e:  # pragma: no cover - environment dependent
+            logger.warning(f"Could not rebuild {name}: {e}")
+            out[name] = None
+    logger.info(f"BM25 statistics refreshed: {out}")
+    return out
 
 
 def _try_ddl(session_factory: Callable, sql: str, what: str) -> None:
