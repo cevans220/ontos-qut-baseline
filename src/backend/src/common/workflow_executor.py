@@ -2783,6 +2783,8 @@ class WorkflowExecutor:
                         db_asset.status = 'draft'
                         logger.info(f"Asset {entity_id} status reverted to 'draft' after review rejection")
                     self._db.commit()
+                    from src.common.search_live_index import reindex_asset
+                    reindex_asset(db_asset)
                     
             # Handle data contract deploy completion
             elif entity_type == 'data_contract' and trigger_type in ('on_request_publish', 'ON_REQUEST_PUBLISH'):
@@ -2814,6 +2816,8 @@ class WorkflowExecutor:
                         db_product.status = 'draft'
                         logger.info(f"Data product {entity_id} status reverted to 'draft' after rejection")
                     self._db.commit()
+                    from src.common.search_live_index import reindex_product
+                    reindex_product(db_product, self._db)
                     
         except Exception as e:
             logger.error(f"Error updating entity status after workflow completion: {e}", exc_info=True)
