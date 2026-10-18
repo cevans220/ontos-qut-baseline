@@ -57,8 +57,10 @@ def _aux_text(item: SearchIndexItem) -> str:
     return " ".join(p for p in parts if p)
 
 
-def upsert_documents(db: Session, items: Iterable[SearchIndexItem]) -> int:
-    """Insert or update search_documents rows for the given items. Returns the count."""
+def upsert_documents(db: Session, items: Iterable[SearchIndexItem], *, count_inserted: bool = False) -> int:
+    """Insert or update search_documents rows for the given items. Returns the
+    number of rows written, or with ``count_inserted`` only the newly inserted
+    ones (updates of existing ids don't count)."""
     rows = list(items)
     if not rows:
         return 0
@@ -80,10 +82,12 @@ def upsert_documents(db: Session, items: Iterable[SearchIndexItem]) -> int:
             extra_data = EXCLUDED.extra_data,
             link = EXCLUDED.link,
             updated_at = now()
+        RETURNING (xmax = 0) AS inserted
         """
     )
+    inserted = 0
     for item in rows:
-        db.execute(stmt, {
+        inserted += bool(db.execute(stmt, {
             "id": item.id,
             "entity_id": _entity_id(item.id),
             "type": item.type,
@@ -94,8 +98,8 @@ def upsert_documents(db: Session, items: Iterable[SearchIndexItem]) -> int:
             "tags": json.dumps([str(t) for t in (item.tags or [])]),
             "extra_data": json.dumps(item.extra_data or {}),
             "link": item.link,
-        })
-    return len(rows)
+        }).scalar())
+    return inserted if count_inserted else len(rows)
 
 
 def delete_document(db: Session, item_id: str) -> None:
@@ -447,9 +451,15 @@ def search_index_items(
     return items
 
 
-# Field tsvector -> the Settings field whose boost weights it. aux_text carries
-# tags + domains + owner + concept labels, weighted like tags.
-_BM25_FIELDS = (("title_tsv", "title"), ("description_tsv", "description"), ("aux_tsv", "tags"))
+# Field tsvector -> the Settings field(s) whose boost weights it. aux_text carries
+# tags + domains + owner + concept labels, so it takes the highest of those
+# fields' boosts for the row's type (a domain/owner match counts even where tags
+# aren't indexed).
+_BM25_FIELDS = (
+    ("title_tsv", ("title",)),
+    ("description_tsv", ("description",)),
+    ("aux_tsv", ("tags", "domain", "domains", "owner", "owner_team")),
+)
 
 
 def bm25_rank(
@@ -489,13 +499,20 @@ def bm25_rank(
     to_query = engine.bm25("to_bm25query")
     op = engine.bm25_op()
 
+    # A stopword-only query ("the") has terms for the app tokenizer but an empty
+    # english tsvector; return nothing instead of handing BM25 an empty query.
+    nonempty = "to_tsvector('english', :bm25_q) <> ''::tsvector"
     ctes, terms = [], []
-    for i, (col, field_name) in enumerate(_BM25_FIELDS):
-        boost_sql, bparams = search_scoring_sql.field_boost_sql(config, field_name, ns=f"bmb{i}")
+    for i, (col, field_names) in enumerate(_BM25_FIELDS):
+        boost_sql, bparams = search_scoring_sql.field_boost_sql(config, field_names, ns=f"bmb{i}")
         params.update(bparams)
         dist = f"{col} {op} {to_query}(to_tsvector('english', :bm25_q), '{BM25_INDEXES[col]}'::regclass)"
+        # Rows whose type doesn't weight this field (boost 0) are excluded inside
+        # the top-K, so they can't take slots from rows that would score.
+        cond = f"({boost_sql}) > 0 AND {nonempty}"
+        field_where = f"{where} AND {cond}" if where else f" WHERE {cond}"
         ctes.append(
-            f"f{i} AS (SELECT id, ({boost_sql}) * -({dist}) AS s FROM search_documents{where} "
+            f"f{i} AS (SELECT id, ({boost_sql}) * -({dist}) AS s FROM search_documents{field_where} "
             f"ORDER BY {dist} LIMIT :bm25_k)"
         )
         terms.append(f"SELECT id, s FROM f{i}")
@@ -509,9 +526,15 @@ def bm25_rank(
         # lakebase_text's own SQL functions name their types unqualified, so the
         # extension schema must be on search_path, which the app pins to its own
         # schema. Append it for this transaction only (is_local=true).
+        # Idempotent, so repeated calls in one transaction don't keep growing it;
+        # appended last, so the app schema still wins any name lookup.
         db.execute(
-            text("SELECT set_config('search_path', current_setting('search_path') || ', ' || :s, true)"),
-            {"s": '"' + ext_schema.replace('"', '""') + '"'},
+            text(
+                "SELECT set_config('search_path', CASE WHEN :s = ANY(current_schemas(false)) "
+                "THEN current_setting('search_path') "
+                "ELSE current_setting('search_path') || ', ' || quote_ident(:s) END, true)"
+            ),
+            {"s": ext_schema},
         )
     return [(r._mapping["id"], float(r._mapping["score"])) for r in db.execute(text(sql), params)]
 

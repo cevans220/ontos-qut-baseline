@@ -183,7 +183,109 @@ def test_reconcile_refreshes_bm25_statistics(lakebase):
     factory, engine = lakebase
     backend = PostgresBackend(factory, config_provider=_config)
     backend.engine = engine
-    stats = backend.reconcile([("All", lambda: ITEMS)], is_indexable=lambda it: bool(it.feature_id))
-    assert stats["status"] == "done"
+    extra = SearchIndexItem(id="product::new", type="data-product", feature_id="data-products",
+                            title="Customer Churn Forecast", description="", link="/", tags=[], extra_data={})
+    stats = backend.reconcile([("All", lambda: ITEMS + [extra])], is_indexable=lambda it: bool(it.feature_id))
+    assert stats["status"] == "done" and stats["inserted"] == 1
     assert set(stats["bm25_refresh"]) == set(BM25_INDEXES.values())
-    assert backend.bm25_rank("customer churn")[0][0] == "product::1"
+    assert backend.bm25_rank("customer churn")[0][0] in ("product::1", "product::new")
+
+
+# ------------------------------------------- review fixes (pg engine, CI)
+
+def test_upsert_counts_only_new_rows(pg):
+    with pg() as db:
+        assert repo.upsert_documents(db, ITEMS[:3], count_inserted=True) == 3
+        assert repo.upsert_documents(db, ITEMS[:5], count_inserted=True) == 2   # 3 updates + 2 inserts
+        assert repo.upsert_documents(db, ITEMS[:5]) == 5                        # default: rows written
+
+
+def test_reconcile_reports_inserts_so_restarts_skip_the_bm25_rebuild(pg):
+    backend = PostgresBackend(pg, config_provider=_config)
+    first = backend.reconcile([("All", lambda: ITEMS)], is_indexable=lambda it: True)
+    second = backend.reconcile([("All", lambda: ITEMS)], is_indexable=lambda it: True)
+    assert first["inserted"] == len(ITEMS) and "bm25_refresh" in first
+    assert second["inserted"] == 0 and second["removed"] == 0 and "bm25_refresh" not in second
+
+
+def test_concurrent_index_build_heals_a_failed_previous_build(pg):
+    from src.repositories.search_engine import _create_index_concurrently, _drop_invalid_indexes
+
+    name = "ix_search_documents_probe"
+    ddl = f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name} ON search_documents (type)"
+    with pg() as db:
+        db.execute(text(f"CREATE INDEX {name} ON search_documents (type)"))
+        db.execute(text(f"CREATE INDEX {name}_ccnew ON search_documents (type)"))
+        try:  # simulate interrupted CONCURRENTLY builds (needs superuser, as in CI / local)
+            db.execute(text(
+                "UPDATE pg_index SET indisvalid = false WHERE indexrelid IN "
+                f"('{name}'::regclass, '{name}_ccnew'::regclass)"
+            ))
+        except Exception:
+            pytest.skip("needs superuser to mark an index invalid")
+
+    def valid(n):
+        with pg() as db:
+            return db.execute(text(
+                "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+                "WHERE c.relname = :n"), {"n": n}).scalar()
+
+    assert _drop_invalid_indexes(pg, f"{name}_ccnew%") == [f"{name}_ccnew"]
+    assert valid(f"{name}_ccnew") is None
+    _create_index_concurrently(pg, name, ddl)   # IF NOT EXISTS alone would skip the invalid one
+    assert valid(name) is True
+
+
+# --------------------------------------- review fixes (lakebase engine)
+
+@needs_lakebase
+def test_stopword_only_query_returns_nothing(lakebase):
+    factory, engine = lakebase
+    with factory() as db:
+        assert repo.bm25_rank(db, "the and or", config=_config(), engine=engine) == []
+
+
+@needs_lakebase
+def test_zero_boost_types_dont_take_top_k_slots(lakebase):
+    factory, engine = lakebase
+    config = _config()
+    config.asset_types["data-product"].fields["title"] = copy.deepcopy(config.defaults.fields.title)
+    config.asset_types["data-product"].fields["title"].boost = 0.0
+    config.asset_types["data-product"].fields["description"] = copy.deepcopy(config.defaults.fields.description)
+    config.asset_types["data-product"].fields["description"].boost = 0.0
+    config.asset_types["data-product"].inherit_defaults = False
+    with factory() as db:
+        ranked = repo.bm25_rank(db, "customer", config=config, engine=engine, limit=1)
+    assert ranked and not ranked[0][0].startswith("product::")
+
+
+@needs_lakebase
+def test_repeated_calls_keep_search_path_stable(lakebase):
+    factory, engine = lakebase
+    with factory() as db:
+        repo.bm25_rank(db, "customer", config=_config(), engine=engine)
+        first = db.execute(text("SHOW search_path")).scalar()
+        repo.bm25_rank(db, "churn", config=_config(), engine=engine)
+        assert db.execute(text("SHOW search_path")).scalar() == first
+        assert first.count("public") == 1
+
+
+@needs_lakebase
+def test_aux_field_counts_where_tags_are_not_indexed(lakebase):
+    """Domain/owner text in aux_tsv still scores for a type that doesn't index tags."""
+    factory, engine = lakebase
+    config = _config()
+    config.asset_types["data-contract"].fields["tags"] = copy.deepcopy(config.defaults.fields.tags)
+    config.asset_types["data-contract"].fields["tags"].indexed = False
+    with factory() as db:
+        ranked = repo.bm25_rank(db, "order platform", config=config, engine=engine)  # contract::4's owner
+    assert "contract::4" in [i for i, _ in ranked]
+
+
+@needs_lakebase
+def test_restart_without_corpus_changes_skips_the_bm25_rebuild(lakebase):
+    factory, engine = lakebase
+    backend = PostgresBackend(factory, config_provider=_config)
+    backend.engine = engine
+    stats = backend.reconcile([("All", lambda: ITEMS)], is_indexable=lambda it: bool(it.feature_id))
+    assert stats["inserted"] == 0 and "bm25_refresh" not in stats

@@ -27,15 +27,18 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     if op.get_bind().dialect.name != "postgresql":
         return
-    for src, col in FIELD_TSV_COLUMNS.items():
-        op.execute(
-            f"ALTER TABLE {TABLE} ADD COLUMN IF NOT EXISTS {col} tsvector "
-            f"GENERATED ALWAYS AS (to_tsvector('english', coalesce({src}, ''))) STORED"
-        )
+    # One ALTER TABLE, so the table is rewritten once rather than per column.
+    adds = ", ".join(
+        f"ADD COLUMN IF NOT EXISTS {col} tsvector "
+        f"GENERATED ALWAYS AS (to_tsvector('english', coalesce({src}, ''))) STORED"
+        for src, col in FIELD_TSV_COLUMNS.items()
+    )
+    op.execute(f"ALTER TABLE {TABLE} {adds}")
 
 
 def downgrade() -> None:
     if op.get_bind().dialect.name != "postgresql":
         return
-    for col in FIELD_TSV_COLUMNS.values():
-        op.execute(f"ALTER TABLE {TABLE} DROP COLUMN IF EXISTS {col}")
+    op.execute(f"ALTER TABLE {TABLE} " + ", ".join(
+        f"DROP COLUMN IF EXISTS {col}" for col in FIELD_TSV_COLUMNS.values()
+    ))

@@ -22,7 +22,8 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any
+from collections.abc import Sequence
+from typing import Any, Union
 
 from src.models.search_config import FieldConfig, MatchType, SearchConfig, SortField
 
@@ -179,6 +180,19 @@ def order_by_sql(config: SearchConfig) -> str:
     return ", ".join(parts)
 
 
+def _fill_types(template: str, config: SearchConfig, b: _Binder, ty_names: dict[str, str]) -> str:
+    """Replace ``_branches``' ``{ty:<name>}`` placeholders with bound type names,
+    binding each name once per statement (``ty_names`` caches the bindings)."""
+    out = template
+    for name in config.asset_types:
+        ph = f"{{ty:{name}}}"
+        if ph in out:
+            if name not in ty_names:
+                ty_names[name] = b.bind(name, "ty")
+            out = out.replace(ph, ty_names[name])
+    return out
+
+
 def build_scoring_sql(config: SearchConfig, tokens: list[str]) -> ScoringSql:
     """Compile the config scorer for ``tokens`` (already lower-cased by tokenize)."""
     b = _Binder()
@@ -188,14 +202,7 @@ def build_scoring_sql(config: SearchConfig, tokens: list[str]) -> ScoringSql:
     ty_names: dict[str, str] = {}
 
     def _fill(template: str) -> str:
-        out = template
-        for name in config.asset_types:
-            ph = f"{{ty:{name}}}"
-            if ph in out:
-                if name not in ty_names:
-                    ty_names[name] = b.bind(name, "ty")
-                out = out.replace(ph, ty_names[name])
-        return out
+        return _fill_types(template, config, b, ty_names)
 
     # Base CTE: which branch applies to the row, plus each distinct field value once.
     branch_case = "CASE " + " ".join(
@@ -270,18 +277,17 @@ def disabled_where_only(config: SearchConfig) -> tuple[str, dict[str, Any]]:
     return disabled_types_sql(config, b), b.params
 
 
-def field_boost_sql(config: SearchConfig, field_name: str, ns: str = "bmb") -> tuple[str, dict[str, Any]]:
-    """Per-row Settings boost of one field (0 where the type doesn't index it),
-    as a CASE over the same type branches as the scorer. Used to weight the
-    per-field BM25 scores (lakebase engine)."""
+def field_boost_sql(
+    config: SearchConfig, field_names: Union[str, Sequence[str]], ns: str = "bmb",
+) -> tuple[str, dict[str, Any]]:
+    """Per-row Settings boost of one field, or the highest of several (0 where the
+    type indexes none of them), as a CASE over the same type branches as the
+    scorer. Used to weight the per-field BM25 scores (lakebase engine)."""
+    names = [field_names] if isinstance(field_names, str) else list(field_names)
     b = _Binder(ns=ns)
+    ty_names: dict[str, str] = {}
     whens: list[str] = []
     for cond, fcs in _branches(config):
-        for name in config.asset_types:
-            ph = f"{{ty:{name}}}"
-            if ph in cond:
-                cond = cond.replace(ph, b.bind(name, "ty"))
-        fc = fcs.get(field_name)
-        boost = fc.boost if fc is not None and fc.indexed else 0.0
-        whens.append(f"WHEN {cond} THEN {_f8(boost)}")
+        boosts = [fcs[n].boost for n in names if n in fcs and fcs[n].indexed]
+        whens.append(f"WHEN {_fill_types(cond, config, b, ty_names)} THEN {_f8(max(boosts, default=0.0))}")
     return "CASE " + " ".join(whens) + " END", b.params

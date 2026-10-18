@@ -43,11 +43,12 @@ _CREATE_TSV_INDEX = (
 # weights, so the lakebase engine indexes each field separately and applies the
 # Settings boosts when combining. Plain tsvector, so valid on every engine.
 FIELD_TSV_COLUMNS = {"title": "title_tsv", "description": "description_tsv", "aux_text": "aux_tsv"}
-FIELD_TSV_DDL = [
-    f"ALTER TABLE {SEARCH_DOCUMENTS_TABLE} ADD COLUMN IF NOT EXISTS {col} tsvector "
+# One ALTER TABLE adding all three, so an existing table is rewritten once.
+FIELD_TSV_DDL = f"ALTER TABLE {SEARCH_DOCUMENTS_TABLE} " + ", ".join(
+    f"ADD COLUMN IF NOT EXISTS {col} tsvector "
     f"GENERATED ALWAYS AS (to_tsvector('english', coalesce({src}, ''))) STORED"
     for src, col in FIELD_TSV_COLUMNS.items()
-]
+)
 
 
 class SearchDocumentDb(Base):
@@ -87,9 +88,8 @@ event.listen(
     "after_create",
     DDL(_CREATE_TSV_INDEX).execute_if(dialect="postgresql"),
 )
-for _ddl in FIELD_TSV_DDL:
-    event.listen(
-        SearchDocumentDb.__table__,
-        "after_create",
-        DDL(_ddl).execute_if(dialect="postgresql"),
-    )
+event.listen(
+    SearchDocumentDb.__table__,
+    "after_create",
+    DDL(FIELD_TSV_DDL).execute_if(dialect="postgresql"),
+)

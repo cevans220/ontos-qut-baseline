@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Iterable, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
 
@@ -163,10 +164,11 @@ def ensure_search_indexes(session_factory: Callable, engine: SearchEngine) -> No
         )
     if engine.has_bm25:
         for col, name in BM25_INDEXES.items():
-            _try_ddl(
-                session_factory,
-                f"CREATE INDEX IF NOT EXISTS {name} ON search_documents USING lakebase_bm25 ({col})",
-                f"BM25 index on search_documents.{col}",
+            # CONCURRENTLY: building on a populated table must not block the
+            # writes other replicas keep making to search_documents.
+            _create_index_concurrently(
+                session_factory, name,
+                f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name} ON search_documents USING lakebase_bm25 ({col})",
             )
         # Lakebase guidance for text-search tables: VACUUM (which refreshes BM25
         # statistics) should follow inserts at a fixed threshold, not a growing one.
@@ -185,21 +187,64 @@ def refresh_bm25_statistics(session_factory: Callable, engine: Optional[SearchEn
     if engine is None or not engine.has_bm25:
         return {}
     out: Dict[str, Any] = {}
-    with session_factory() as db:
-        bind = db.get_bind()
     for name in BM25_INDEXES.values():
         started = time.monotonic()
         try:
-            # REINDEX CONCURRENTLY can't run inside a transaction block.
-            with bind.connect() as conn:
-                conn = conn.execution_options(isolation_level="AUTOCOMMIT")
+            with _autocommit(session_factory) as conn:
                 conn.execute(text(f"REINDEX INDEX CONCURRENTLY {name}"))
             out[name] = round(time.monotonic() - started, 3)
         except Exception as e:  # pragma: no cover - environment dependent
             logger.warning(f"Could not rebuild {name}: {e}")
             out[name] = None
+        # An interrupted REINDEX CONCURRENTLY leaves an INVALID <name>_ccnew copy
+        # that still costs a write on every upsert; drop any such leftovers.
+        _drop_invalid_indexes(session_factory, f"{name}_ccnew%")
     logger.info(f"BM25 statistics refreshed: {out}")
     return out
+
+
+@contextmanager
+def _autocommit(session_factory: Callable):
+    """A connection outside a transaction block (CONCURRENTLY DDL requires it),
+    with the same connect options (pinned search_path) as the app's sessions."""
+    with session_factory() as db:
+        bind = db.get_bind()
+    with bind.connect() as conn:
+        yield conn.execution_options(isolation_level="AUTOCOMMIT")
+
+
+def _drop_invalid_indexes(session_factory: Callable, name_pattern: str) -> List[str]:
+    """Drop INVALID indexes (failed/interrupted CONCURRENTLY builds) in the current
+    schema whose name matches ``name_pattern`` (LIKE). Returns the dropped names."""
+    dropped: List[str] = []
+    try:
+        with _autocommit(session_factory) as conn:
+            names = [r[0] for r in conn.execute(text(
+                "SELECT c.relname FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+                "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE n.nspname = current_schema() AND NOT i.indisvalid AND c.relname LIKE :p"
+            ), {"p": name_pattern})]
+            for name in names:
+                conn.execute(text(f"DROP INDEX CONCURRENTLY IF EXISTS {_qident(name)}"))
+                dropped.append(name)
+    except Exception as e:  # pragma: no cover - environment dependent
+        logger.warning(f"Could not clean up invalid indexes matching {name_pattern}: {e}")
+    if dropped:
+        logger.warning(f"Dropped invalid search indexes: {dropped}")
+    return dropped
+
+
+def _create_index_concurrently(session_factory: Callable, name: str, ddl: str) -> None:
+    """``CREATE INDEX CONCURRENTLY IF NOT EXISTS`` that heals a previous failed
+    build: such a build leaves an INVALID index under the same name, which
+    IF NOT EXISTS would otherwise skip forever."""
+    _drop_invalid_indexes(session_factory, name)
+    try:
+        with _autocommit(session_factory) as conn:
+            conn.execute(text(ddl))
+    except Exception as e:  # pragma: no cover - environment dependent
+        logger.warning(f"Could not create index {name}: {e}")
+        _drop_invalid_indexes(session_factory, name)
 
 
 def _try_ddl(session_factory: Callable, sql: str, what: str) -> None:

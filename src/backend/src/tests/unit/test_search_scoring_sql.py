@@ -116,3 +116,14 @@ def test_field_boost_sql_follows_type_overrides():
     assert f"CAST({cfg.defaults.fields.title.boost!r} AS float8)" in sql  # defaults branch
     assert "data-product" in params.values()               # type names are bound, not inlined
     assert all(k.startswith("bmb_") for k in params)
+
+
+def test_field_boost_sql_takes_the_highest_of_several_fields():
+    from src.repositories.search_scoring_sql import field_boost_sql
+
+    cfg = _config()
+    tags = cfg.defaults.fields.tags.boost
+    sql, _ = field_boost_sql(cfg, ("tags", "owner"))   # data-product's owner boost (1.5) beats tags
+    assert f"CAST({max(tags, 1.5)!r} AS float8)" in sql
+    none_sql, _ = field_boost_sql(cfg, ("not-a-field",))
+    assert "CAST(0.0 AS float8)" in none_sql

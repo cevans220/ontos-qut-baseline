@@ -151,11 +151,17 @@ class PostgresBackend(SearchBackend):
                   limit=100) -> List[Tuple[str, float]]:
         """BM25 ranked list (lakebase engine only, else ``[]``); input for hybrid fusion (#1061)."""
         from src.repositories import search_repository
-        with self._session_factory() as db:
-            return search_repository.bm25_rank(
-                db, query, config=self._config(), engine=self.engine, type_filter=type_filter,
-                filters=filters, allowed_features=allowed_features, limit=limit,
-            )
+        try:
+            with self._session_factory() as db:
+                return search_repository.bm25_rank(
+                    db, query, config=self._config(), engine=self.engine, type_filter=type_filter,
+                    filters=filters, allowed_features=allowed_features, limit=limit,
+                )
+        except Exception as e:
+            # e.g. a BM25 index whose startup build failed: degrade to "no BM25
+            # signal" so hybrid fusion still answers from the other lists.
+            logger.warning(f"BM25 ranking unavailable: {e}")
+            return []
 
     def refresh_bm25_statistics(self) -> Dict[str, Any]:
         from src.repositories.search_engine import refresh_bm25_statistics
@@ -222,7 +228,7 @@ class PostgresBackend(SearchBackend):
         """
         from src.repositories import search_repository as repo
         started = time.monotonic()
-        stats: Dict[str, Any] = {"status": "done", "upserted": 0, "removed": 0, "failed_sources": []}
+        stats: Dict[str, Any] = {"status": "done", "upserted": 0, "inserted": 0, "removed": 0, "failed_sources": []}
         with self._session_factory() as lock_db:
             if not repo.try_reconcile_lock(lock_db):
                 logger.info("Search reconcile: another replica holds the lock; skipping.")
@@ -235,7 +241,9 @@ class PostgresBackend(SearchBackend):
                         items = [it for it in fetch() if is_indexable(it)]
                         for i in range(0, len(items), batch_size):
                             with self._session_factory() as db:
-                                repo.upsert_documents(db, items[i:i + batch_size])
+                                stats["inserted"] += repo.upsert_documents(
+                                    db, items[i:i + batch_size], count_inserted=True,
+                                )
                         stats["upserted"] += len(items)
                         logger.info(f"Search reconcile: {name} {len(items)} items ({n}/{len(sources)}).")
                     except Exception as e:
@@ -251,8 +259,10 @@ class PostgresBackend(SearchBackend):
                     with self._session_factory() as db:
                         stats["removed"] = repo.delete_stale(db, t0)
                 # BM25 corpus statistics are fixed at index build time; refresh
-                # them after loading rows (no-op off the lakebase engine).
-                if stats["upserted"] or stats["removed"]:
+                # them when the corpus gained or lost documents (no-op off the
+                # lakebase engine). Edits of existing rows are left to the
+                # scheduled reindex job, so a plain restart doesn't rebuild.
+                if stats["inserted"] or stats["removed"]:
                     try:
                         stats["bm25_refresh"] = self.refresh_bm25_statistics()
                     except Exception as e:
