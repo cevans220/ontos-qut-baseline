@@ -32,10 +32,13 @@ tasks:
     environment_key: "search-index-reindex-env"
 
 # Default schedule; an admin-set schedule_cron (Settings -> Jobs) overrides it.
+# Unpaused: on the lakebase engine this is what keeps BM25 statistics current
+# after edits (the startup reconcile only rebuilds when documents were added or
+# removed). On the pg engine a run is just an ANALYZE.
 schedule:
   quartz_cron_expression: "0 30 2 * * ?"  # Daily at 02:30
   timezone_id: "UTC"
-  pause_status: "PAUSED"
+  pause_status: "UNPAUSED"
 
 parameters:
   reindex_all: "false"

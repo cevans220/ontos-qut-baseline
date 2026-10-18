@@ -30,6 +30,13 @@ SCHEDULE_TIMEZONE_KEY = "schedule_timezone"
 _SCHEDULE_CONFIG_KEYS = (SCHEDULE_CRON_KEY, SCHEDULE_TIMEZONE_KEY)
 
 
+def _config_value(value: Any) -> Any:
+    """Normalise a configuration value for change detection (unset == empty)."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    return value
+
+
 def validate_quartz_cron(expr: str) -> str:
     """Light shape check (Databricks validates the expression itself): 6 or 7
     whitespace-separated Quartz fields (seconds first, optional year)."""
@@ -181,15 +188,7 @@ class JobsManager:
             job_settings_kwargs['continuous'] = jobs.Continuous(pause_status=jobs.PauseStatus.UNPAUSED)
 
         if 'parameters' in wf_def:
-            params = wf_def['parameters']
-            if isinstance(params, dict):
-                # Convert dict to list of JobParameter objects with default values
-                job_settings_kwargs['parameters'] = [
-                    jobs.JobParameter(name=key, default=str(value))
-                    for key, value in params.items()
-                ]
-            else:
-                job_settings_kwargs['parameters'] = params
+            job_settings_kwargs['parameters'] = self._job_parameters(workflow_id, wf_def)
 
         if 'tags' in wf_def:
             job_settings_kwargs['tags'] = wf_def['tags']
@@ -293,15 +292,7 @@ class JobsManager:
             job_settings.continuous = jobs.Continuous(pause_status=jobs.PauseStatus.UNPAUSED)
         
         if 'parameters' in wf_def:
-            params = wf_def['parameters']
-            if isinstance(params, dict):
-                # Convert dict to list of JobParameter objects with default values
-                job_settings.parameters = [
-                    jobs.JobParameter(name=key, default=str(value))
-                    for key, value in params.items()
-                ]
-            else:
-                job_settings.parameters = params
+            job_settings.parameters = self._job_parameters(workflow_id, wf_def)
         
         if 'tags' in wf_def:
             job_settings.tags = wf_def['tags']
@@ -324,10 +315,33 @@ class JobsManager:
         
         self._client.jobs.update(job_id=job_id, new_settings=job_settings)
 
-    def _resolve_schedule(self, workflow_id: str, wf_def: Dict[str, Any]) -> Optional[jobs.CronSchedule]:
+    def _job_parameters(
+        self, workflow_id: str, wf_def: Dict[str, Any], saved: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        """Job parameters with their defaults set to what a manual run would pass
+        (saved configuration + the app's database connection), so scheduled runs,
+        which get only the defaults, connect to the right database and schema."""
+        params = wf_def.get('parameters')
+        if not isinstance(params, dict):
+            return params
+        try:
+            resolved = self.get_merged_job_parameters(workflow_id, saved_config=saved)
+        except Exception as e:
+            logger.warning(f"Could not resolve job parameters for {workflow_id}; using YAML defaults: {e}")
+            resolved = {}
+        return [
+            jobs.JobParameter(name=key, default=resolved.get(key, str(value)))
+            for key, value in params.items()
+        ]
+
+    def _resolve_schedule(
+        self, workflow_id: str, wf_def: Dict[str, Any], saved: Optional[Dict[str, Any]] = None,
+    ) -> Optional[jobs.CronSchedule]:
         """The job schedule: the saved ``schedule_cron`` (unpaused) if an admin set
-        one, otherwise the workflow YAML's ``schedule`` block, otherwise none."""
-        saved = self.get_workflow_configuration(workflow_id) or {}
+        one, otherwise the workflow YAML's ``schedule`` block, otherwise none.
+        ``saved`` overrides the stored configuration (a save in progress)."""
+        if saved is None:
+            saved = self.get_workflow_configuration(workflow_id) or {}
         cron = saved.get(SCHEDULE_CRON_KEY)
         yaml_schedule = wf_def.get('schedule') if isinstance(wf_def.get('schedule'), dict) else None
         if isinstance(cron, str) and cron.strip():
@@ -345,23 +359,35 @@ class JobsManager:
             )
         return None
 
-    def apply_schedule(self, workflow_id: str) -> Optional[int]:
-        """Push the resolved schedule to the installed Databricks job (no-op if the
-        workflow isn't installed). Returns the job id that was updated."""
+    def _push_job_settings(
+        self, workflow_id: str, saved: Dict[str, Any], *, schedule: bool, parameters: bool,
+    ) -> Optional[int]:
+        """Push the schedule and/or parameter defaults that follow from ``saved``
+        to the installed Databricks job (no-op if the workflow isn't installed).
+        Returns the job id that was updated."""
         inst = workflow_installation_repo.get_by_workflow_id(self._db, workflow_id=workflow_id)
-        if not inst or not getattr(inst, 'job_id', None):
+        if not inst or not getattr(inst, 'job_id', None) or not (schedule or parameters):
             return None
         job_id = int(inst.job_id)
         wf_def = self._get_workflow_definition(workflow_id, job_cluster_id=None)
-        schedule = self._resolve_schedule(workflow_id, wf_def)
-        if schedule is not None:
-            self._client.jobs.update(job_id=job_id, new_settings=jobs.JobSettings(schedule=schedule))
-        else:
-            self._client.jobs.update(job_id=job_id, fields_to_remove=['schedule'])
-        logger.info(
-            f"Applied schedule to job {job_id} ({workflow_id}): "
-            f"{schedule.quartz_cron_expression if schedule else 'none'}"
-        )
+        new_settings = jobs.JobSettings()
+        fields_to_remove: List[str] = []
+        if schedule:
+            cron = self._resolve_schedule(workflow_id, wf_def, saved)
+            if cron is not None:
+                new_settings.schedule = cron
+            else:
+                fields_to_remove.append('schedule')
+            logger.info(
+                f"Applying schedule to job {job_id} ({workflow_id}): "
+                f"{cron.quartz_cron_expression if cron else 'none'}"
+            )
+        if parameters and 'parameters' in wf_def:
+            new_settings.parameters = self._job_parameters(workflow_id, wf_def, saved)
+        kwargs: Dict[str, Any] = {"job_id": job_id, "new_settings": new_settings}
+        if fields_to_remove:
+            kwargs["fields_to_remove"] = fields_to_remove
+        self._client.jobs.update(**kwargs)
         return job_id
 
     def remove_workflow(self, job_id: int) -> None:
@@ -497,25 +523,44 @@ class JobsManager:
         Raises:
             ValueError: ``schedule_cron`` isn't a Quartz cron expression.
         """
-        cron = (configuration or {}).get(SCHEDULE_CRON_KEY)
+        configuration = dict(configuration or {})
+        cron = configuration.get(SCHEDULE_CRON_KEY)
         if isinstance(cron, str) and cron.strip():
-            configuration = {**configuration, SCHEDULE_CRON_KEY: validate_quartz_cron(cron)}
-        db_obj = workflow_configuration_repo.upsert(
+            configuration[SCHEDULE_CRON_KEY] = validate_quartz_cron(cron)
+
+        # Changes take effect on the installed job right away (scheduled runs
+        # only see the job's own schedule and parameter defaults). Pushed before
+        # saving, so a failed push leaves the old configuration in place; only
+        # what changed is pushed, so an unrelated save never resets the schedule.
+        current = self.get_workflow_configuration(workflow_id) or {}
+
+        def changed(keys) -> bool:
+            return any(_config_value(current.get(k)) != _config_value(configuration.get(k)) for k in keys)
+
+        param_keys = (set(current) | set(configuration)) - set(_SCHEDULE_CONFIG_KEYS)
+        self._push_job_settings(
+            workflow_id, configuration,
+            schedule=changed(_SCHEDULE_CONFIG_KEYS), parameters=changed(param_keys),
+        )
+
+        workflow_configuration_repo.upsert(
             self._db,
             workflow_id=workflow_id,
             configuration=configuration
         )
         self._db.commit()
 
-        # A schedule change takes effect on the installed job right away.
-        if any(k in (configuration or {}) for k in _SCHEDULE_CONFIG_KEYS):
-            self.apply_schedule(workflow_id)
-
         # Return as Pydantic model
         config_dict = workflow_configuration_repo.get_configuration_dict(self._db, workflow_id=workflow_id)
         return WorkflowConfiguration(workflow_id=workflow_id, configuration=config_dict or {})
     
-    def get_merged_job_parameters(self, workflow_id: str, ad_hoc_params: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    def get_merged_job_parameters(
+        self,
+        workflow_id: str,
+        ad_hoc_params: Optional[Dict[str, str]] = None,
+        *,
+        saved_config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, str]:
         """Merge saved configuration with ad-hoc parameters for job execution.
         
         Saved configuration values are converted to strings and merged with ad-hoc parameters.
@@ -526,14 +571,16 @@ class JobsManager:
         Args:
             workflow_id: Workflow identifier
             ad_hoc_params: Optional runtime parameters to override saved config
+            saved_config: Use this configuration instead of the stored one
             
         Returns:
             Merged parameters dict (all values as strings for job submission)
         """
         merged: Dict[str, str] = {}
         
-        # Load saved configuration
-        saved_config = self.get_workflow_configuration(workflow_id)
+        # Load saved configuration (unless the caller passes the one being saved)
+        if saved_config is None:
+            saved_config = self.get_workflow_configuration(workflow_id)
         if saved_config:
             # Convert all values to strings for job parameters
             for key, value in saved_config.items():

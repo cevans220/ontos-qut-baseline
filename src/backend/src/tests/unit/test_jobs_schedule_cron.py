@@ -62,7 +62,7 @@ def test_invalid_expressions_are_rejected(expr):
 def test_yaml_schedule_is_the_default(mgr, saved):
     sched = mgr._resolve_schedule(WF, _wf_def(mgr))
     assert sched.quartz_cron_expression == "0 30 2 * * ?"
-    assert sched.pause_status == jobs.PauseStatus.PAUSED
+    assert sched.pause_status == jobs.PauseStatus.UNPAUSED  # keeps BM25 statistics current
 
 
 def test_saved_schedule_cron_overrides_yaml_and_unpauses(mgr, saved):
@@ -103,6 +103,7 @@ def test_saving_schedule_cron_applies_it_to_the_installed_job(mgr, saved, instal
 
 def test_clearing_schedule_cron_restores_the_yaml_schedule(mgr, saved, installed):
     installed[WF] = SimpleNamespace(job_id="99")
+    saved[WF] = {"schedule_cron": "0 0 1 * * ?"}
     mgr.update_workflow_configuration(WF, {"schedule_cron": ""})
     assert mgr._client.jobs.update.call_args.kwargs["new_settings"].schedule.quartz_cron_expression == "0 30 2 * * ?"
 
@@ -112,6 +113,7 @@ def test_no_schedule_at_all_removes_it_from_the_job(mgr, saved, installed, monke
     real = mgr._get_workflow_definition
     monkeypatch.setattr(mgr, "_get_workflow_definition",
                         lambda wid, job_cluster_id=None: {k: v for k, v in real(wid, job_cluster_id=None).items() if k != "schedule"})
+    saved[WF] = {"schedule_cron": "0 0 1 * * ?"}
     mgr.update_workflow_configuration(WF, {"schedule_cron": ""})
     assert mgr._client.jobs.update.call_args.kwargs["fields_to_remove"] == ["schedule"]
 
@@ -127,10 +129,41 @@ def test_invalid_schedule_cron_is_rejected_before_saving(mgr, saved, installed):
     assert WF not in saved
 
 
-def test_other_config_changes_dont_touch_the_schedule(mgr, saved, installed):
+def test_other_config_changes_update_parameters_but_not_the_schedule(mgr, saved, installed):
     installed[WF] = SimpleNamespace(job_id="99")
-    mgr.update_workflow_configuration(WF, {"reindex_all": True})
+    saved[WF] = {"schedule_cron": "0 0 1 * * ?"}
+    mgr.update_workflow_configuration(WF, {"schedule_cron": "0 0 1 * * ?", "reindex_all": True})
+    new_settings = mgr._client.jobs.update.call_args.kwargs["new_settings"]
+    assert new_settings.schedule is None                     # unchanged: not re-pushed
+    assert {p.name: p.default for p in new_settings.parameters}["reindex_all"] == "True"
+
+
+def test_an_unchanged_save_doesnt_touch_the_job(mgr, saved, installed):
+    installed[WF] = SimpleNamespace(job_id="99")
+    saved[WF] = {"schedule_cron": "0 0 1 * * ?", "reindex_all": True}
+    mgr.update_workflow_configuration(WF, {"schedule_cron": "0  0 1 * * ?", "reindex_all": True})
     mgr._client.jobs.update.assert_not_called()
+
+
+def test_a_failed_push_leaves_the_saved_configuration_alone(mgr, saved, installed):
+    installed[WF] = SimpleNamespace(job_id="99")
+    saved[WF] = {"schedule_cron": "0 0 1 * * ?"}
+    mgr._client.jobs.update.side_effect = RuntimeError("jobs API down")
+    with pytest.raises(RuntimeError):
+        mgr.update_workflow_configuration(WF, {"schedule_cron": "0 0 2 * * ?"})
+    assert saved[WF] == {"schedule_cron": "0 0 1 * * ?"}
+
+
+def test_scheduled_runs_get_the_app_database_as_parameter_defaults(mgr, saved, monkeypatch):
+    """Scheduled runs only see the job's parameter defaults, not the merged
+    parameters a manual run passes, so install bakes those in."""
+    monkeypatch.setattr(mgr, "get_merged_job_parameters", lambda wid, ad_hoc_params=None, saved_config=None: {
+        "postgres_host": "ep-x.database.cloud", "postgres_schema": "app_schema", "reindex_all": "false",
+    })
+    mgr.install_workflow(WF)
+    params = {p.name: p.default for p in mgr._client.jobs.create.call_args.kwargs["parameters"]}
+    assert params["postgres_host"] == "ep-x.database.cloud" and params["postgres_schema"] == "app_schema"
+    assert params["postgres_port"] == "5432"                # YAML default where nothing is resolved
 
 
 def test_schedule_keys_are_not_job_parameters(mgr, saved):
