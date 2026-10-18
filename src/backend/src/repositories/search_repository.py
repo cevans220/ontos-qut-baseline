@@ -560,43 +560,75 @@ def bm25_rank(
 
 # --- embeddings (#1060) ------------------------------------------------------
 
-def claim_pending_embeddings(db: Session, limit: int) -> List[Dict[str, Any]]:
-    """Rows whose embedding is missing or older than their content
-    (``embedded_at`` null or before ``updated_at``), oldest first. ``FOR UPDATE
-    SKIP LOCKED`` keeps replicas' workers from claiming the same rows; the lock
-    lasts until the caller's transaction ends (store/touch in the same session)."""
+# A row needs (re-)embedding when its content is newer than its embedding, or
+# when the embedding is missing (e.g. the column was re-created) unless the
+# endpoint rejected that exact text before ("rejected:<hash>").
+_PENDING_EMBEDDING = (
+    "(embedded_at IS NULL OR embedded_at < updated_at "
+    "OR (embedding IS NULL AND COALESCE(embedding_hash, '') NOT LIKE 'rejected:%'))"
+)
+REJECTED_HASH_PREFIX = "rejected:"
+
+
+def claim_pending_embeddings(db: Session, limit: int, lease_seconds: float = 300.0) -> List[Dict[str, Any]]:
+    """Lease up to ``limit`` pending rows, oldest first, and return them.
+
+    The lease is a timestamp, not a row lock: the caller commits right away and
+    calls the endpoint with no transaction open, so writes to those rows never
+    wait on the endpoint. Replicas skip leased rows; a lease that outlives a
+    crashed worker expires after ``lease_seconds``."""
     rows = db.execute(text(
-        "SELECT id, title, description, aux_text, embedding_hash FROM search_documents "
-        "WHERE embedded_at IS NULL OR embedded_at < updated_at "
-        "ORDER BY updated_at, id LIMIT :lim FOR UPDATE SKIP LOCKED"
-    ), {"lim": max(1, int(limit))})
-    return [dict(r._mapping) for r in rows]
+        "UPDATE search_documents d SET embedding_claimed_at = clock_timestamp() "
+        "FROM (SELECT id FROM search_documents "
+        f"      WHERE {_PENDING_EMBEDDING} AND (embedding_claimed_at IS NULL "
+        "        OR embedding_claimed_at < clock_timestamp() - make_interval(secs => :lease)) "
+        "      ORDER BY updated_at, id LIMIT :lim FOR UPDATE SKIP LOCKED) c "
+        "WHERE d.id = c.id "
+        "RETURNING d.id, d.title, d.description, d.aux_text, d.embedding_hash, d.updated_at, "
+        "(d.embedding IS NOT NULL) AS has_embedding"
+    ), {"lim": max(1, int(limit)), "lease": float(lease_seconds)})
+    return sorted((dict(r._mapping) for r in rows), key=lambda r: (r["updated_at"], r["id"]))
 
 
-def store_embeddings(db: Session, rows: Iterable[tuple[str, Optional[List[float]], str]],
-                     engine: SearchEngine) -> int:
-    """Write ``(id, vector, text_hash)``. ``vector=None`` marks the row current
-    without touching the stored vector (content unchanged, hash matched)."""
+def store_embeddings(db: Session, results: Iterable[Dict[str, Any]], engine: SearchEngine) -> int:
+    """Write embedding results ``{id, updated_at, hash, vector?, rejected?}``.
+
+    - ``vector``: store it.
+    - no ``vector``: content unchanged (hash matched), only mark it current.
+    - ``rejected``: the endpoint refused this text; keep it from being retried
+      until the text changes.
+
+    Each write only applies if the row's ``updated_at`` is still the claimed
+    one; a row edited meanwhile stays pending and is embedded again. Returns
+    the number of rows written."""
     n = 0
     vec_type = engine.vec("vector")
-    for doc_id, vec, h in rows:
-        if vec is None:
-            db.execute(text(
-                "UPDATE search_documents SET embedded_at = clock_timestamp(), embedding_hash = :h WHERE id = :id"
-            ), {"id": doc_id, "h": h})
+    guard = "WHERE id = :id AND updated_at = :u"
+    for r in results:
+        params = {"id": r["id"], "u": r["updated_at"], "h": r["hash"]}
+        if r.get("rejected"):
+            sql = ("UPDATE search_documents SET embedding = NULL, embedding_hash = :h, "
+                   f"embedded_at = clock_timestamp() {guard}")
+            params["h"] = REJECTED_HASH_PREFIX + r["hash"]
+        elif r.get("vector") is None:
+            sql = f"UPDATE search_documents SET embedded_at = clock_timestamp(), embedding_hash = :h {guard}"
         else:
-            db.execute(text(
-                f"UPDATE search_documents SET embedding = CAST(:v AS {vec_type}), embedding_hash = :h, "
-                "embedded_at = clock_timestamp() WHERE id = :id"
-            ), {"id": doc_id, "h": h, "v": "[" + ",".join(repr(float(x)) for x in vec) + "]"})
-        n += 1
+            sql = (f"UPDATE search_documents SET embedding = CAST(:v AS {vec_type}), embedding_hash = :h, "
+                   f"embedded_at = clock_timestamp() {guard}")
+            params["v"] = "[" + ",".join(repr(float(x)) for x in r["vector"]) + "]"
+        n += int(db.execute(text(sql), params).rowcount or 0)
     return n
 
 
+def release_embedding_claims(db: Session, ids: Iterable[str]) -> None:
+    ids = list(ids)
+    if ids:
+        db.execute(text("UPDATE search_documents SET embedding_claimed_at = NULL WHERE id = ANY(:ids)"),
+                   {"ids": ids})
+
+
 def count_pending_embeddings(db: Session) -> int:
-    return int(db.execute(text(
-        "SELECT count(*) FROM search_documents WHERE embedded_at IS NULL OR embedded_at < updated_at"
-    )).scalar() or 0)
+    return int(db.execute(text(f"SELECT count(*) FROM search_documents WHERE {_PENDING_EMBEDDING}")).scalar() or 0)
 
 
 def vector_rank(
@@ -627,14 +659,34 @@ def vector_rank(
         **params, **dparams, "vr_limit": limit,
         "qvec": "[" + ",".join(repr(float(x)) for x in query_vector) + "]",
     }
+    if engine.vector_index_method == "hnsw":
+        _hnsw_filtered_scan(db, limit)
     sql = f"SELECT id, 1 - ({dist}) AS sim FROM search_documents{where} ORDER BY {dist} LIMIT :vr_limit"
-    return [(r._mapping["id"], float(r._mapping["sim"])) for r in db.execute(text(sql), params)]
+    ranked = [(r._mapping["id"], float(r._mapping["sim"])) for r in db.execute(text(sql), params)]
+    return sorted(ranked, key=lambda r: -r[1])  # relaxed_order may return near-ties out of order
+
+
+def _hnsw_filtered_scan(db: Session, limit: int) -> None:
+    """HNSW returns at most ``hnsw.ef_search`` (default 40) candidates and the
+    WHERE filters apply after that, so a filtered query (type, permissions,
+    disabled types) could come back nearly empty. pgvector >= 0.8 keeps
+    scanning until ``limit`` rows pass the filters (``iterative_scan``); the
+    larger ``ef_search`` also helps older versions. Transaction-local."""
+    try:
+        with db.begin_nested():
+            db.execute(text("SELECT set_config('hnsw.ef_search', :ef, true)"), {"ef": str(min(1000, max(40, limit)))})
+        with db.begin_nested():
+            db.execute(text("SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true)"))
+    except Exception as e:  # pgvector < 0.8: no iterative scan
+        logger.debug(f"hnsw.iterative_scan unavailable: {e}")
 
 
 def replace_all(db: Session, items: Iterable[SearchIndexItem]) -> int:
-    """Full rebuild: clear the table and re-insert all items (one transaction)."""
-    db.execute(text("DELETE FROM search_documents"))
-    return upsert_documents(db, items)
+    """Full rebuild: make the table exactly ``items`` (one transaction). Rows
+    that stay keep their embeddings; unchanged ones aren't rewritten."""
+    rows = list(items)
+    db.execute(text("DELETE FROM search_documents WHERE NOT (id = ANY(:ids))"), {"ids": [it.id for it in rows]})
+    return upsert_documents(db, rows)
 
 
 # --- background reconcile primitives (SearchManager._reconcile_postgres) ------

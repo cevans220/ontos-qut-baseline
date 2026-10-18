@@ -289,6 +289,8 @@ class PostgresBackend(SearchBackend):
         with self._session_factory() as db:
             search_repository.replace_all(db, rows)
         logger.info(f"PostgresBackend: rebuilt search_documents with {len(rows)} items.")
+        if self.embedding_worker is not None:
+            self.embedding_worker.notify()
 
     def replace_type(self, type_: str, items: Iterable[SearchIndexItem]) -> None:
         """Make the rows of one type exactly ``items`` (e.g. all glossary terms),

@@ -34,9 +34,23 @@ def embedding_text(title: str | None, description: str | None, aux_text: str | N
     return "\n".join(parts)[:MAX_EMBEDDING_CHARS]
 
 
-def text_hash(text: str) -> str:
-    """Content hash stored next to the embedding, so unchanged text isn't re-embedded."""
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+def text_hash(text: str, model: str = "") -> str:
+    """Hash stored next to the embedding, so unchanged text isn't re-embedded.
+    Covers the model (endpoint) too: switching to another model of the same
+    size re-embeds everything instead of mixing vectors from both."""
+    return hashlib.sha256(f"{model}\n{text}".encode("utf-8")).hexdigest()
+
+
+class EmbeddingInputRejected(Exception):
+    """The endpoint rejected the input itself (4xx), as opposed to being down.
+    Retrying the same text won't help."""
+
+
+def is_input_rejection(error: BaseException) -> bool:
+    if isinstance(error, EmbeddingInputRejected):
+        return True
+    status = getattr(error, "status_code", None)
+    return isinstance(status, int) and 400 <= status < 500 and status not in (401, 403, 404, 408, 429)
 
 
 @dataclass
@@ -70,24 +84,45 @@ class Embedder(Protocol):
 class DatabricksEmbedder:
     """Embeddings from a Databricks serving endpoint through ``create_openai_client``.
 
-    A client is created per call: background batches can run for hours and the
-    OAuth token behind the client would expire otherwise.
+    The client is reused for ``CLIENT_TTL_SECONDS`` and then rebuilt, so the
+    OAuth token behind it is refreshed well before it expires (1 h) without
+    resolving a token on every call. Calls have a timeout and few retries: a
+    hanging endpoint must not stall a search request or the worker.
     """
+
+    CLIENT_TTL_SECONDS = 600.0
+    TIMEOUT_SECONDS = 30.0
+    MAX_RETRIES = 1
 
     def __init__(self, settings: Any, endpoint: str, dim: int):
         self._settings = settings
         self.endpoint = endpoint
         self.dim = dim
         self.stats = EmbeddingStats()
+        self._client: Any = None
+        self._client_at = 0.0
+        self._client_lock = threading.Lock()
 
-    def embed(self, texts: Sequence[str]) -> list[list[float]]:
+    def _get_client(self) -> Any:
         from src.common.llm_client import create_openai_client
 
+        with self._client_lock:
+            now = time.monotonic()
+            if self._client is None or now - self._client_at > self.CLIENT_TTL_SECONDS:
+                self._client = create_openai_client(self._settings).with_options(
+                    timeout=self.TIMEOUT_SECONDS, max_retries=self.MAX_RETRIES,
+                )
+                self._client_at = now
+            return self._client
+
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
         if not texts:
             return []
+        if any(not t.strip() for t in texts):
+            self.stats.add(calls=1, errors=1)
+            raise EmbeddingInputRejected("empty text")  # the endpoint rejects it anyway
         try:
-            client = create_openai_client(self._settings)
-            resp = client.embeddings.create(model=self.endpoint, input=list(texts))
+            resp = self._get_client().embeddings.create(model=self.endpoint, input=list(texts))
         except Exception:
             self.stats.add(calls=1, errors=1)
             raise

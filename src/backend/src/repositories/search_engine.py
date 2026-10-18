@@ -30,6 +30,7 @@ logger = get_logger(__name__)
 
 LAKEBASE_EXTENSIONS = frozenset({"lakebase_text", "lakebase_vector"})
 # Portable extensions the engines use; created if available and permitted.
+# ``vector`` (pgvector) only when semantic search is on (an embedding size).
 PORTABLE_EXTENSIONS = ("pg_trgm", "vector")
 VALID_ENGINES = ("auto", "pg", "lakebase")
 
@@ -151,7 +152,7 @@ def prepare_engine(session_factory: Callable, requested: str, *, embedding_dim: 
     with session_factory() as db:
         available = _available(db)
         installed = _installed(db)
-    wanted = list(PORTABLE_EXTENSIONS)
+    wanted = [e for e in PORTABLE_EXTENSIONS if e != "vector" or embedding_dim]
     if (requested or "auto").strip().lower() in ("auto", "lakebase"):
         # Only offered once Lakebase Search is enabled on the project (that switch
         # is the irreversible step; creating the extensions is not).
@@ -165,11 +166,12 @@ def prepare_engine(session_factory: Callable, requested: str, *, embedding_dim: 
         installed = _installed(db)
 
     engine = choose_engine(requested, installed.keys(), installed)
-    if embedding_dim and engine.has_vector and ensure_embedding_columns(session_factory, engine, embedding_dim):
+    if embedding_dim and not engine.has_vector:
+        logger.info("pgvector not available: semantic search is off (lexical only).")
+    elif embedding_dim and ensure_embedding_columns(session_factory, engine, embedding_dim):
         from dataclasses import replace
         engine = replace(engine, embedding_dim=embedding_dim)
-    elif embedding_dim:
-        logger.info("pgvector not available: semantic search is off (lexical only).")
+    # (ensure_embedding_columns logs why semantic search is off otherwise)
     ensure_search_indexes(session_factory, engine)
     logger.info(
         "Search engine: %s (requested=%s; pg_trgm=%s; lakebase_text=%s; lakebase_vector=%s)",
@@ -181,32 +183,48 @@ def prepare_engine(session_factory: Callable, requested: str, *, embedding_dim: 
     return engine
 
 
+# Added outside Alembic (pgvector is optional); alembic/env.py ignores them.
+EMBEDDING_COLUMNS = ("embedding", "embedding_hash", "embedded_at", "embedding_claimed_at")
+
+
 def ensure_embedding_columns(session_factory: Callable, engine: SearchEngine, dim: int) -> bool:
     """Add the embedding columns (needs pgvector, so not in Alembic). Returns
-    True when the column exists with ``dim`` dimensions."""
-    _try_ddl(
-        session_factory,
-        "ALTER TABLE search_documents "
-        f"ADD COLUMN IF NOT EXISTS embedding {engine.vec('vector')}({int(dim)}), "
-        "ADD COLUMN IF NOT EXISTS embedding_hash text, "
-        "ADD COLUMN IF NOT EXISTS embedded_at timestamptz",
-        "embedding columns on search_documents",
-    )
+    True when the column exists with ``dim`` dimensions.
+
+    ``ALTER TABLE`` takes an ACCESS EXCLUSIVE lock even when every column
+    already exists, and a waiting one blocks all reads behind it, so it only
+    runs for missing columns and gives up quickly if the table is busy (the
+    next startup retries)."""
+    types = {
+        "embedding": f"{engine.vec('vector')}({int(dim)})", "embedding_hash": "text",
+        "embedded_at": "timestamptz", "embedding_claimed_at": "timestamptz",
+    }
     try:
         with session_factory() as db:
-            actual = db.execute(text(
-                "SELECT atttypmod FROM pg_attribute "
-                "WHERE attrelid = 'search_documents'::regclass AND attname = 'embedding' AND NOT attisdropped"
-            )).scalar()
+            cols = dict(db.execute(text(
+                "SELECT attname, atttypmod FROM pg_attribute "
+                "WHERE attrelid = 'search_documents'::regclass AND attnum > 0 AND NOT attisdropped "
+                "AND attname = ANY(:names)"
+            ), {"names": list(EMBEDDING_COLUMNS)}).all())
+            missing = [c for c in EMBEDDING_COLUMNS if c not in cols]
+            if missing:
+                db.execute(text("SET LOCAL lock_timeout = '5s'"))
+                db.execute(text(
+                    "ALTER TABLE search_documents "
+                    + ", ".join(f"ADD COLUMN IF NOT EXISTS {c} {types[c]}" for c in missing)
+                ))
+                db.commit()
+                cols["embedding"] = int(dim) if "embedding" in missing else cols["embedding"]
     except Exception as e:  # pragma: no cover - environment dependent
-        logger.warning(f"Could not inspect search_documents.embedding: {e}")
+        logger.warning(f"Could not add the embedding columns to search_documents; semantic search is off: {e}")
         return False
-    if actual is None:
-        return False
+    actual = cols.get("embedding")
     if int(actual) != int(dim):
         logger.error(
             f"search_documents.embedding has {actual} dimensions but SEARCH_EMBEDDING_DIM is {dim}; "
-            "semantic search is off until they match (drop the column to re-embed with the new model)."
+            "semantic search is off until they match. To switch models, drop the column "
+            "(ALTER TABLE search_documents DROP COLUMN embedding) and restart: every document "
+            "is embedded again."
         )
         return False
     return True
