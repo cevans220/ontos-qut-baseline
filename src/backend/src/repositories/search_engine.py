@@ -155,17 +155,16 @@ def prepare_engine(session_factory: Callable, requested: str) -> SearchEngine:
 
 def ensure_search_indexes(session_factory: Callable, engine: SearchEngine) -> None:
     """Engine-specific indexes on search_documents (Alembic only adds portable columns)."""
+    # CONCURRENTLY: building on a populated table must not block the writes
+    # other replicas keep making to search_documents.
     if engine.has_trgm:
-        _try_ddl(
-            session_factory,
-            f"CREATE INDEX IF NOT EXISTS {TITLE_TRGM_INDEX} "
+        _create_index_concurrently(
+            session_factory, TITLE_TRGM_INDEX,
+            f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {TITLE_TRGM_INDEX} "
             f"ON search_documents USING gin (lower(title) {engine.trgm('gin_trgm_ops')})",
-            "trigram index on search_documents.title",
         )
     if engine.has_bm25:
         for col, name in BM25_INDEXES.items():
-            # CONCURRENTLY: building on a populated table must not block the
-            # writes other replicas keep making to search_documents.
             _create_index_concurrently(
                 session_factory, name,
                 f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name} ON search_documents USING lakebase_bm25 ({col})",
