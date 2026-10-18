@@ -22,6 +22,25 @@ from src.repositories.workflow_configurations_repository import workflow_configu
 from src.models.workflow_installations import WorkflowInstallation
 from src.models.workflow_configurations import WorkflowParameterDefinition, WorkflowConfiguration, WorkflowConfigurationUpdate
 
+# Saved workflow configuration keys that set the Databricks job's schedule rather
+# than a job parameter. An admin-set ``schedule_cron`` (Quartz) overrides the
+# workflow YAML's ``schedule``; empty/absent falls back to the YAML.
+SCHEDULE_CRON_KEY = "schedule_cron"
+SCHEDULE_TIMEZONE_KEY = "schedule_timezone"
+_SCHEDULE_CONFIG_KEYS = (SCHEDULE_CRON_KEY, SCHEDULE_TIMEZONE_KEY)
+
+
+def validate_quartz_cron(expr: str) -> str:
+    """Light shape check (Databricks validates the expression itself): 6 or 7
+    whitespace-separated Quartz fields (seconds first, optional year)."""
+    fields = (expr or "").split()
+    if len(fields) not in (6, 7):
+        raise ValueError(
+            f"schedule_cron must be a Quartz cron expression with 6 or 7 fields "
+            f"(e.g. '0 30 2 * * ?'), got {expr!r}"
+        )
+    return " ".join(fields)
+
 logger = get_logger(__name__)
 
 
@@ -153,15 +172,10 @@ class JobsManager:
                 if not hasattr(task, 'existing_cluster_id') or task.existing_cluster_id is None:
                     task.environment_key = 'default'
 
-        # Add optional job configuration from YAML
-        if 'schedule' in wf_def:
-            schedule_config = wf_def['schedule']
-            if isinstance(schedule_config, dict):
-                job_settings_kwargs['schedule'] = jobs.CronSchedule(
-                    quartz_cron_expression=schedule_config.get('quartz_cron_expression'),
-                    timezone_id=schedule_config.get('timezone_id', 'UTC'),
-                    pause_status=jobs.PauseStatus(schedule_config.get('pause_status', 'UNPAUSED'))
-                )
+        # Schedule: admin-set schedule_cron, else the YAML default
+        schedule = self._resolve_schedule(workflow_id, wf_def)
+        if schedule is not None:
+            job_settings_kwargs['schedule'] = schedule
 
         if 'continuous' in wf_def and wf_def['continuous']:
             job_settings_kwargs['continuous'] = jobs.Continuous(pause_status=jobs.PauseStatus.UNPAUSED)
@@ -270,16 +284,10 @@ class JobsManager:
             if env_objs:
                 job_settings.environments = env_objs
 
-        # Add optional job configuration from YAML
-        if 'schedule' in wf_def:
-            schedule_config = wf_def['schedule']
-            if isinstance(schedule_config, dict):
-                cron_schedule = jobs.CronSchedule(
-                    quartz_cron_expression=schedule_config.get('quartz_cron_expression'),
-                    timezone_id=schedule_config.get('timezone_id', 'UTC'),
-                    pause_status=jobs.PauseStatus(schedule_config.get('pause_status', 'UNPAUSED'))
-                )
-                job_settings.schedule = cron_schedule
+        # Schedule: admin-set schedule_cron, else the YAML default
+        schedule = self._resolve_schedule(workflow_id, wf_def)
+        if schedule is not None:
+            job_settings.schedule = schedule
         
         if 'continuous' in wf_def and wf_def['continuous']:
             job_settings.continuous = jobs.Continuous(pause_status=jobs.PauseStatus.UNPAUSED)
@@ -315,6 +323,46 @@ class JobsManager:
                 )
         
         self._client.jobs.update(job_id=job_id, new_settings=job_settings)
+
+    def _resolve_schedule(self, workflow_id: str, wf_def: Dict[str, Any]) -> Optional[jobs.CronSchedule]:
+        """The job schedule: the saved ``schedule_cron`` (unpaused) if an admin set
+        one, otherwise the workflow YAML's ``schedule`` block, otherwise none."""
+        saved = self.get_workflow_configuration(workflow_id) or {}
+        cron = saved.get(SCHEDULE_CRON_KEY)
+        yaml_schedule = wf_def.get('schedule') if isinstance(wf_def.get('schedule'), dict) else None
+        if isinstance(cron, str) and cron.strip():
+            timezone = saved.get(SCHEDULE_TIMEZONE_KEY) or (yaml_schedule or {}).get('timezone_id') or 'UTC'
+            return jobs.CronSchedule(
+                quartz_cron_expression=validate_quartz_cron(cron),
+                timezone_id=str(timezone),
+                pause_status=jobs.PauseStatus.UNPAUSED,
+            )
+        if yaml_schedule:
+            return jobs.CronSchedule(
+                quartz_cron_expression=yaml_schedule.get('quartz_cron_expression'),
+                timezone_id=yaml_schedule.get('timezone_id', 'UTC'),
+                pause_status=jobs.PauseStatus(yaml_schedule.get('pause_status', 'UNPAUSED')),
+            )
+        return None
+
+    def apply_schedule(self, workflow_id: str) -> Optional[int]:
+        """Push the resolved schedule to the installed Databricks job (no-op if the
+        workflow isn't installed). Returns the job id that was updated."""
+        inst = workflow_installation_repo.get_by_workflow_id(self._db, workflow_id=workflow_id)
+        if not inst or not getattr(inst, 'job_id', None):
+            return None
+        job_id = int(inst.job_id)
+        wf_def = self._get_workflow_definition(workflow_id, job_cluster_id=None)
+        schedule = self._resolve_schedule(workflow_id, wf_def)
+        if schedule is not None:
+            self._client.jobs.update(job_id=job_id, new_settings=jobs.JobSettings(schedule=schedule))
+        else:
+            self._client.jobs.update(job_id=job_id, fields_to_remove=['schedule'])
+        logger.info(
+            f"Applied schedule to job {job_id} ({workflow_id}): "
+            f"{schedule.quartz_cron_expression if schedule else 'none'}"
+        )
+        return job_id
 
     def remove_workflow(self, job_id: int) -> None:
         self._client.jobs.delete(job_id=job_id)
@@ -445,14 +493,24 @@ class JobsManager:
             
         Returns:
             Updated configuration
+
+        Raises:
+            ValueError: ``schedule_cron`` isn't a Quartz cron expression.
         """
+        cron = (configuration or {}).get(SCHEDULE_CRON_KEY)
+        if isinstance(cron, str) and cron.strip():
+            configuration = {**configuration, SCHEDULE_CRON_KEY: validate_quartz_cron(cron)}
         db_obj = workflow_configuration_repo.upsert(
             self._db,
             workflow_id=workflow_id,
             configuration=configuration
         )
         self._db.commit()
-        
+
+        # A schedule change takes effect on the installed job right away.
+        if any(k in (configuration or {}) for k in _SCHEDULE_CONFIG_KEYS):
+            self.apply_schedule(workflow_id)
+
         # Return as Pydantic model
         config_dict = workflow_configuration_repo.get_configuration_dict(self._db, workflow_id=workflow_id)
         return WorkflowConfiguration(workflow_id=workflow_id, configuration=config_dict or {})
@@ -479,6 +537,8 @@ class JobsManager:
         if saved_config:
             # Convert all values to strings for job parameters
             for key, value in saved_config.items():
+                if key in _SCHEDULE_CONFIG_KEYS:
+                    continue  # applied to the job schedule, not a job parameter
                 if isinstance(value, (list, dict)):
                     # Serialize complex types to JSON
                     merged[key] = json.dumps(value)

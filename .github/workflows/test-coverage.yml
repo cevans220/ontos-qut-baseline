@@ -158,6 +158,7 @@ jobs:
             backend/src/tests/integration/test_search_engine_pg.py \
             backend/src/tests/integration/test_search_reconcile_pg.py \
             backend/src/tests/integration/test_search_bm25_pg.py \
+            backend/src/tests/integration/test_search_reindex_job_pg.py \
             --no-cov -rs -v
 
   frontend-tests:
