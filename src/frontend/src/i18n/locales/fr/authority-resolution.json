@@ -409,7 +409,7 @@
     },
     "params": {
       "label": "Paramètres (JSON)",
-      "hint": "Les valeurs de type chaîne sont des modèles Jinja appliqués à la requête, plus <code>ar.*</code>, p. ex. <code>{'{{ actor_identity }}'}</code>, <code>{'{{ ar.domain_context.market }}'}</code>.",
+      "hint": "Les valeurs de type chaîne sont des modèles Jinja appliqués à la requête, plus <code>ar.*</code>, p. ex. <code>{{exampleActor}}</code>, <code>{{exampleMarket}}</code>.",
       "errorInvalid": "JSON invalide.",
       "errorNotObject": "Les paramètres doivent être un objet JSON."
     },

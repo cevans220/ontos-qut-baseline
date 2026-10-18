@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -149,13 +149,13 @@ export default function McpRefEditor({ value, onChange }: Props) {
       <div className="space-y-1">
         <Label className="text-xs flex items-center gap-1.5">
           {t('mcp.params.label')}
-          <InfoHint>{t('mcp.params.hint')}</InfoHint>
+          <InfoHint><Trans i18nKey="mcp.params.hint" ns="authority-resolution" values={{ exampleActor: '{{ actor_identity }}', exampleMarket: '{{ ar.domain_context.market }}' }} shouldUnescape components={{ code: <code /> }} /></InfoHint>
         </Label>
         <Textarea value={paramsText} onChange={(e) => setParams(e.target.value)} rows={4} className="font-mono text-xs" />
         {paramsError && <p className="text-xs text-destructive">{paramsError}</p>}
       </div>
       <div className="space-y-1">
-        <Label className="text-xs flex items-center gap-1.5">{t('mcp.resultPointer.label')} <InfoHint>{t('mcp.resultPointer.hint')}</InfoHint></Label>
+        <Label className="text-xs flex items-center gap-1.5">{t('mcp.resultPointer.label')} <InfoHint><Trans i18nKey="mcp.resultPointer.hint" ns="authority-resolution" components={{ code: <code /> }} /></InfoHint></Label>
         <Input
           value={value.mcp_result_pointer || ''}
           onChange={(e) => onChange({ mcp_result_pointer: e.target.value || null })}

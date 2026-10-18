@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -136,8 +136,8 @@ export default function ScheduleSelect({ value, onChange }: Props) {
         {parsed.frequency === 'off'
           ? t('schedule.descriptions.off')
           : parsed.frequency === 'custom'
-            ? t('schedule.descriptions.custom', { cron: value })
-            : t('schedule.descriptions.scheduled', { cron: value })}
+            ? <Trans i18nKey="schedule.descriptions.custom" ns="authority-resolution" values={{ cron: value }} shouldUnescape components={{ code: <code /> }} />
+            : <Trans i18nKey="schedule.descriptions.scheduled" ns="authority-resolution" values={{ cron: value }} shouldUnescape components={{ code: <code /> }} />}
       </p>
     </div>
   );

@@ -409,7 +409,7 @@
     },
     "params": {
       "label": "Params (JSON)",
-      "hint": "Stringwaarden zijn Jinja-templates over het verzoek plus <code>ar.*</code>, bijv. <code>{'{{ actor_identity }}'}</code>, <code>{'{{ ar.domain_context.market }}'}</code>.",
+      "hint": "Stringwaarden zijn Jinja-templates over het verzoek plus <code>ar.*</code>, bijv. <code>{{exampleActor}}</code>, <code>{{exampleMarket}}</code>.",
       "errorInvalid": "Ongeldige JSON.",
       "errorNotObject": "Params moeten een JSON-object zijn."
     },

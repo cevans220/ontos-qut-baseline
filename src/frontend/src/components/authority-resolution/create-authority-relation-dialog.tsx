@@ -68,7 +68,8 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
   const [businessRoles, setBusinessRoles] = useState<BusinessRoleRead[]>([]);
   const [rolesLoading, setRolesLoading] = useState(false);
   const [slugsLoading, setSlugsLoading] = useState(false);
-  const [candidatesLoading, setCandidatesLoading] = useState(false);
+  // Keyed like refCandidates so one row's fetch doesn't skeleton the others.
+  const [candidatesLoading, setCandidatesLoading] = useState<Record<string, boolean>>({});
 
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
@@ -320,7 +321,7 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
       : await post<AuthorityRelation>('/api/authority/relations', payload);
     setSaving(false);
     if (error) {
-      toast({ title: isEdit ? t('common:actions.save') : t('common:actions.create'), description: error, variant: 'destructive' });
+      toast({ title: t('common:toast.failed'), description: error, variant: 'destructive' });
       return;
     }
     if (!isEdit) reset();
@@ -666,7 +667,7 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
                 )}
                 {r.ref_type === 'ontos_entity' && (
                   <div className="grid grid-cols-[auto_1fr] gap-2 items-center">
-                    {candidatesLoading && r.entity_type ? (
+                    {candidatesLoading[candidateKey] ? (
                       <Skeleton className="h-9 w-full" />
                     ) : (
                       <NativeSelect
@@ -680,17 +681,18 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
                             ),
                           );
                           if (entity_type) {
-                            setCandidatesLoading(true);
-                            const { data } = await get<EntityRefCandidate[]>(
-                              `/api/authority/entity-ref-candidates?entity_type=${entity_type}&limit=100`,
-                            );
-                            if (Array.isArray(data)) {
-                              setRefCandidates((prev) => ({
-                                ...prev,
-                                [`${entity_type}::${idx}`]: data,
-                              }));
+                            const key = `${entity_type}::${idx}`;
+                            setCandidatesLoading((prev) => ({ ...prev, [key]: true }));
+                            try {
+                              const { data } = await get<EntityRefCandidate[]>(
+                                `/api/authority/entity-ref-candidates?entity_type=${entity_type}&limit=100`,
+                              );
+                              if (Array.isArray(data)) {
+                                setRefCandidates((prev) => ({ ...prev, [key]: data }));
+                              }
+                            } finally {
+                              setCandidatesLoading((prev) => ({ ...prev, [key]: false }));
                             }
-                            setCandidatesLoading(false);
                           }
                         }}
                       >
@@ -700,7 +702,7 @@ export default function CreateAuthorityRelationDialog({ open, onOpenChange, onCr
                         <option value="data_domain">{t('editor.resourceRefs.entityType.dataDomain')}</option>
                       </NativeSelect>
                     )}
-                    {candidatesLoading ? (
+                    {candidatesLoading[candidateKey] ? (
                       <Skeleton className="h-9 w-full" />
                     ) : (
                       <NativeSelect

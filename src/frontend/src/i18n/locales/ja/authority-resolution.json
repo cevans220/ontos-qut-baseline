@@ -409,7 +409,7 @@
     },
     "params": {
       "label": "パラメータ（JSON）",
-      "hint": "文字列値は、リクエストと <code>ar.*</code> に対する Jinja テンプレートです。例: <code>{'{{ actor_identity }}'}</code>、<code>{'{{ ar.domain_context.market }}'}</code>。",
+      "hint": "文字列値は、リクエストと <code>ar.*</code> に対する Jinja テンプレートです。例: <code>{{exampleActor}}</code>、<code>{{exampleMarket}}</code>。",
       "errorInvalid": "JSON が無効です。",
       "errorNotObject": "パラメータは JSON オブジェクトである必要があります。"
     },

@@ -409,7 +409,7 @@
     },
     "params": {
       "label": "Params (JSON)",
-      "hint": "String values are Jinja templates over the request plus <code>ar.*</code>, e.g. <code>{'{{ actor_identity }}'}</code>, <code>{'{{ ar.domain_context.market }}'}</code>.",
+      "hint": "String values are Jinja templates over the request plus <code>ar.*</code>, e.g. <code>{{exampleActor}}</code>, <code>{{exampleMarket}}</code>.",
       "errorInvalid": "Invalid JSON.",
       "errorNotObject": "Params must be a JSON object."
     },

@@ -54,10 +54,10 @@ const getPREDICATE_DEFAULTS = (t: (key: string, options?: any) => string): Recor
   action_match: { field: 'action', direction: 'neutral', name: t('criteria.predicateDefaults.actionMatchName'), fail: t('criteria.predicateDefaults.actionMatchFailure') },
 });
 
-export const emptyCriterionRow = (): CriterionRow => ({
+export const emptyCriterionRow = (t: (key: string, options?: any) => string): CriterionRow => ({
   mode: 'builder', predicate: 'allowlist', field: 'actor_identity', values: '', max: '0.15',
   allowEscalation: true, rawRule: '', policyId: '',
-  name: '', failureMessage: '',
+  name: getPREDICATE_DEFAULTS(t).allowlist.name, failureMessage: getPREDICATE_DEFAULTS(t).allowlist.fail,
   direction: 'actual-exceeds-documented', weight: '1.0', dimension: 'people',
 });
 
@@ -287,7 +287,7 @@ export default function CriteriaBuilder({ rows, onChange }: Props) {
         </div>
       ))}
 
-      <Button variant="outline" size="sm" onClick={() => onChange([...rows, emptyCriterionRow()])}>
+      <Button variant="outline" size="sm" onClick={() => onChange([...rows, emptyCriterionRow(t)])}>
         <Plus className="h-4 w-4 mr-1" /> {t('criteria.buttons.addCriterion')}
       </Button>
     </div>

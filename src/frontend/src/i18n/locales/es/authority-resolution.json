@@ -409,7 +409,7 @@
     },
     "params": {
       "label": "Parámetros (JSON)",
-      "hint": "Los valores de cadena son plantillas Jinja sobre la solicitud más <code>ar.*</code>, p. ej. <code>{'{{ actor_identity }}'}</code>, <code>{'{{ ar.domain_context.market }}'}</code>.",
+      "hint": "Los valores de cadena son plantillas Jinja sobre la solicitud más <code>ar.*</code>, p. ej. <code>{{exampleActor}}</code>, <code>{{exampleMarket}}</code>.",
       "errorInvalid": "JSON no válido.",
       "errorNotObject": "Los parámetros deben ser un objeto JSON."
     },

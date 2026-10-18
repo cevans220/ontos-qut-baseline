@@ -409,7 +409,7 @@
     },
     "params": {
       "label": "Parameter (JSON)",
-      "hint": "Zeichenkettenwerte sind Jinja-Templates über die Anfrage plus <code>ar.*</code>, z. B. <code>{'{{ actor_identity }}'}</code>, <code>{'{{ ar.domain_context.market }}'}</code>.",
+      "hint": "Zeichenkettenwerte sind Jinja-Templates über die Anfrage plus <code>ar.*</code>, z. B. <code>{{exampleActor}}</code>, <code>{{exampleMarket}}</code>.",
       "errorInvalid": "Ungültiges JSON.",
       "errorNotObject": "Parameter müssen ein JSON-Objekt sein."
     },
