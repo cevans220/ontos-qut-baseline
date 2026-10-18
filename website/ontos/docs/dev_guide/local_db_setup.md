@@ -102,10 +102,10 @@ To roll back, set `SEARCH_BACKEND=memory` and restart: the in-memory index is re
 
 - **`pg_trgm`** (typo-tolerant fallback when a query has no matches) ships with Postgres. It's a trusted extension, so the app creates it itself when the app user has `CREATE` on the database, which the grants above include.
 - **`pgvector`** (vector search, coming in a later release) needs a separate install: `brew install pgvector`.
-- **Lakebase Search** (`lakebase` engine only): the app creates `lakebase_text` and `lakebase_vector` (with `CASCADE`, which pulls in `vector`) once Lakebase Search is enabled on the project. It then builds one `lakebase_bm25` index per field (title, description, tags/domains/owner). BM25 corpus statistics only update on a rebuild or `VACUUM`, so they can lag behind the rows:
+- **Lakebase Search** (`lakebase` engine only): the app creates `lakebase_text` and `lakebase_vector` (with `CASCADE`, which pulls in `vector`) once Lakebase Search is enabled on the project. It then builds one `lakebase_bm25` index per field (title, description, tags/domains/owner). Keyword results still come from the Settings-driven ranking; BM25 is an extra ranked list that hybrid fusion will combine with it. BM25 corpus statistics only update on a rebuild or `VACUUM`, so they can lag behind the rows:
   - A startup reconcile rebuilds the indexes when it added or removed documents.
   - Autovacuum refreshes them after enough writes. The table is set to vacuum after a fixed number of inserts, as Lakebase recommends for text search.
-  - Edits between those points leave the statistics slightly stale. New and edited rows are still found; only their relative BM25 scores drift. Keyword results still come from the Settings-driven ranking; BM25 is an extra ranked list that hybrid fusion will combine with it.
+  - Edits between those points leave the statistics slightly stale. New and edited rows are still found; only their relative BM25 scores drift.
 
 To run the Postgres search tests against your local server:
 
