@@ -137,6 +137,13 @@ class Settings(BaseSettings):
     SEARCH_BACKFILL_WAIT_SECONDS: float = Field(30.0, env='SEARCH_BACKFILL_WAIT_SECONDS')
     # Rows per upsert transaction during the reconcile.
     SEARCH_BACKFILL_BATCH_SIZE: int = Field(500, env='SEARCH_BACKFILL_BATCH_SIZE')
+    # Semantic search (#1060): Databricks embedding serving endpoint. Unset = no
+    # embeddings (lexical-only search); needs pgvector (or lakebase_vector).
+    SEARCH_EMBEDDING_ENDPOINT: Optional[str] = Field(None, env='SEARCH_EMBEDDING_ENDPOINT')
+    # Must match the endpoint's output size (databricks-gte-large-en = 1024).
+    SEARCH_EMBEDDING_DIM: int = Field(1024, env='SEARCH_EMBEDDING_DIM')
+    # Documents per embedding request in the background worker.
+    SEARCH_EMBEDDING_BATCH_SIZE: int = Field(32, env='SEARCH_EMBEDDING_BATCH_SIZE')
 
     # SQLAlchemy Echo Flag (controls SQL query logging)
     DB_ECHO: bool = Field(False, env='APP_DB_ECHO')

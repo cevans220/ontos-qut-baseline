@@ -79,7 +79,7 @@ def upsert_documents(db: Session, items: Iterable[SearchIndexItem], *, count_ins
         f"""
         INSERT INTO search_documents ({cols}, updated_at)
         SELECT u.id, u.entity_id, u.type, u.feature_id, u.title, u.description, u.aux_text,
-               CAST(u.tags AS jsonb), CAST(u.extra_data AS jsonb), u.link, now()
+               CAST(u.tags AS jsonb), CAST(u.extra_data AS jsonb), u.link, clock_timestamp()
         FROM unnest(
             CAST(:id AS text[]), CAST(:entity_id AS text[]), CAST(:type AS text[]),
             CAST(:feature_id AS text[]), CAST(:title AS text[]), CAST(:description AS text[]),
@@ -88,7 +88,10 @@ def upsert_documents(db: Session, items: Iterable[SearchIndexItem], *, count_ins
         ) AS u({cols})
         ON CONFLICT (id) DO UPDATE SET
             {", ".join(f"{c} = EXCLUDED.{c}" for c in _CONTENT_COLS)},
-            updated_at = now()
+            -- clock_timestamp (not the transaction start): an update that waited
+            -- on the embedding worker's row lock must still read as newer than
+            -- the embedding stored meanwhile, or it would never be re-embedded.
+            updated_at = clock_timestamp()
         WHERE ({", ".join(f"search_documents.{c}" for c in _CONTENT_COLS)})
               IS DISTINCT FROM ({", ".join(f"EXCLUDED.{c}" for c in _CONTENT_COLS)})
         RETURNING (xmax = 0) AS inserted
@@ -553,6 +556,79 @@ def bm25_rank(
             {"s": ext_schema},
         )
     return [(r._mapping["id"], float(r._mapping["score"])) for r in db.execute(text(sql), params)]
+
+
+# --- embeddings (#1060) ------------------------------------------------------
+
+def claim_pending_embeddings(db: Session, limit: int) -> List[Dict[str, Any]]:
+    """Rows whose embedding is missing or older than their content
+    (``embedded_at`` null or before ``updated_at``), oldest first. ``FOR UPDATE
+    SKIP LOCKED`` keeps replicas' workers from claiming the same rows; the lock
+    lasts until the caller's transaction ends (store/touch in the same session)."""
+    rows = db.execute(text(
+        "SELECT id, title, description, aux_text, embedding_hash FROM search_documents "
+        "WHERE embedded_at IS NULL OR embedded_at < updated_at "
+        "ORDER BY updated_at, id LIMIT :lim FOR UPDATE SKIP LOCKED"
+    ), {"lim": max(1, int(limit))})
+    return [dict(r._mapping) for r in rows]
+
+
+def store_embeddings(db: Session, rows: Iterable[tuple[str, Optional[List[float]], str]],
+                     engine: SearchEngine) -> int:
+    """Write ``(id, vector, text_hash)``. ``vector=None`` marks the row current
+    without touching the stored vector (content unchanged, hash matched)."""
+    n = 0
+    vec_type = engine.vec("vector")
+    for doc_id, vec, h in rows:
+        if vec is None:
+            db.execute(text(
+                "UPDATE search_documents SET embedded_at = clock_timestamp(), embedding_hash = :h WHERE id = :id"
+            ), {"id": doc_id, "h": h})
+        else:
+            db.execute(text(
+                f"UPDATE search_documents SET embedding = CAST(:v AS {vec_type}), embedding_hash = :h, "
+                "embedded_at = clock_timestamp() WHERE id = :id"
+            ), {"id": doc_id, "h": h, "v": "[" + ",".join(repr(float(x)) for x in vec) + "]"})
+        n += 1
+    return n
+
+
+def count_pending_embeddings(db: Session) -> int:
+    return int(db.execute(text(
+        "SELECT count(*) FROM search_documents WHERE embedded_at IS NULL OR embedded_at < updated_at"
+    )).scalar() or 0)
+
+
+def vector_rank(
+    db: Session,
+    query_vector: List[float],
+    *,
+    config: Optional[SearchConfig] = None,
+    engine: Optional[SearchEngine] = None,
+    type_filter: Optional[str] = None,
+    filters: Optional[Dict[str, Optional[str]]] = None,
+    allowed_features: Optional[Iterable[str]] = None,
+    limit: int = 100,
+) -> List[tuple[str, float]]:
+    """Semantic ranked list ``[(id, cosine similarity)]``, best first, over rows
+    that have an embedding. Uses the engine's ANN index (HNSW / lakebase_ann)
+    via ``ORDER BY embedding <=> :q LIMIT``; same filters, permissions and
+    disabled types as keyword search. A signal for hybrid fusion (#1061)."""
+    if engine is None or not engine.embedding_dim or not query_vector:
+        return []
+    config = config or _default_config()
+    limit = max(1, min(limit, 1000))
+    disabled, dparams = search_scoring_sql.disabled_where_only(config)
+    where, params = _where(type_filter, filters, allowed_features, disabled)
+    cond = "embedding IS NOT NULL"
+    where = f"{where} AND {cond}" if where else f" WHERE {cond}"
+    dist = f"embedding {engine.vec_op('<=>')} CAST(:qvec AS {engine.vec('vector')})"
+    params = {
+        **params, **dparams, "vr_limit": limit,
+        "qvec": "[" + ",".join(repr(float(x)) for x in query_vector) + "]",
+    }
+    sql = f"SELECT id, 1 - ({dist}) AS sim FROM search_documents{where} ORDER BY {dist} LIMIT :vr_limit"
+    return [(r._mapping["id"], float(r._mapping["sim"])) for r in db.execute(text(sql), params)]
 
 
 def replace_all(db: Session, items: Iterable[SearchIndexItem]) -> int:

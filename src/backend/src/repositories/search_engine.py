@@ -30,10 +30,13 @@ logger = get_logger(__name__)
 
 LAKEBASE_EXTENSIONS = frozenset({"lakebase_text", "lakebase_vector"})
 # Portable extensions the engines use; created if available and permitted.
-PORTABLE_EXTENSIONS = ("pg_trgm",)
+PORTABLE_EXTENSIONS = ("pg_trgm", "vector")
 VALID_ENGINES = ("auto", "pg", "lakebase")
 
 TITLE_TRGM_INDEX = "ix_search_documents_title_trgm"
+# Embedding ANN index (#1060): HNSW (pgvector) on pg, lakebase_ann on lakebase.
+# Separate names, so switching engine replaces one with the other.
+EMBEDDING_INDEXES = {"hnsw": "ix_search_documents_embedding_hnsw", "lakebase_ann": "ix_search_documents_embedding_ann"}
 # lakebase engine: one lakebase_bm25 index per field tsvector (#1059).
 BM25_INDEXES = {
     col: f"ix_search_documents_{col}_bm25" for col in ("title_tsv", "description_tsv", "aux_tsv")
@@ -53,6 +56,8 @@ class SearchEngine:
     name: str                          # "pg" | "lakebase"
     installed: frozenset[str]          # extensions installed in the database
     ext_schemas: Mapping[str, str] = field(default_factory=dict)  # extension -> schema
+    # Size of the embedding column once ensured (0 = no vector column, semantic off).
+    embedding_dim: int = 0
 
     @property
     def has_trgm(self) -> bool:
@@ -67,6 +72,24 @@ class SearchEngine:
 
     def trgm_op(self, op: str) -> str:
         schema = self.ext_schemas.get("pg_trgm")
+        return f"OPERATOR({_qident(schema)}.{op})" if schema else op
+
+    @property
+    def has_vector(self) -> bool:
+        return "vector" in self.installed
+
+    @property
+    def vector_index_method(self) -> str:
+        """lakebase_ann (storage-backed, survives scale-to-zero) where Lakebase
+        Search is on, pgvector HNSW everywhere else."""
+        return "lakebase_ann" if self.name == "lakebase" and "lakebase_vector" in self.installed else "hnsw"
+
+    def vec(self, obj: str) -> str:
+        schema = self.ext_schemas.get("vector")
+        return f"{_qident(schema)}.{obj}" if schema else obj
+
+    def vec_op(self, op: str = "<=>") -> str:
+        schema = self.ext_schemas.get("vector")
         return f"OPERATOR({_qident(schema)}.{op})" if schema else op
 
     @property
@@ -118,7 +141,7 @@ def _available(db) -> frozenset[str]:
     return frozenset(r[0] for r in db.execute(text("SELECT name FROM pg_available_extensions")))
 
 
-def prepare_engine(session_factory: Callable, requested: str) -> SearchEngine:
+def prepare_engine(session_factory: Callable, requested: str, *, embedding_dim: int = 0) -> SearchEngine:
     """Create usable portable extensions, pick the engine, ensure its indexes.
 
     Idempotent; safe on every startup and across replicas. Missing privileges or
@@ -142,6 +165,11 @@ def prepare_engine(session_factory: Callable, requested: str) -> SearchEngine:
         installed = _installed(db)
 
     engine = choose_engine(requested, installed.keys(), installed)
+    if embedding_dim and engine.has_vector and ensure_embedding_columns(session_factory, engine, embedding_dim):
+        from dataclasses import replace
+        engine = replace(engine, embedding_dim=embedding_dim)
+    elif embedding_dim:
+        logger.info("pgvector not available: semantic search is off (lexical only).")
     ensure_search_indexes(session_factory, engine)
     logger.info(
         "Search engine: %s (requested=%s; pg_trgm=%s; lakebase_text=%s; lakebase_vector=%s)",
@@ -151,6 +179,37 @@ def prepare_engine(session_factory: Callable, requested: str) -> SearchEngine:
     if not engine.has_trgm:
         logger.info("pg_trgm not available: the typo-tolerant search fallback is off.")
     return engine
+
+
+def ensure_embedding_columns(session_factory: Callable, engine: SearchEngine, dim: int) -> bool:
+    """Add the embedding columns (needs pgvector, so not in Alembic). Returns
+    True when the column exists with ``dim`` dimensions."""
+    _try_ddl(
+        session_factory,
+        "ALTER TABLE search_documents "
+        f"ADD COLUMN IF NOT EXISTS embedding {engine.vec('vector')}({int(dim)}), "
+        "ADD COLUMN IF NOT EXISTS embedding_hash text, "
+        "ADD COLUMN IF NOT EXISTS embedded_at timestamptz",
+        "embedding columns on search_documents",
+    )
+    try:
+        with session_factory() as db:
+            actual = db.execute(text(
+                "SELECT atttypmod FROM pg_attribute "
+                "WHERE attrelid = 'search_documents'::regclass AND attname = 'embedding' AND NOT attisdropped"
+            )).scalar()
+    except Exception as e:  # pragma: no cover - environment dependent
+        logger.warning(f"Could not inspect search_documents.embedding: {e}")
+        return False
+    if actual is None:
+        return False
+    if int(actual) != int(dim):
+        logger.error(
+            f"search_documents.embedding has {actual} dimensions but SEARCH_EMBEDDING_DIM is {dim}; "
+            "semantic search is off until they match (drop the column to re-embed with the new model)."
+        )
+        return False
+    return True
 
 
 def ensure_search_indexes(session_factory: Callable, engine: SearchEngine) -> None:
@@ -169,6 +228,22 @@ def ensure_search_indexes(session_factory: Callable, engine: SearchEngine) -> No
                 session_factory, name,
                 f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name} ON search_documents USING lakebase_bm25 ({col})",
             )
+    if engine.embedding_dim:
+        method = engine.vector_index_method
+        name = EMBEDDING_INDEXES[method]
+        _create_index_concurrently(
+            session_factory, name,
+            f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name} ON search_documents "
+            f"USING {method} (embedding {engine.vec('vector_cosine_ops')})",
+        )
+        for other_method, other in EMBEDDING_INDEXES.items():
+            if other_method != method:
+                try:
+                    with _autocommit(session_factory) as conn:
+                        conn.execute(text(f"DROP INDEX CONCURRENTLY IF EXISTS {other}"))
+                except Exception as e:  # pragma: no cover - environment dependent
+                    logger.warning(f"Could not drop {other}: {e}")
+    if engine.has_bm25:
         # Lakebase guidance for text-search tables: VACUUM (which refreshes BM25
         # statistics) should follow inserts at a fixed threshold, not a growing one.
         _try_ddl(

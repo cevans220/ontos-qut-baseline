@@ -101,11 +101,19 @@ To roll back, set `SEARCH_BACKEND=memory` and restart: the in-memory index is re
   - Install, update and every configuration change set the job's parameter defaults to the app's database connection and the saved configuration. Scheduled runs, which only get those defaults, therefore reach the right database and schema.
 
 - **`pg_trgm`** (typo-tolerant fallback when a query has no matches) ships with Postgres. It's a trusted extension, so the app creates it itself when the app user has `CREATE` on the database, which the grants above include.
-- **`pgvector`** (vector search, coming in a later release) needs a separate install: `brew install pgvector`.
+- **`pgvector`** (semantic search on the `pg` engine) needs a separate install: `brew install pgvector`.
 - **Lakebase Search** (`lakebase` engine only): the app creates `lakebase_text` and `lakebase_vector` (with `CASCADE`, which pulls in `vector`) once Lakebase Search is enabled on the project. It then builds one `lakebase_bm25` index per field (title, description, tags/domains/owner). Keyword results still come from the Settings-driven ranking; BM25 is an extra ranked list that hybrid fusion will combine with it. BM25 corpus statistics only update on a rebuild or `VACUUM`, so they can lag behind the rows:
   - A startup reconcile rebuilds the indexes when it added or removed documents.
   - Autovacuum refreshes them after enough writes. The table is set to vacuum after a fixed number of inserts, as Lakebase recommends for text search.
   - Edits between those points leave the statistics slightly stale. New and edited rows are still found; only their relative BM25 scores drift.
+
+**Semantic search** (embeddings) is off until `SEARCH_EMBEDDING_ENDPOINT` names a Databricks embedding serving endpoint, for example `databricks-gte-large-en`. It also needs a vector index: `lakebase_ann` on the `lakebase` engine, or pgvector HNSW on the `pg` engine.
+  - **Settings:** `SEARCH_EMBEDDING_DIM` must match the endpoint's output size (1024 for `databricks-gte-large-en`). `SEARCH_EMBEDDING_BATCH_SIZE` sets the documents per request (default 32).
+  - **Permission:** a deployed app's service principal needs `CAN_QUERY` on the endpoint. Add the endpoint as an app resource.
+  - **Background embedding:** documents are embedded off the request path. Writes only mark a row as changed, and a background worker embeds rows whose text changed. A row whose text hash is unchanged is just marked current, with no endpoint call. Backfill of an existing catalog is the same loop, so it resumes after a restart. Replicas share the work.
+  - **Failures:** endpoint errors leave rows pending and back off. Search keeps answering lexically meanwhile.
+  - **Changing the embedding size:** a database whose vector column has a different size turns semantic search off, with a warning, instead of mixing sizes.
+  - **Ranking:** like BM25, the semantic ranking is an extra ranked list for hybrid fusion. It doesn't change keyword results yet.
 
 To run the Postgres search tests against your local server:
 
@@ -122,4 +130,11 @@ The `lakebase` engine tests also need a Lakebase branch with Lakebase Search ena
 ```bash
 SEARCH_TEST_LAKEBASE_URL="postgresql+psycopg2://<user>:<token>@<endpoint-host>/databricks_postgres?sslmode=require" \
   hatch -e dev run pytest backend/src/tests/integration/test_search_bm25_pg.py backend/src/tests/integration/test_search_engine_pg.py
+```
+
+The semantic-search tests use a deterministic fake embedder and need pgvector (or the Lakebase URL above). To also check the real endpoint, set `SEARCH_TEST_EMBEDDING_PROFILE` to a Databricks CLI profile; `SEARCH_TEST_EMBEDDING_ENDPOINT` defaults to `databricks-gte-large-en`:
+
+```bash
+SEARCH_TEST_PG_URL=... SEARCH_TEST_EMBEDDING_PROFILE=<profile> \
+  hatch -e dev run pytest backend/src/tests/integration/test_search_embeddings_pg.py
 ```

@@ -100,6 +100,8 @@ class PostgresBackend(SearchBackend):
         config_provider: Optional[Callable[[], Any]] = None,
         engine_name: str = "auto",
         trgm_threshold: float = 0.45,
+        embedder: Any = None,
+        embedding_batch_size: int = 32,
     ):
         # session_factory() -> context manager yielding a Session (get_db_session).
         # config_provider() -> the current SearchConfig (hot-reloaded per call), so
@@ -109,12 +111,18 @@ class PostgresBackend(SearchBackend):
         self._engine_name = engine_name
         self._trgm_threshold = trgm_threshold
         self.engine = None  # SearchEngine, set by prepare()
+        # Semantic search (#1060): only with an embedder AND a vector column.
+        self._embedder = embedder
+        self._embedding_batch_size = embedding_batch_size
+        self.embedding_worker = None
+        self._query_vectors = None
         self._prepared = False
 
     # Engine detection + index DDL runs once per process and database: startup
     # builds more than one SearchManager, and each needs the same engine.
     _prepare_lock = threading.Lock()
-    _prepared_engines: Dict[Tuple[Callable, str], Any] = {}
+    _prepared_engines: Dict[Tuple[Callable, str, int], Any] = {}
+    _embedding_workers: Dict[Callable, Any] = {}
 
     def prepare(self) -> None:
         """Detect the engine from installed extensions and ensure its indexes.
@@ -126,21 +134,67 @@ class PostgresBackend(SearchBackend):
         logged warning.
         """
         from src.repositories.search_engine import SearchEngineUnavailable, prepare_engine
-        key = (self._session_factory, self._engine_name)
+        dim = int(getattr(self._embedder, "dim", 0) or 0)
+        key = (self._session_factory, self._engine_name, dim)
         with PostgresBackend._prepare_lock:
             if key in PostgresBackend._prepared_engines:
                 self.engine = PostgresBackend._prepared_engines[key]
-                self._prepared = True
-                return
-            try:
-                self.engine = prepare_engine(self._session_factory, self._engine_name)
-            except SearchEngineUnavailable:
-                raise
-            except Exception as e:
-                logger.warning(f"Search engine detection failed; continuing without engine extras: {e}")
-                self.engine = None
-            PostgresBackend._prepared_engines[key] = self.engine
+            else:
+                try:
+                    self.engine = prepare_engine(self._session_factory, self._engine_name, embedding_dim=dim)
+                except SearchEngineUnavailable:
+                    raise
+                except Exception as e:
+                    logger.warning(f"Search engine detection failed; continuing without engine extras: {e}")
+                    self.engine = None
+                PostgresBackend._prepared_engines[key] = self.engine
             self._prepared = True
+        if self._embedder is not None and self.engine is not None and self.engine.embedding_dim:
+            self.start_embeddings()
+
+    def start_embeddings(self) -> None:
+        """Start the background embedding worker and the query-embedding cache."""
+        from src.common.search_embeddings import QueryEmbeddingCache
+        from src.controller.search_embedding_worker import EmbeddingWorker
+        self._query_vectors = QueryEmbeddingCache(self._embedder)
+        # One worker per process and database (startup builds more than one
+        # SearchManager); replicas share the work via SKIP LOCKED.
+        with PostgresBackend._prepare_lock:
+            worker = PostgresBackend._embedding_workers.get(self._session_factory)
+            if worker is None:
+                worker = EmbeddingWorker(
+                    self._session_factory, self.engine, self._embedder, batch_size=self._embedding_batch_size,
+                )
+                PostgresBackend._embedding_workers[self._session_factory] = worker
+        self.embedding_worker = worker
+        worker.start()
+        logger.info(
+            f"Semantic search on ({self.engine.vector_index_method}, {self.engine.embedding_dim} dims, "
+            f"endpoint {getattr(self._embedder, 'endpoint', '?')})."
+        )
+
+    @property
+    def semantic_enabled(self) -> bool:
+        return self._query_vectors is not None
+
+    def vector_rank(self, query, *, type_filter=None, filters=None, allowed_features=None,
+                    limit=100) -> List[Tuple[str, float]]:
+        """Semantic ranked list (``[]`` when semantic search is off or fails); input
+        for hybrid fusion (#1061). The query is embedded once and cached briefly."""
+        from src.controller.search_scoring import is_list_query, tokenize
+        from src.repositories import search_repository
+        if self._query_vectors is None or is_list_query(query) or not tokenize(query or ""):
+            return []
+        try:
+            qvec = self._query_vectors.get(query)
+            with self._session_factory() as db:
+                return search_repository.vector_rank(
+                    db, qvec, config=self._config(), engine=self.engine, type_filter=type_filter,
+                    filters=filters, allowed_features=allowed_features, limit=limit,
+                )
+        except Exception as e:
+            logger.warning(f"Semantic ranking unavailable: {e}")
+            return []
 
     def _config(self):
         return self._config_provider() if self._config_provider else None
@@ -216,6 +270,9 @@ class PostgresBackend(SearchBackend):
                 search_repository.upsert_documents(db, rows)
         except Exception as e:  # best-effort incremental sync; periodic reindex is the backstop
             logger.warning(f"PostgresBackend.upsert failed for {len(rows)} item(s): {e}")
+            return
+        if self.embedding_worker is not None:
+            self.embedding_worker.notify()
 
     def remove(self, item_id: str) -> None:
         from src.repositories import search_repository
@@ -244,6 +301,9 @@ class PostgresBackend(SearchBackend):
             self._replace_type(type_, rows)
         except Exception as e:
             logger.warning(f"PostgresBackend.replace_type failed for {type_}: {e}")
+            return
+        if self.embedding_worker is not None:
+            self.embedding_worker.notify()
 
     def _replace_type(self, type_: str, rows: List[SearchIndexItem]) -> None:
         from src.repositories import search_repository
@@ -301,6 +361,8 @@ class PostgresBackend(SearchBackend):
                     stats["bm25_refresh"] = self.refresh_bm25_statistics()
                 except Exception as e:
                     logger.warning(f"Search reconcile: BM25 refresh failed: {e}")
+        if self.embedding_worker is not None:
+            self.embedding_worker.notify()  # embed what the reconcile added or changed
         stats["seconds"] = round(time.monotonic() - started, 2)
         logger.info(
             f"Search reconcile {stats['status']}: {stats['upserted']} upserted, "
@@ -365,10 +427,20 @@ def create_backend(
     """Factory: 'postgres' -> PostgresBackend, anything else -> InMemoryBackend."""
     if (backend_name or "memory").lower() == "postgres":
         from src.common.database import get_db_session
+        from src.common.search_embeddings import create_embedder
         logger.info("SearchManager using PostgresBackend (DB-backed, Settings-driven ranking).")
+        embedder, batch_size = None, 32
+        try:
+            from src.common.config import get_settings
+            settings = get_settings()
+            embedder = create_embedder(settings)
+            batch_size = int(getattr(settings, "SEARCH_EMBEDDING_BATCH_SIZE", 32))
+        except Exception as e:
+            logger.warning(f"Semantic search disabled (no embedder): {e}")
         return PostgresBackend(
             get_db_session, config_provider=lambda: manager.config,
             engine_name=engine_name, trgm_threshold=trgm_threshold,
+            embedder=embedder, embedding_batch_size=batch_size,
         )
     logger.info("SearchManager using InMemoryBackend (in-process index).")
     return InMemoryBackend(manager)
