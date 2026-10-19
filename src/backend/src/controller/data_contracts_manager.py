@@ -2176,6 +2176,20 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
                 )
                 db.add(auth_def_db)
     
+    @staticmethod
+    def _servers_payload(contract_data, data_dict: dict) -> Optional[List[dict]]:
+        """The servers of an update in the ODCS form `_create_servers` reads
+        (`schema`, not the model's `database_schema`), or None when the update
+        doesn't carry any. `servers` and the older `serverConfigs` are both read."""
+        for key in ('servers', 'serverConfigs'):
+            models = getattr(contract_data, key, None)
+            if models is not None:
+                return [m.model_dump(by_alias=True, exclude_none=True) if hasattr(m, 'model_dump') else dict(m)
+                        for m in models]
+            if isinstance(contract_data, dict) and data_dict.get(key) is not None:
+                return [dict(s) for s in data_dict[key]]
+        return None
+
     def _create_servers(self, db, contract_id: str, servers_data: List[dict]):
         """Create servers and server properties from ODCS servers array."""
         from src.db_models.data_contracts import DataContractServerPropertyDb
@@ -2735,6 +2749,32 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
                     logger.error(f"Failed to update tags for contract {contract_id}: {e}")
                     # Don't fail the entire update if tags fail
             
+            # Servers (the contract page sends the whole list): replace them,
+            # keeping the ODCS id of a server the payload names without one
+            servers_data = self._servers_payload(contract_data, data_dict)
+            if servers_data is not None:
+                stable_ids = {s.server: s.stable_id for s in updated.servers if s.server and s.stable_id}
+                updated.servers.clear()
+                db.flush()
+                for server in servers_data:
+                    if not server.get('id') and server.get('server') in stable_ids:
+                        server['id'] = stable_ids[server['server']]
+                self._create_servers(db, contract_id, servers_data)
+
+            # SLA: ODCS slaProperties replace all of them; the SLA form's four
+            # values are SLA properties of their own (see utils/contract_sla.py)
+            if data_dict.get('slaProperties') is not None:
+                from src.db_models.data_contracts import DataContractSlaPropertyDb
+                db.query(DataContractSlaPropertyDb).filter(
+                    DataContractSlaPropertyDb.contract_id == contract_id
+                ).delete(synchronize_session=False)
+                self._create_sla_properties(db, contract_id, data_dict['slaProperties'])
+            if 'sla' in data_dict:
+                from src.utils.contract_sla import apply_legacy_sla
+                apply_legacy_sla(db, contract_id, data_dict['sla'])
+            if 'slaDefaultElement' in data_dict:
+                updated.sla_default_element = data_dict['slaDefaultElement']
+
             # Handle custom properties if provided
             if data_dict.get('customProperties') is not None:
                 from src.db_models.data_contracts import DataContractCustomPropertyDb
@@ -6921,13 +6961,17 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
             for cp in db_contract.custom_properties:
                 custom_properties[cp.property] = cp.value
         
-        # SLA properties (flatten basic key/value)
-        sla = None
-        if getattr(db_contract, 'sla_properties', None):
-            sla = {}
-            for sp in db_contract.sla_properties:
-                if sp.property and sp.value is not None:
-                    sla[sp.property] = sp.value
+        # The SLA form's four values, kept as SLA properties
+        from src.utils.contract_sla import legacy_sla_from_rows
+        sla = legacy_sla_from_rows(getattr(db_contract, 'sla_properties', None))
+        sla_properties = [
+            {k: v for k, v in {
+                'property': sp.property, 'value': sp.value, 'unit': sp.unit,
+                'element': sp.element, 'driver': sp.driver,
+            }.items() if v is not None}
+            for sp in (getattr(db_contract, 'sla_properties', None) or [])
+            if sp.property and sp.value is not None
+        ]
         
         # Servers (full ODCS mapping)
         servers = []
@@ -7101,6 +7145,8 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
             support=support,
             customProperties=custom_properties,
             sla=sla,
+            slaProperties=sla_properties,
+            slaDefaultElement=getattr(db_contract, 'sla_default_element', None),
             servers=servers,
             authoritativeDefinitions=authoritative_definitions,
             qualityRules=quality_rules,

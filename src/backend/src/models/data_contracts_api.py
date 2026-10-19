@@ -493,7 +493,10 @@ class DataContractUpdate(BaseModel):
     authoritativeDefinitions: Optional[List[AuthoritativeDefinition]] = Field(None)
     qualityRules: Optional[List[QualityRule]] = Field(None)
     serverConfigs: Optional[List[ServerConfig]] = Field(None)
+    servers: Optional[List[ServerConfig]] = None  # replace-all, as sent by the contract page
     sla: Optional[SLARequirements] = None
+    slaDefaultElement: Optional[str] = None
+    slaProperties: Optional[List[SLAProperty]] = None  # replace-all
     team: Optional[List[TeamMember]] = None  # ODCS team members
     customProperties: Optional[Dict[str, Any]] = None  # Custom properties for team assignment metadata
 
