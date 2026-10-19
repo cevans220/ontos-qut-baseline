@@ -1529,6 +1529,7 @@ The workflow executor currently lacks comprehensive unit tests for:
 
 ## Related Documentation
 
+- [Workflow Authoring Guide](/user-docs/workflow-authoring-guide): how executions run, step by step, with verified examples
 - [Compliance DSL Guide](compliance-dsl-guide.md)
 - [Compliance DSL Reference](compliance-dsl-reference.md)
 - [User Guide](USER-GUIDE.md)
