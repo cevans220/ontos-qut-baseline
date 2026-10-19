@@ -658,7 +658,7 @@
       "certLevelRequired": "Bitte wählen Sie eine Zertifizierungsstufe aus"
     },
     "errors": {
-      "cannotRequest": "{{requestType}} kann für ein Produkt mit dem Status '{{productStatus}}' nicht angefordert werden",
+      "cannotRequest": "\"{{requestType}}\" ist für ein Produkt mit Status {{productStatus}} nicht verfügbar.",
       "failedToSubmit": "Anfrage konnte nicht gesendet werden"
     },
     "toast": {

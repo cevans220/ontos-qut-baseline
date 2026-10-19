@@ -658,7 +658,7 @@
       "certLevelRequired": "認定レベルを選択してください"
     },
     "errors": {
-      "cannotRequest": "ステータスが '{{productStatus}}' の製品に対して {{requestType}} をリクエストできません",
+      "cannotRequest": "「{{requestType}}」はステータス {{productStatus}} のプロダクトでは利用できません。",
       "failedToSubmit": "リクエストの送信に失敗しました"
     },
     "toast": {

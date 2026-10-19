@@ -107,6 +107,9 @@ export default function RequestProductActionDialog({
   const { toast } = useToast();
   const { lookupWorkflowId } = useApprovalWizardTrigger();
   const refreshNotifications = useNotificationsStore((state) => state.refreshNotifications);
+  // A product status in the UI language (the API and the lifecycle use the raw value)
+  const statusLabel = (status?: string) =>
+    t(`data-products:status.${(status || '').toLowerCase()}`, { defaultValue: status || '' });
 
   const [requestType, setRequestType] = useState<RequestType>(defaultRequestType);
   const [message, setMessage] = useState('');
@@ -347,7 +350,7 @@ export default function RequestProductActionDialog({
       if (type === 'status_change' && canDirectStatusChange) {
         toast({
           title: t('data-products:requestAction.toast.statusChanged'),
-          description: t('data-products:requestAction.toast.statusChangedDesc', { fromStatus: productStatus, toStatus: targetStatus }),
+          description: t('data-products:requestAction.toast.statusChangedDesc', { fromStatus: statusLabel(productStatus), toStatus: statusLabel(targetStatus) }),
         });
       } else {
         toast({
@@ -386,7 +389,7 @@ export default function RequestProductActionDialog({
   const handleSubmit = async () => {
     const config = getRequestTypeConfig(requestType);
     if (!config.enabled) {
-      setError(t('data-products:requestAction.errors.cannotRequest', { requestType, productStatus }));
+      setError(t('data-products:requestAction.errors.cannotRequest', { requestType: config.title, productStatus: statusLabel(productStatus) }));
       return;
     }
 

@@ -1062,7 +1062,7 @@
     "statusLabel": "Status:",
     "requestTypeLabel": "Request Type *",
     "notAvailableForStatus": "Not available for status '{{status}}'",
-    "cannotRequest": "Cannot request {{type}} for a contract with status '{{status}}'",
+    "cannotRequest": "\"{{type}}\" isn't available for a contract with status {{status}}.",
     "messageOptionalLabel": "Message (Optional)",
     "changingStatus": "Changing Status...",
     "sendingRequest": "Sending Request...",
@@ -1149,7 +1149,8 @@
     },
     "errors": {
       "submitFailed": "Failed to submit request",
-      "loadPolicyFailed": "Failed to load deployment policy"
+      "loadPolicyFailed": "Failed to load deployment policy",
+      "reviewSchemaRequired": "A schema is required before a contract can be proposed for review."
     }
   },
   "deployRequest": {

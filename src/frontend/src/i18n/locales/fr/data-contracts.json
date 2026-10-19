@@ -1061,7 +1061,7 @@
     "statusLabel": "Statut :",
     "requestTypeLabel": "Type de demande *",
     "notAvailableForStatus": "Non disponible pour le statut « {{status}} »",
-    "cannotRequest": "Impossible de demander {{type}} pour un contrat au statut « {{status}} »",
+    "cannotRequest": "« {{type}} » n'est pas disponible pour un contrat au statut {{status}}.",
     "messageOptionalLabel": "Message (facultatif)",
     "changingStatus": "Modification du statut...",
     "sendingRequest": "Envoi de la demande...",
@@ -1148,7 +1148,8 @@
     },
     "errors": {
       "submitFailed": "Échec de l'envoi de la demande",
-      "loadPolicyFailed": "Échec du chargement de la politique de déploiement"
+      "loadPolicyFailed": "Échec du chargement de la politique de déploiement",
+      "reviewSchemaRequired": "Un contrat doit avoir un schéma avant d'être proposé en revue."
     }
   },
   "deployRequest": {

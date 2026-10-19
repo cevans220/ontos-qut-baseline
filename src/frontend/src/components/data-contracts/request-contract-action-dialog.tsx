@@ -9,7 +9,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { useApi } from '@/hooks/use-api';
-import { statusChangeErrorText } from '@/lib/status-change-error';
+import { contractActionErrorText } from '@/lib/contract-action-error';
 import { useNotificationsStore } from '@/stores/notifications-store';
 import { Loader2, AlertCircle, FileText, Eye, Database, ShieldCheck, Info, RefreshCw, Rocket } from 'lucide-react';
 import type { DeploymentPolicy } from '@/types/deployment-policy';
@@ -53,6 +53,9 @@ export default function RequestContractActionDialog({
   const { post, get } = useApi();
   const { toast } = useToast();
   const refreshNotifications = useNotificationsStore((state) => state.refreshNotifications);
+  // A contract status in the UI language (the API and the lifecycle use the raw value)
+  const statusLabel = (status?: string) =>
+    t(`data-contracts:status.${(status || '').toLowerCase()}`, { defaultValue: status || '' });
   
   const [requestType, setRequestType] = useState<RequestType>('deploy');
   const [message, setMessage] = useState('');
@@ -204,7 +207,7 @@ export default function RequestContractActionDialog({
 
     const config = getRequestTypeConfig(requestType);
     if (!config.enabled) {
-      setError(t('data-contracts:requests.cannotRequest', "Cannot request {{type}} for a contract with status '{{status}}'", { type: requestType, status: contractStatus }));
+      setError(t('data-contracts:requests.cannotRequest', '"{{type}}" isn\'t available for a contract with status {{status}}.', { type: config.title, status: statusLabel(contractStatus) }));
       return;
     }
 
@@ -267,14 +270,14 @@ export default function RequestContractActionDialog({
       const response = await post(config.endpoint, payload);
 
       if (response.error) {
-        throw new Error(statusChangeErrorText(response, t, 'data-contracts'));
+        throw new Error(contractActionErrorText(response, t));
       }
 
       // Different success messages for direct changes vs requests
       if (requestType === 'status_change' && canDirectStatusChange) {
         toast({
           title: t('data-contracts:requests.toast.statusChangedTitle', 'Status Changed'),
-          description: t('data-contracts:requests.toast.statusChangedDescription', 'Contract status changed from "{{from}}" to "{{to}}".', { from: contractStatus, to: targetStatus })
+          description: t('data-contracts:requests.toast.statusChangedDescription', 'Contract status changed from "{{from}}" to "{{to}}".', { from: statusLabel(contractStatus), to: statusLabel(targetStatus) })
         });
       } else {
         toast({
@@ -429,7 +432,7 @@ export default function RequestContractActionDialog({
               <p className="text-muted-foreground">{currentConfig.description}</p>
               {!currentConfig.enabled && (
                 <p className="text-destructive mt-2 text-xs">
-                  {t('data-contracts:requests.notAvailableForStatus', "Not available for status '{{status}}'", { status: contractStatus })}
+                  {t('data-contracts:requests.notAvailableForStatus', "Not available for status '{{status}}'", { status: statusLabel(contractStatus) })}
                 </p>
               )}
             </div>

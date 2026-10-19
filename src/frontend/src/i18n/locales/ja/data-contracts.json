@@ -1061,7 +1061,7 @@
     "statusLabel": "ステータス:",
     "requestTypeLabel": "リクエストタイプ *",
     "notAvailableForStatus": "ステータス「{{status}}」では利用できません",
-    "cannotRequest": "ステータス「{{status}}」のコントラクトに対して {{type}} をリクエストできません",
+    "cannotRequest": "「{{type}}」はステータス {{status}} のコントラクトでは利用できません。",
     "messageOptionalLabel": "メッセージ（任意）",
     "changingStatus": "ステータスを変更中...",
     "sendingRequest": "リクエストを送信中...",
@@ -1148,7 +1148,8 @@
     },
     "errors": {
       "submitFailed": "リクエストの送信に失敗しました",
-      "loadPolicyFailed": "デプロイポリシーの読み込みに失敗しました"
+      "loadPolicyFailed": "デプロイポリシーの読み込みに失敗しました",
+      "reviewSchemaRequired": "レビューに提案する前に、コントラクトにスキーマが必要です。"
     }
   },
   "deployRequest": {

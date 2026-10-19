@@ -1061,7 +1061,7 @@
     "statusLabel": "Status:",
     "requestTypeLabel": "Verzoektype *",
     "notAvailableForStatus": "Niet beschikbaar voor status '{{status}}'",
-    "cannotRequest": "Kan geen {{type}} aanvragen voor een contract met status '{{status}}'",
+    "cannotRequest": "\"{{type}}\" is niet beschikbaar voor een contract met status {{status}}.",
     "messageOptionalLabel": "Bericht (optioneel)",
     "changingStatus": "Status wijzigen...",
     "sendingRequest": "Verzoek verzenden...",
@@ -1148,7 +1148,8 @@
     },
     "errors": {
       "submitFailed": "Indienen van verzoek mislukt",
-      "loadPolicyFailed": "Laden van deploymentbeleid mislukt"
+      "loadPolicyFailed": "Laden van deploymentbeleid mislukt",
+      "reviewSchemaRequired": "Een contract heeft een schema nodig voordat het ter beoordeling kan worden voorgesteld."
     }
   },
   "deployRequest": {

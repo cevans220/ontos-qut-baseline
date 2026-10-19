@@ -1061,7 +1061,7 @@
     "statusLabel": "Stato:",
     "requestTypeLabel": "Tipo di Richiesta *",
     "notAvailableForStatus": "Non disponibile per lo stato '{{status}}'",
-    "cannotRequest": "Impossibile richiedere {{type}} per un contratto con stato '{{status}}'",
+    "cannotRequest": "\"{{type}}\" non è disponibile per un contratto con stato {{status}}.",
     "messageOptionalLabel": "Messaggio (Facoltativo)",
     "changingStatus": "Modifica dello Stato...",
     "sendingRequest": "Invio della Richiesta...",
@@ -1148,7 +1148,8 @@
     },
     "errors": {
       "submitFailed": "Impossibile inviare la richiesta",
-      "loadPolicyFailed": "Impossibile caricare la politica di deployment"
+      "loadPolicyFailed": "Impossibile caricare la politica di deployment",
+      "reviewSchemaRequired": "Il contratto deve avere uno schema prima di essere proposto per la revisione."
     }
   },
   "deployRequest": {

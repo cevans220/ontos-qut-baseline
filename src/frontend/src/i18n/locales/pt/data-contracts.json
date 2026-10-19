@@ -1061,7 +1061,7 @@
     "statusLabel": "Status:",
     "requestTypeLabel": "Tipo de Solicitação *",
     "notAvailableForStatus": "Não disponível para o status '{{status}}'",
-    "cannotRequest": "Não é possível solicitar {{type}} para um contrato com status '{{status}}'",
+    "cannotRequest": "\"{{type}}\" não está disponível para um contrato com status {{status}}.",
     "messageOptionalLabel": "Mensagem (Opcional)",
     "changingStatus": "Alterando Status...",
     "sendingRequest": "Enviando Solicitação...",
@@ -1148,7 +1148,8 @@
     },
     "errors": {
       "submitFailed": "Falha ao enviar solicitação",
-      "loadPolicyFailed": "Falha ao carregar política de implantação"
+      "loadPolicyFailed": "Falha ao carregar política de implantação",
+      "reviewSchemaRequired": "O contrato precisa de um schema antes de ser proposto para revisão."
     }
   },
   "deployRequest": {

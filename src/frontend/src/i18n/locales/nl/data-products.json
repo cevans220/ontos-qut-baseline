@@ -658,7 +658,7 @@
       "certLevelRequired": "Selecteer een certificeringsniveau"
     },
     "errors": {
-      "cannotRequest": "Kan geen {{requestType}} aanvragen voor een product met status '{{productStatus}}'",
+      "cannotRequest": "\"{{requestType}}\" is niet beschikbaar voor een product met status {{productStatus}}.",
       "failedToSubmit": "Verzenden van verzoek mislukt"
     },
     "toast": {

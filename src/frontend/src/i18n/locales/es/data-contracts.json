@@ -1061,7 +1061,7 @@
     "statusLabel": "Estado:",
     "requestTypeLabel": "Tipo de solicitud *",
     "notAvailableForStatus": "No disponible para el estado '{{status}}'",
-    "cannotRequest": "No se puede solicitar {{type}} para un contrato con estado '{{status}}'",
+    "cannotRequest": "\"{{type}}\" no está disponible para un contrato con estado {{status}}.",
     "messageOptionalLabel": "Mensaje (opcional)",
     "changingStatus": "Cambiando el estado...",
     "sendingRequest": "Enviando solicitud...",
@@ -1148,7 +1148,8 @@
     },
     "errors": {
       "submitFailed": "Error al enviar la solicitud",
-      "loadPolicyFailed": "Error al cargar la política de despliegue"
+      "loadPolicyFailed": "Error al cargar la política de despliegue",
+      "reviewSchemaRequired": "El contrato necesita un esquema antes de proponerse para revisión."
     }
   },
   "deployRequest": {
