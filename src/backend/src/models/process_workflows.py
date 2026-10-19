@@ -482,7 +482,7 @@ class ScriptStepConfig(BaseModel):
         json_schema_extra = {
             "example": {
                 "language": "python",
-                "code": "return {'status': 'ok'}",
+                "code": "result = {'passed': True, 'data': {'status': 'ok'}}",
                 "timeout_seconds": 30
             }
         }

@@ -306,9 +306,12 @@ class ValidationStepHandler(StepHandler):
         
         try:
             passed, message = evaluate_rule_on_object(rule, _rule_object(self._db, context))
+            # A failed rule's message is the step's error, so it is stored with
+            # the step and shown under it in the execution dialog.
             return StepResult(
                 passed=passed,
                 message=message,
+                error=None if passed else message,
                 data={'rule': rule}
             )
         except Exception as e:
@@ -2945,7 +2948,12 @@ class WorkflowExecutor:
                         approval_entry = context.step_results.setdefault(
                             current_step_id, {}
                         )
-                        approval_entry.update(merged)
+                        # The wizard is the requester's: its fields never replace
+                        # the approver's decision (passed, decision, message,
+                        # reason), which ${step_results.<approval>.reason} names.
+                        for key, value in merged.items():
+                            if key not in approval_entry:
+                                approval_entry[key] = value
                         logger.info(
                             "Merged %d wizard field(s) into step_results.%s",
                             len(merged),
