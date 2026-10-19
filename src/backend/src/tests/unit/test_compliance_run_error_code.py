@@ -54,6 +54,21 @@ def test_an_app_error_with_a_code_stores_it(db_session):
     assert json.loads(run.error_params) == {'entityType': 'data_product'}
 
 
+def test_a_coded_error_does_not_pass_the_exception_text_to_the_ui(db_session):
+    # The workspace client failed with an SDK error: the run stores the code
+    # without parameters, the SDK text only as the stored fallback message.
+    policy = _policy(db_session, "MATCH (o:Object) ASSERT o.name != ''")
+    with patch('src.common.workspace_client.get_workspace_client',
+               side_effect=RuntimeError('cannot get access token from https://internal.example')):
+        run = ComplianceManager().run_policy_inline(db_session, policy=policy)
+
+    assert run.status == 'failed'
+    assert run.error_code == 'workspace_client_unavailable'
+    assert run.error_params is None
+    assert _run_error_code(run) == {'error_code': 'workspace_client_unavailable', 'error_params': None}
+    assert 'internal.example' in run.error_message
+
+
 def test_other_errors_keep_only_their_text(db_session):
     iterator = MagicMock()
     iterator.iterate.side_effect = RuntimeError('connection reset by peer')

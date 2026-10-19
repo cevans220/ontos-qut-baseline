@@ -32,6 +32,20 @@ describe('complianceRunErrorText', () => {
     );
   });
 
+  it('does not show the stored exception text for an error that has a code', async () => {
+    await i18n.changeLanguage('en');
+    const text = complianceRunErrorText(i18n.t, {
+      error_message: 'cannot get access token from https://internal.example',
+      error_code: 'workspace_client_unavailable',
+      error_params: null,
+    });
+
+    expect(text).toBe(
+      "The Databricks workspace isn't available, and this rule checks Unity Catalog objects, so it could not run.",
+    );
+    expect(text).not.toContain('internal.example');
+  });
+
   it('shows the stored message when there is no code', async () => {
     await i18n.changeLanguage('pt');
     expect(complianceRunErrorText(i18n.t, { error_message: 'connection reset' })).toBe('connection reset');

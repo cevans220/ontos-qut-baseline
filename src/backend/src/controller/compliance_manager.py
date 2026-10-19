@@ -623,8 +623,9 @@ class ComplianceManager:
             ws = get_workspace_client()
         except Exception as e:
             if needs_uc:
-                # A code the UI translates; the message stays the fallback
-                e.error_code, e.error_params = 'workspace_client_unavailable', {'detail': str(e)}
+                # A code the UI translates; the exception text stays in the
+                # stored message and the log, not in what the UI shows
+                e.error_code, e.error_params = 'workspace_client_unavailable', {}
                 raise
             logger.warning(
                 "Workspace client unavailable, policy '%s' (%s) only matches app entities "
@@ -636,7 +637,7 @@ class ComplianceManager:
                 "Databricks workspace client unavailable; this rule matches Unity Catalog "
                 "objects and cannot be evaluated without it"
             )
-            error.error_code, error.error_params = 'workspace_client_unavailable', {'detail': 'no client'}
+            error.error_code, error.error_params = 'workspace_client_unavailable', {}
             raise error
         return ws
 
