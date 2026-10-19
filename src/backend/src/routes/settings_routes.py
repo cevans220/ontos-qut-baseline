@@ -659,16 +659,20 @@ async def clear_demo_data(
     Clear all demo data from the database.
 
     Deletes the rows inserted by the demo packs, together with the rows that
-    are part of them and were added later (e.g. runs and results of a demo
-    compliance policy, custom properties of a demo product).
+    are part of them and were added later, also by users (e.g. subscriptions
+    to a demo product, runs and results of a demo compliance policy, custom
+    properties of a demo product). Comments posted on a demo entity are not
+    linked to it by a foreign key and are left in place.
 
     User data that refers to demo rows (an asset of a demo asset type, a tag in
     a demo tag namespace, a product owned by a demo team, ...) is never deleted
     or detached: if there is any, nothing is deleted and the response (409)
     lists it per table with row ids. The clear is all or nothing.
 
-    With `dry_run=true`, returns the rows that would be deleted per table and
-    the rows that would block the clear, without changing anything.
+    With `dry_run=true`, returns the rows that would be deleted per table
+    (`would_delete`), how many of them were added later as parts of demo rows
+    (`added_later`, per table), and the rows that would block the clear,
+    without changing anything.
     """
     success = False
     details = {"action": "clear_demo_data", "dry_run": dry_run}
@@ -721,6 +725,11 @@ async def clear_demo_data(
         if dry_run:
             would_delete = plan.deletes_report(db)
             total = sum(len(ids) for ids in would_delete.values())
+            # Rows added after the demo was loaded that are part of demo rows
+            # (a subscription to a demo product, a run of a demo policy): they
+            # go with them, so the dry run names them apart.
+            added_later = {t: len(rows) for t, rows in sorted(plan.dependents.items()) if rows}
+            added_later_count = sum(added_later.values())
             success = True
             details["would_delete_counts"] = {t: len(ids) for t, ids in would_delete.items()}
             blocking_count = sum(b['count'] for b in blocking)
@@ -728,13 +737,20 @@ async def clear_demo_data(
                 "status": "dry_run",
                 # code + params for clients to translate; message is the English fallback
                 "code": "demo_clear_dry_run",
-                "params": {"would_delete": total, "blocking": blocking_count},
+                "params": {
+                    "would_delete": total, "added_later": added_later_count,
+                    "blocking": blocking_count,
+                },
                 "message": (
                     f"Clearing would delete {total} records"
+                    + (f", {added_later_count} of them added after the demo was loaded "
+                       f"as parts of demo records (e.g. subscriptions to demo products)"
+                       if added_later_count else "")
                     + (f"; {blocking_count} records of user data refer to "
                        f"demo data and would block it." if blocking else ".")
                 ),
                 "would_delete": would_delete,
+                "added_later": added_later,
                 "blocking": blocking,
             }
 

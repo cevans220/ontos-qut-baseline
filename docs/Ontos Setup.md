@@ -322,6 +322,17 @@ segment such as `0000`, `0001`, `0002`, …) so that we can discern demo
 records from data entered manually by users, and so that `DELETE demo-data`
 can clean up exactly what was inserted.
 
+`DELETE /api/settings/demo-data` also deletes the records added later that
+are part of a demo record, also when users added them: subscriptions to a
+demo product, runs and results of a demo compliance policy, custom properties
+of a demo product. Comments posted on a demo entity are not deleted: they are
+not linked to it by a foreign key, so they stay after the clear. User data
+that only refers to demo data (an asset of a demo asset type, a product owned
+by a demo team) stops the clear instead: nothing is deleted and the response
+lists it. Call it with `?dry_run=true` first to see both, without changing
+anything: `added_later` counts, per table, the records added after the demo
+was loaded.
+
 Open the `POST load` endpoint and click on "Try it out":
 
 ![](images/setup/a614e01cb5b297ce4c1a4eae473dfc7b.png)

@@ -390,10 +390,33 @@ def test_the_dry_run_lists_without_deleting(route_db):
 
     assert result['status'] == 'dry_run'
     assert result['code'] == 'demo_clear_dry_run'
-    assert result['params'] == {'would_delete': 1, 'blocking': 1}
+    assert result['params'] == {'would_delete': 1, 'added_later': 0, 'blocking': 1}
     assert result['would_delete'] == {'asset_types': [str(demo_type.id)]}
+    assert result['added_later'] == {}
     assert result['blocking'][0]['ids'] == [str(users_asset.id)]
     assert route_db.get(AssetTypeDb, demo_type.id) is not None
+
+
+def test_the_dry_run_names_what_users_added_to_demo_rows(route_db):
+    from src.db_models.data_products import DataProductSubscriptionDb
+    from src.utils.demo_data_sql import DemoInsert
+
+    demo = _product(route_db)
+    route_db.add(DataProductSubscriptionDb(
+        id=_id(), product_id=demo.id, subscriber_email='rita@example.com',
+    ))
+    route_db.commit()
+
+    with patch('src.utils.demo_data_sql.parse_demo_inserts',
+               side_effect=lambda text: [DemoInsert('data_products', 'id', [demo.id])]):
+        result = _call_route(route_db, dry_run=True)
+
+    assert result['params'] == {'would_delete': 2, 'added_later': 1, 'blocking': 0}
+    assert result['added_later'] == {'data_product_subscriptions': 1}
+    assert result['message'] == (
+        'Clearing would delete 2 records, 1 of them added after the demo was loaded '
+        'as parts of demo records (e.g. subscriptions to demo products).'
+    )
 
 
 def test_the_clear_is_all_or_nothing(route_db):
