@@ -1710,11 +1710,14 @@ async def delete_executions_bulk(
 async def get_execution(
     execution_id: str,
     db: DBSessionDep,
-    _: bool = Depends(PermissionChecker('process-workflows', FeatureAccessLevel.READ_ONLY)),
+    _: bool = Depends(PermissionChecker('settings-workflows', FeatureAccessLevel.READ_ONLY)),
 ) -> Dict[str, Any]:
     """Get detailed information about a workflow execution.
     
-    Returns the execution with all step execution details.
+    Returns the execution with all step execution details. Gated like the
+    executions list (the Workflows settings page, its only caller): the
+    details carry the trigger context and the steps' raw errors, which every
+    role's ``process-workflows`` read access must not open.
     """
     execution = workflow_execution_repo.get(db, execution_id)
     if not execution:
