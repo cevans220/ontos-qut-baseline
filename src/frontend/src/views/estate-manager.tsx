@@ -221,7 +221,7 @@ export default function EstateManager() {
         metastore_name: '',
         connection_type: 'delta_share',
         export_policies: [],
-    import_policies: [],
+        import_policies: [],
         is_enabled: true,
         sync_schedule: '0 0 * * *',
       });

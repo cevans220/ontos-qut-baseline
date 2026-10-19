@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from typing import List, Optional
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.common.api_errors import CodedValueError
@@ -76,6 +77,31 @@ class EstateManager:
         if other is not None and other.id != estate_id:
             raise EstateNameConflictError(f"An estate named '{name}' already exists.", name=name)
 
+    @staticmethod
+    def _is_name_conflict(error: IntegrityError) -> bool:
+        """Whether ``error`` is the unique constraint on ``estates.name``."""
+        message = str(getattr(error, 'orig', error)).lower()
+        # Postgres names the constraint estates_name_key; SQLite reports the column.
+        return 'estates_name_key' in message or 'estates.name' in message
+
+    def _commit(self, db: Session, name: str) -> None:
+        """Commit, turning a lost race on the unique name into the coded 409.
+
+        The pre-check can't see an estate another request creates in the
+        meantime; the database constraint then fails the commit. Other
+        integrity errors are re-raised unchanged.
+        """
+        try:
+            db.flush()
+        except IntegrityError as e:
+            db.rollback()
+            if self._is_name_conflict(e):
+                raise EstateNameConflictError(
+                    f"An estate named '{name}' already exists.", name=name
+                ) from e
+            raise
+        db.commit()
+
     # --- CRUD -----------------------------------------------------------------------
 
     def list_estates(self, db: Session) -> List[Estate]:
@@ -91,7 +117,7 @@ class EstateManager:
         row.created_by = user
         row.updated_by = user
         db.add(row)
-        db.commit()
+        self._commit(db, estate.name)
         db.refresh(row)
         logger.info("Created estate %s (%s)", row.name, row.id)
         return self._to_api(row)
@@ -106,7 +132,7 @@ class EstateManager:
         self._repo.apply(db, row, estate)
         row.updated_by = user
         row.updated_at = datetime.now(timezone.utc)
-        db.commit()
+        self._commit(db, estate.name)
         db.refresh(row)
         return self._to_api(row)
 

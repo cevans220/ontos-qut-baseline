@@ -108,6 +108,41 @@ def test_a_second_estate_with_the_same_name_is_refused(db_session, manager):
         manager.update_estate(db_session, other.id, _estate())
 
 
+def test_a_name_taken_after_the_check_still_gets_the_coded_conflict_on_create(
+    db_session, manager, monkeypatch
+):
+    # Two requests can both pass the pre-check; the second one then hits the
+    # unique constraint and must still get the 409, not a 500.
+    manager.create_estate(db_session, _estate())
+    monkeypatch.setattr(manager, "_check_name_free", lambda *a, **k: None)
+
+    with pytest.raises(EstateNameConflictError) as exc:
+        manager.create_estate(db_session, _estate())
+    assert exc.value.code == "estate_name_conflict"
+    assert exc.value.params == {"name": "EU Analytics"}
+
+
+def test_a_name_taken_after_the_check_still_gets_the_coded_conflict_on_rename(
+    db_session, manager, monkeypatch
+):
+    manager.create_estate(db_session, _estate())
+    other = manager.create_estate(db_session, _estate(name="Other"))
+    monkeypatch.setattr(manager, "_check_name_free", lambda *a, **k: None)
+
+    with pytest.raises(EstateNameConflictError):
+        manager.update_estate(db_session, other.id, _estate())
+
+
+def test_other_integrity_errors_are_not_reported_as_a_name_conflict():
+    from sqlalchemy.exc import IntegrityError
+
+    error = IntegrityError("INSERT ...", {}, Exception("NOT NULL constraint failed: estates.metastore_name"))
+    assert EstateManager._is_name_conflict(error) is False
+    assert EstateManager._is_name_conflict(
+        IntegrityError("INSERT ...", {}, Exception('duplicate key value violates unique constraint "estates_name_key"'))
+    ) is True
+
+
 def test_sync_records_its_status(db_session, manager):
     created = manager.create_estate(db_session, _estate())
     disabled = manager.create_estate(db_session, _estate(name="Off", is_enabled=False))
