@@ -1293,6 +1293,7 @@ class SettingsManager:
             'git_repo_url': self._settings.GIT_REPO_URL,
             'git_branch': self._settings.GIT_BRANCH,
             'git_username': self._settings.GIT_USERNAME,
+            'git_password_set': bool(self._settings.GIT_PASSWORD),
             # UI Customization settings
             'ui_i18n_enabled': self._settings.UI_I18N_ENABLED,
             'ui_custom_logo_url': self._settings.UI_CUSTOM_LOGO_URL,
@@ -1620,11 +1621,18 @@ class SettingsManager:
             self._settings.GIT_USERNAME = value
             logger.info(f"Updated GIT_USERNAME")
         
-        if 'git_password' in settings:
-            value = settings.get('git_password') or None
+        # The token is write-only: the settings page never gets it back, so it
+        # sends an empty field when the user didn't retype it. An empty or
+        # missing value keeps the saved token; `git_password_clear` removes it.
+        if settings.get('git_password_clear'):
+            app_settings_repo.set(self._db, 'GIT_PASSWORD', None)
+            self._settings.GIT_PASSWORD = None
+            logger.info("Cleared GIT_PASSWORD")
+        elif settings.get('git_password'):
+            value = settings['git_password']
             app_settings_repo.set(self._db, 'GIT_PASSWORD', value)
             self._settings.GIT_PASSWORD = value
-            logger.info(f"Updated GIT_PASSWORD")
+            logger.info("Updated GIT_PASSWORD")
         
         # UI Customization settings
         if 'ui_i18n_enabled' in settings:

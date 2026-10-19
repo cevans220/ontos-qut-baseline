@@ -210,7 +210,8 @@
       "repoUrl": "https://github.com/la-tua-org/il-tuo-repo.git",
       "branch": "main",
       "token": "ghp_... o simile",
-      "username": "x-access-token"
+      "username": "x-access-token",
+      "tokenSaved": "Salvato. Lascia vuoto per mantenerlo."
     },
     "cloneButton": "Clona repository",
     "currentCommit": "Commit",
@@ -235,7 +236,8 @@
       "pushError": "Impossibile eseguire il push delle modifiche",
       "pushSuccess": "Modifiche inviate correttamente",
       "saveError": "Impossibile salvare le impostazioni Git",
-      "saveSuccess": "Impostazioni Git salvate"
+      "saveSuccess": "Impostazioni Git salvate",
+      "tokenRemoved": "Token salvato rimosso"
     },
     "pendingChanges": "Modifiche in sospeso",
     "pullButton": "Pull",
@@ -257,7 +259,8 @@
     "errors": {
       "git_volume_invalid": "L'impostazione del volume \"{{value}}\" non indica un volume Unity Catalog. Usa /Volumes/<catalog>/<schema>/<volume>, <catalog>.<schema>.<volume> o il nome di un volume con catalogo e schema impostati nelle impostazioni generali.",
       "git_volume_sync_failed": "Impossibile scrivere {{path}} nel volume. La modifica è nel repository e viene inviata come sempre; verifica che l'app possa scrivere nel volume (WRITE VOLUME)."
-    }
+    },
+    "removeTokenButton": "Rimuovi token salvato"
   },
   "nav": {
     "groups": {

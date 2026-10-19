@@ -217,7 +217,8 @@
       "repoUrl": "https://github.com/your-org/your-repo.git",
       "branch": "main",
       "token": "ghp_... or similar",
-      "username": "x-access-token"
+      "username": "x-access-token",
+      "tokenSaved": "Saved. Leave empty to keep it."
     },
     "cloneButton": "Clone Repository",
     "currentCommit": "Commit",
@@ -242,7 +243,8 @@
       "pushError": "Failed to push changes",
       "pushSuccess": "Changes pushed successfully",
       "saveError": "Failed to save Git settings",
-      "saveSuccess": "Git settings saved"
+      "saveSuccess": "Git settings saved",
+      "tokenRemoved": "Saved token removed"
     },
     "pendingChanges": "Pending Changes",
     "pullButton": "Pull",
@@ -264,7 +266,8 @@
     "errors": {
       "git_volume_invalid": "The volume setting \"{{value}}\" doesn't name a Unity Catalog volume. Use /Volumes/<catalog>/<schema>/<volume>, <catalog>.<schema>.<volume>, or a volume name with the catalog and schema set in the general settings.",
       "git_volume_sync_failed": "{{path}} couldn't be written to the volume. The change is in the repository and is pushed as usual; check that the app can write to the volume (WRITE VOLUME)."
-    }
+    },
+    "removeTokenButton": "Remove saved token"
   },
   "nav": {
     "groups": {

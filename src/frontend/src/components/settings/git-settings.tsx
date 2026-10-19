@@ -69,6 +69,8 @@ export default function GitSettings() {
     gitUsername: '',
     gitToken: '',
   });
+  // The token is write-only: the API only says whether one is saved.
+  const [tokenSaved, setTokenSaved] = useState(false);
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -121,6 +123,7 @@ export default function GitSettings() {
             gitUsername: data.git_username || '',
             gitToken: '',
           });
+          setTokenSaved(Boolean(data.git_password_set));
         }
         // Fetch Git status
         await fetchStatus();
@@ -148,10 +151,15 @@ export default function GitSettings() {
           git_repo_url: settings.gitRepoUrl,
           git_branch: settings.gitBranch,
           git_username: settings.gitUsername,
-          git_password: settings.gitToken,
+          // An empty field keeps the saved token.
+          ...(settings.gitToken ? { git_password: settings.gitToken } : {}),
         }),
       });
       if (response.ok) {
+        if (settings.gitToken) {
+          setTokenSaved(true);
+          setSettings((prev) => ({ ...prev, gitToken: '' }));
+        }
         toast({
           title: t('settings:git.messages.saveSuccess', 'Git settings saved'),
         });
@@ -159,6 +167,28 @@ export default function GitSettings() {
       } else {
         throw new Error('Failed to save settings');
       }
+    } catch (error) {
+      toast({
+        title: t('settings:git.messages.saveError', 'Failed to save Git settings'),
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleRemoveToken = async () => {
+    setIsSaving(true);
+    try {
+      const response = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ git_password_clear: true }),
+      });
+      if (!response.ok) throw new Error('Failed to remove the token');
+      setTokenSaved(false);
+      toast({ title: t('settings:git.messages.tokenRemoved', 'Saved token removed') });
+      await fetchStatus();
     } catch (error) {
       toast({
         title: t('settings:git.messages.saveError', 'Failed to save Git settings'),
@@ -385,9 +415,25 @@ export default function GitSettings() {
                   type="password"
                   value={settings.gitToken}
                   onChange={handleChange}
-                  placeholder={t('settings:git.placeholders.token', 'ghp_xxxxxxxxxxxx')}
+                  placeholder={
+                    tokenSaved
+                      ? t('settings:git.placeholders.tokenSaved', 'Saved. Leave empty to keep it.')
+                      : t('settings:git.placeholders.token', 'ghp_xxxxxxxxxxxx')
+                  }
                   disabled={!hasWriteAccess}
                 />
+                {tokenSaved && hasWriteAccess && (
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0"
+                    onClick={handleRemoveToken}
+                    disabled={isSaving}
+                  >
+                    {t('settings:git.removeTokenButton', 'Remove saved token')}
+                  </Button>
+                )}
               </div>
             </div>
           </div>
