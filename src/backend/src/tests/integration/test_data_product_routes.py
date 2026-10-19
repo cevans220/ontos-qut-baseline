@@ -28,6 +28,7 @@ class TestDataProductRoutes:
             "description": {"purpose": "Test product via API"},
             "version": "1.0.0",
             "productType": "sourceAligned",
+            "status": "draft",
             "owner": "test@example.com",
             "tags": ["api-test"],
         }
