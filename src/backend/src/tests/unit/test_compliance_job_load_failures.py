@@ -188,11 +188,12 @@ def test_the_deployed_archive_carries_the_scripts(tmp_path):
 
 # --- Exit code of the job ---
 
-def _run_main(monkeypatch, tmp_path, run_result):
+def _run_main(monkeypatch, tmp_path, run_result, revision=None):
     monkeypatch.setattr(job, 'WorkspaceClient', lambda **_: SimpleNamespace(
         config=SimpleNamespace(host='https://example.cloud.databricks.com')))
     monkeypatch.setattr(job, '_initialize_application_config', lambda ws: None)
-    monkeypatch.setattr(job, 'create_engine_from_params', lambda **_: _engine_at(tmp_path, _head()))
+    monkeypatch.setattr(job, 'create_engine_from_params',
+                        lambda **_: _engine_at(tmp_path, revision or _head()))
     monkeypatch.setattr(job, 'load_policies', lambda *a, **k: [{'id': 'p1', 'name': 'Contracts active'}])
     monkeypatch.setattr(job, 'run_policy', lambda *a, **k: run_result)
     monkeypatch.setattr(sys, 'argv', [
@@ -226,3 +227,14 @@ def test_evaluated_policies_end_the_job_normally(monkeypatch, tmp_path):
 
     # Violations are results, not a failure of the job
     _run_main(monkeypatch, tmp_path, succeeded)
+
+
+def test_a_schema_mismatch_ends_the_job_without_a_traceback(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(job, 'load_policies', lambda *a, **k: pytest.fail('policies must not load'))
+
+    # SystemExit, not SchemaRevisionError: main() stops after the ERROR line
+    with pytest.raises(SystemExit) as e:
+        _run_main(monkeypatch, tmp_path, None, revision='i9466e370gg2')
+
+    assert e.value.code == 1
+    assert 'ERROR:' in capsys.readouterr().out

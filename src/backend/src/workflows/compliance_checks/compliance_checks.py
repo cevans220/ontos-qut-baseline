@@ -518,7 +518,11 @@ def main() -> None:
     print("  ✓ Database connection established")
 
     print("\nChecking the database schema revision...")
-    check_schema_revision(engine, _alembic_script_location(import_path))
+    try:
+        check_schema_revision(engine, _alembic_script_location(import_path))
+    except SchemaRevisionError:
+        # The ERROR line is already printed; a traceback would only bury it.
+        sys.exit(1)
 
     # Create session
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
