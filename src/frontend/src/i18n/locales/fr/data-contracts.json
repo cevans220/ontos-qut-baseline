@@ -1174,7 +1174,7 @@
       "submittedTitle": "Demande envoyée",
       "submittedDescription": "Votre demande de {{type}} a été envoyée et vous serez informé de la décision.",
       "workflowFailedTitle": "Demande envoyée, mais son workflow a échoué",
-      "workflowFailedDescription": "Personne n'a été sollicité pour décider de votre demande de {{type}} ({{error}}). Contactez un administrateur."
+      "workflowFailedDescription": "Personne n'a été sollicité pour décider de votre demande de {{type}} : le workflow « {{workflow}} » n'a pas pu démarrer. Contactez un administrateur."
     },
     "errors": {
       "submitFailed": "Échec de l'envoi de la demande",

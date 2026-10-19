@@ -686,7 +686,7 @@
       "requestSubmitted": "Demande envoyée",
       "requestSubmittedDesc": "Votre demande {{type}} a été envoyée et vous serez notifié de la décision.",
       "workflowFailed": "Demande envoyée, mais son workflow a échoué",
-      "workflowFailedDesc": "Personne n'a été sollicité pour décider de votre demande {{type}} ({{error}}). Contactez un administrateur."
+      "workflowFailedDesc": "Personne n'a été sollicité pour décider de votre demande {{type}} : le workflow « {{workflow}} » n'a pas pu démarrer. Contactez un administrateur."
     },
     "labels": {
       "requestType": "Type de demande",

@@ -275,11 +275,14 @@ export default function RequestContractActionDialog({
       }
 
       // The request was recorded; a failed workflow means nobody was asked to decide
-      const outcome = response.data as { workflow_status?: string; workflow_error?: string } | undefined;
+      const outcome = response.data as
+        | { workflow_status?: string; workflow_error_params?: { workflow?: string } }
+        | undefined;
       if (outcome?.workflow_status === 'failed') {
+        // The step's own error stays with the execution (admins open it in Workflows)
         toast({
           title: t('data-contracts:requests.toast.workflowFailedTitle', 'Request sent, but its workflow failed'),
-          description: t('data-contracts:requests.toast.workflowFailedDescription', 'Nobody was asked to decide on your {{type}} request ({{error}}). Please contact an administrator.', { type: requestType, error: outcome.workflow_error }),
+          description: t('data-contracts:requests.toast.workflowFailedDescription', 'Nobody was asked to decide on your {{type}} request: its workflow "{{workflow}}" could not start. Please contact an administrator.', { type: requestType, workflow: outcome.workflow_error_params?.workflow ?? '' }),
           variant: 'destructive',
         });
       } else if (requestType === 'status_change' && canDirectStatusChange) {

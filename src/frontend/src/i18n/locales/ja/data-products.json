@@ -686,7 +686,7 @@
       "requestSubmitted": "リクエストを送信しました",
       "requestSubmittedDesc": "{{type}} のリクエストが送信されました。決定について通知されます。",
       "workflowFailed": "リクエストは送信されましたが、ワークフローが失敗しました",
-      "workflowFailedDesc": "{{type}} のリクエストの判断を依頼された人はいません（{{error}}）。管理者に連絡してください。"
+      "workflowFailedDesc": "{{type}} のリクエストの判断を依頼された人はいません。ワークフロー「{{workflow}}」を開始できませんでした。管理者に連絡してください。"
     },
     "labels": {
       "requestType": "リクエストの種類",

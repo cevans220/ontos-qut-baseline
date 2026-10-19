@@ -1237,8 +1237,11 @@ def request_workflow_outcome(executions: List[WorkflowExecution]) -> Dict[str, A
     fail), and when a workflow ran, ``execution_id`` and ``workflow_status``.
     A request workflow runs until it pauses for an approval, so an execution
     that has already failed means nobody was asked to decide (e.g. no
-    approver could be resolved) and the request goes no further; its
-    ``workflow_error`` is the error of the first step that failed.
+    approver could be resolved) and the request goes no further.
+
+    The requester gets ``workflow_error_code`` and ``workflow_error_params``
+    only: a step's error can be an exception's text (SQL, identifiers), so it
+    stays in the server log and in the execution, where admins can open it.
     """
     if not executions:
         return {"workflow_triggered": False}
@@ -1255,9 +1258,12 @@ def request_workflow_outcome(executions: List[WorkflowExecution]) -> Dict[str, A
              if s.passed is False and s.error_message),
             None,
         )
-        outcome["workflow_error"] = (
-            step_error or failed.error_message or f"Workflow '{failed.workflow_name}' failed"
+        logger.warning(
+            f"Request workflow '{failed.workflow_name}' failed (execution {failed.id}): "
+            f"{step_error or failed.error_message}"
         )
+        outcome["workflow_error_code"] = "request_workflow_failed"
+        outcome["workflow_error_params"] = {"workflow": failed.workflow_name}
     return outcome
 
 
@@ -1265,7 +1271,7 @@ def request_submitted_message(request_kind: str, outcome: Dict[str, Any]) -> str
     """API message for a submitted request, given its ``request_workflow_outcome``."""
     if outcome.get("workflow_status") == ExecutionStatus.FAILED.value:
         return (
-            f"{request_kind} request submitted, but its workflow failed: "
-            f"{outcome.get('workflow_error')}"
+            f"{request_kind} request submitted, but its workflow could not start. "
+            "Please contact an administrator."
         )
     return f"{request_kind} request submitted successfully"

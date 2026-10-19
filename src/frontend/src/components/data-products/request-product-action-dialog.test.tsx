@@ -489,15 +489,22 @@ describe('RequestProductActionDialog when the request workflow fails', () => {
     return mockToast.mock.calls[0][0];
   }
 
-  it('warns instead of promising a decision', async () => {
+  it('warns with a generic text instead of promising a decision', async () => {
     mockPost.mockResolvedValue({
-      data: { workflow_status: 'failed', workflow_error: 'Could not resolve any approvers' },
+      data: {
+        workflow_status: 'failed',
+        workflow_error_code: 'request_workflow_failed',
+        workflow_error_params: { workflow: 'Data Product Access Request' },
+      },
     });
 
     const toast = await submitAccessRequest();
 
     expect(toast.variant).toBe('destructive');
-    expect(toast.description).toContain('Could not resolve any approvers');
+    expect(toast.description).toBe(
+      'Nobody was asked to decide on your access request: its workflow ' +
+        '"Data Product Access Request" could not start. Please contact an administrator.',
+    );
     expect(toast.description).not.toMatch(/you will be notified/i);
   });
 

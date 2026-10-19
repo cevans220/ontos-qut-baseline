@@ -1174,7 +1174,7 @@
       "submittedTitle": "Anfrage eingereicht",
       "submittedDescription": "Ihre {{type}}-Anfrage wurde eingereicht und Sie werden über die Entscheidung informiert.",
       "workflowFailedTitle": "Anfrage gesendet, aber ihr Workflow ist fehlgeschlagen",
-      "workflowFailedDescription": "Niemand wurde gebeten, über Ihre {{type}}-Anfrage zu entscheiden ({{error}}). Bitte wenden Sie sich an einen Administrator."
+      "workflowFailedDescription": "Niemand wurde gebeten, über Ihre {{type}}-Anfrage zu entscheiden: Der Workflow \"{{workflow}}\" konnte nicht gestartet werden. Bitte wenden Sie sich an einen Administrator."
     },
     "errors": {
       "submitFailed": "Anfrage konnte nicht eingereicht werden",

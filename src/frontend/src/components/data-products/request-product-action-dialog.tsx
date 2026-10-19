@@ -347,11 +347,14 @@ export default function RequestProductActionDialog({
         throw new Error(statusChangeErrorText(response, t, 'data-products'));
       }
       // The request was recorded; a failed workflow means nobody was asked to decide
-      const outcome = response.data as { workflow_status?: string; workflow_error?: string } | undefined;
+      const outcome = response.data as
+        | { workflow_status?: string; workflow_error_params?: { workflow?: string } }
+        | undefined;
       if (outcome?.workflow_status === 'failed') {
+        // The step's own error stays with the execution (admins open it in Workflows)
         toast({
           title: t('data-products:requestAction.toast.workflowFailed'),
-          description: t('data-products:requestAction.toast.workflowFailedDesc', { type, error: outcome.workflow_error }),
+          description: t('data-products:requestAction.toast.workflowFailedDesc', { type, workflow: outcome.workflow_error_params?.workflow ?? '' }),
           variant: 'destructive',
         });
       } else if (type === 'status_change' && canDirectStatusChange) {

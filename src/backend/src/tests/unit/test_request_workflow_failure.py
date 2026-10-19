@@ -1,4 +1,7 @@
-"""A request whose workflow fails says so instead of promising a decision (#1065)."""
+"""A request whose workflow fails says so instead of promising a decision (#1065).
+
+The requester gets a code, never the step's error text (it can carry exception text).
+"""
 import os
 
 os.environ['TESTING'] = 'true'
@@ -46,22 +49,41 @@ def test_no_workflow_and_a_paused_workflow():
     )
 
 
-def test_a_failed_workflow_reports_its_first_failed_step():
+def test_a_failed_workflow_reports_a_code(caplog):
     failed = _execution(
         ExecutionStatus.FAILED, error='Request was rejected',
         steps=[('ask', 'Could not resolve any approvers'), ('rejected', 'Request was rejected')],
     )
 
     # Another matching workflow paused: the request still did not reach everyone
-    outcome = request_workflow_outcome([_execution(ExecutionStatus.PAUSED), failed])
+    with caplog.at_level('WARNING'):
+        outcome = request_workflow_outcome([_execution(ExecutionStatus.PAUSED), failed])
 
     assert outcome == {
         'workflow_triggered': False, 'execution_id': failed.id, 'workflow_status': 'failed',
-        'workflow_error': 'Could not resolve any approvers',
+        'workflow_error_code': 'request_workflow_failed',
+        'workflow_error_params': {'workflow': 'Review'},
     }
     assert request_submitted_message('Publish', outcome) == (
-        'Publish request submitted, but its workflow failed: Could not resolve any approvers'
+        'Publish request submitted, but its workflow could not start. '
+        'Please contact an administrator.'
     )
+    # The first failed step's error stays in the server log
+    assert 'Could not resolve any approvers' in caplog.text
+
+
+def test_an_exception_text_does_not_reach_the_requester():
+    sql_error = (
+        "SQL execution FAILED: [TABLE_OR_VIEW_NOT_FOUND] The table `main.hr.salaries` "
+        "cannot be found (SQLSTATE 42P01)"
+    )
+    failed = _execution(ExecutionStatus.FAILED, error=sql_error, steps=[('check', sql_error)])
+
+    outcome = request_workflow_outcome([failed])
+    response = {**outcome, 'message': request_submitted_message('Review', outcome)}
+
+    assert 'salaries' not in json.dumps(response)
+    assert 'SQLSTATE' not in json.dumps(response)
 
 
 def _review_workflow(db):
@@ -104,20 +126,23 @@ def test_a_contract_review_whose_approval_cannot_be_routed(db_session):
         )
 
     assert result['workflow_status'] == 'failed'
-    assert result['workflow_error'] == 'No approvers configured'
+    assert result['workflow_error_code'] == 'request_workflow_failed'
+    assert 'No approvers configured' not in json.dumps(result)
     assert result['message'] == (
-        'Review request submitted, but its workflow failed: No approvers configured'
+        'Review request submitted, but its workflow could not start. '
+        'Please contact an administrator.'
     )
     [change] = change_log_manager.get_changes_for_entity(db_session, 'data_contract', contract.id)
     assert change.details['workflow_triggered'] is False
-    assert change.details['workflow_error'] == 'No approvers configured'
+    assert change.details['workflow_error_code'] == 'request_workflow_failed'
 
 
 def test_a_product_publication_request_returns_the_workflow_failure():
     from src.routes import data_product_routes
 
     failed = _execution(
-        ExecutionStatus.FAILED, steps=[('approval-gate', 'Could not resolve any approvers')],
+        ExecutionStatus.FAILED,
+        steps=[('approval-gate', 'psycopg2.errors.UndefinedTable: relation "x" does not exist')],
     )
     manager = MagicMock()
     manager._repo.get.return_value = SimpleNamespace(name='p', status='active')
@@ -134,5 +159,7 @@ def test_a_product_publication_request_returns_the_workflow_failure():
 
     body = json.loads(response.body)
     assert body['workflow_status'] == 'failed'
-    assert body['workflow_error'] == 'Could not resolve any approvers'
-    assert 'workflow failed' in body['message']
+    assert body['workflow_error_code'] == 'request_workflow_failed'
+    assert body['workflow_error_params'] == {'workflow': 'Review'}
+    assert 'psycopg2' not in response.body.decode()
+    assert 'could not start' in body['message']

@@ -1174,7 +1174,7 @@
       "submittedTitle": "Solicitação Enviada",
       "submittedDescription": "Sua solicitação de {{type}} foi enviada e você será notificado da decisão.",
       "workflowFailedTitle": "Solicitação enviada, mas o workflow falhou",
-      "workflowFailedDescription": "Ninguém foi acionado para decidir sobre sua solicitação de {{type}} ({{error}}). Contate um administrador."
+      "workflowFailedDescription": "Ninguém foi acionado para decidir sobre sua solicitação de {{type}}: o workflow \"{{workflow}}\" não pôde ser iniciado. Contate um administrador."
     },
     "errors": {
       "submitFailed": "Falha ao enviar solicitação",
