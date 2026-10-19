@@ -105,9 +105,12 @@ from src.db_models.data_contracts import (
     DataContractServerPropertyDb,
     SchemaObjectAuthoritativeDefinitionDb,
     SchemaPropertyAuthoritativeDefinitionDb,
+    SchemaObjectRelationshipDb,
+    SchemaPropertyRelationshipDb,
 )
 from src.repositories.data_contracts_repository import data_contract_repo
-from src.utils.odcs_quality_operators import odcs_operators, operator_columns
+from src.utils.odcs_quality_operators import odcs_quality_check, operator_columns
+from src.utils.schema_editor_fields import keep_unsent_fields
 from src.utils.property_custom_properties import (
     custom_properties_by_property,
     object_custom_property_rows,
@@ -128,6 +131,31 @@ from src.common.delivery_mixin import DeliveryMixin
 
 logger = get_logger(__name__)
 
+
+def _relationship_read(rel) -> Dict[str, Any]:
+    """A stored schema-level relationship in its API (ODCS) form."""
+    def _decode(raw):
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return raw
+    out: Dict[str, Any] = {'id': rel.id, 'type': rel.relationship_type,
+                           'from': _decode(rel.from_value), 'to': _decode(rel.to_value)}
+    if rel.custom_properties_json:
+        out['customProperties'] = _decode(rel.custom_properties_json)
+    return out
+
+
+
+def _json_list(raw) -> list:
+    """A list stored as JSON text (older rows may hold the list itself)."""
+    if isinstance(raw, list):
+        return raw
+    try:
+        value = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return [raw] if raw else []
+    return value if isinstance(value, list) else [value]
 
 # Inherit from SearchableAsset and DeliveryMixin
 @searchable_asset
@@ -939,6 +967,7 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
             'id': db_obj.id,
             'kind': db_obj.kind or 'DataContract',
             'apiVersion': db_obj.api_version or 'v3.1.0',
+            'name': db_obj.name,
             'version': db_obj.version,
             'status': db_obj.status,
         }
@@ -1040,8 +1069,8 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
                 if getattr(schema_obj, 'description', None):
                     schema_dict['description'] = schema_obj.description
                 if getattr(schema_obj, 'tags', None):
-                    # Tags are now rich objects managed by TagsManager
-                    schema_dict['tags'] = schema_obj.tags or []
+                    # Stored as a JSON list (see _create_schema_objects)
+                    schema_dict['tags'] = _json_list(schema_obj.tags)
                     
                 # Add properties with full ODCS field support
                 if hasattr(schema_obj, 'properties') and schema_obj.properties:
@@ -1157,49 +1186,7 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
                             if property_quality_checks:
                                 quality = []
                                 for check in property_quality_checks:
-                                    quality_dict: Dict[str, Any] = {'type': check.type}
-                                    if check.rule or check.name:
-                                        quality_dict['rule'] = check.rule or check.name
-                                    if getattr(check, 'stable_id', None):
-                                        quality_dict['id'] = check.stable_id
-                                    if check.description:
-                                        quality_dict['description'] = check.description
-                                    if check.dimension:
-                                        quality_dict['dimension'] = check.dimension
-                                    if check.business_impact:
-                                        quality_dict['businessImpact'] = check.business_impact
-                                    if check.severity:
-                                        quality_dict['severity'] = check.severity
-                                    if check.method:
-                                        quality_dict['method'] = check.method
-                                    if check.schedule:
-                                        quality_dict['schedule'] = check.schedule
-                                    if check.scheduler:
-                                        quality_dict['scheduler'] = check.scheduler
-                                    if check.unit:
-                                        quality_dict['unit'] = check.unit
-                                    if check.tags:
-                                        quality_dict['tags'] = check.tags
-                                    if check.query:
-                                        quality_dict['query'] = check.query
-                                    if check.engine:
-                                        quality_dict['engine'] = check.engine
-                                    if check.implementation:
-                                        quality_dict['implementation'] = check.implementation
-
-                                    # Add comparison fields
-                                    quality_dict.update(odcs_operators(check))
-
-                                    # Add custom properties for quality rules
-                                    if hasattr(check, 'custom_properties') and check.custom_properties:
-                                        custom_props = []
-                                        for custom_prop in check.custom_properties:
-                                            custom_props.append({
-                                                'property': custom_prop.property,
-                                                'value': custom_prop.value
-                                            })
-                                        quality_dict['customProperties'] = custom_props
-
+                                    quality_dict = odcs_quality_check(check, db_obj.api_version)
                                     quality.append(quality_dict)
                                 prop_dict['quality'] = quality
 
@@ -1230,39 +1217,7 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
                         # Property-level checks have property_id set and are exported with their properties
                         if check.property_id is not None:
                             continue
-                        quality_dict: Dict[str, Any] = {'type': check.type}
-                        if check.rule or check.name:
-                            quality_dict['rule'] = check.rule or check.name
-                        if getattr(check, 'stable_id', None):
-                            quality_dict['id'] = check.stable_id
-                        if check.description:
-                            quality_dict['description'] = check.description
-                        if check.dimension:
-                            quality_dict['dimension'] = check.dimension
-                        if check.business_impact:
-                            quality_dict['businessImpact'] = check.business_impact
-                        if check.severity:
-                            quality_dict['severity'] = check.severity
-                        if check.method:
-                            quality_dict['method'] = check.method
-                        if check.schedule:
-                            quality_dict['schedule'] = check.schedule
-                        if check.scheduler:
-                            quality_dict['scheduler'] = check.scheduler
-                        if check.unit:
-                            quality_dict['unit'] = check.unit
-                        if check.tags:
-                            quality_dict['tags'] = check.tags
-                        if check.query:
-                            quality_dict['query'] = check.query
-                        if check.engine:
-                            quality_dict['engine'] = check.engine
-                        if check.implementation:
-                            quality_dict['implementation'] = check.implementation
-
-                        # Add comparison fields
-                        quality_dict.update(odcs_operators(check))
-
+                        quality_dict = odcs_quality_check(check, db_obj.api_version)
                         quality.append(quality_dict)
                     schema_dict['quality'] = quality
 
@@ -1845,6 +1800,7 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
                     required=prop_dict.get('required', False),
                     unique=prop_dict.get('unique', False),
                     partitioned=prop_dict.get('partitioned', False),
+                    primary_key=bool(prop_dict.get('primaryKey')),
                     primary_key_position=prop_dict.get('primaryKeyPosition', -1) if prop_dict.get('primaryKey') else -1,
                     partition_key_position=prop_dict.get('partitionKeyPosition', -1) if prop_dict.get('partitioned') else -1,
                     classification=prop_dict.get('classification'),
@@ -1904,7 +1860,8 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
             for rel_data in (schema_dict.get('relationships') or []):
                 if isinstance(rel_data, dict):
                     from src.db_models.data_contracts import SchemaObjectRelationshipDb
-                    from_val = rel_data.get('from', '')
+                    # `from_value` when the payload went through the API model (alias `from`)
+                    from_val = rel_data.get('from') or rel_data.get('from_value') or ''
                     to_val = rel_data.get('to', '')
                     all_obj_relationships.append(SchemaObjectRelationshipDb(
                         id=str(uuid4()),
@@ -2660,6 +2617,11 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
                 incoming_names = set()
                 schemas_to_create = []
                 custom_property_ids = {}
+                # The stored objects as the export writes them: what an editor
+                # save leaves out is taken from here (utils/schema_editor_fields)
+                stored_objects = {
+                    o['name']: o for o in self.build_odcs_from_db(db_obj, db).get('schema', [])
+                } if existing_schemas else {}
 
                 for s in schema_data:
                     s_dict = s.model_dump() if hasattr(s, 'model_dump') else s
@@ -2685,6 +2647,8 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
                             custom_property_ids[name] = stable_ids_by_property(
                                 db, existing_schemas[name].id
                             )
+                            if name in stored_objects:
+                                s_dict = keep_unsent_fields(s_dict, stored_objects[name])
                             db.query(SchemaObjectDb).filter(
                                 SchemaObjectDb.id == existing_schemas[name].id
                             ).delete()
@@ -2698,9 +2662,12 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
                         ).delete()
 
                 if schemas_to_create:
+                    # Object-level quality kept from a recreated object is in
+                    # its `quality`; `qualityRules` (below) still replaces it
                     self._create_schema_objects(
                         db, contract_id, schemas_to_create, current_user,
                         custom_property_ids=custom_property_ids,
+                        include_object_quality=True,
                     )
             
             # Handle quality rules if provided
@@ -4876,6 +4843,8 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
                     properties = schema_data.pop('properties', [])
                     authoritative_defs = schema_data.pop('authoritative_defs', [])
                     schema_custom_props = schema_data.pop('custom_properties', [])
+                    quality_checks = schema_data.pop('quality_checks', [])
+                    schema_relationships = schema_data.pop('relationships', [])
                     
                     schema = SchemaObjectDb(id=schema_id, **schema_data)
                     db.add(schema)
@@ -4891,6 +4860,7 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
                         prop_id = prop_data.pop('id')
                         prop_auth_defs = prop_data.pop('authoritative_defs', [])
                         prop_custom_props = prop_data.pop('custom_properties', [])
+                        prop_relationships = prop_data.pop('relationships', [])
                         
                         prop = SchemaPropertyDb(id=prop_id, **prop_data)
                         db.add(prop)
@@ -4901,6 +4871,14 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
                         for prop_auth_def_data in prop_auth_defs:
                             from src.db_models.data_contracts import SchemaPropertyAuthoritativeDefinitionDb
                             db.add(SchemaPropertyAuthoritativeDefinitionDb(**prop_auth_def_data))
+                        for rel_data in prop_relationships:
+                            db.add(SchemaPropertyRelationshipDb(property_id=prop_id, **rel_data))
+
+                    # Quality checks (object- and property-level) and relationships
+                    for check_data in quality_checks:
+                        db.add(DataQualityCheckDb(object_id=schema_id, **check_data))
+                    for rel_data in schema_relationships:
+                        db.add(SchemaObjectRelationshipDb(schema_object_id=schema_id, **rel_data))
             
             db.commit()
             db.refresh(new_contract)
@@ -6875,7 +6853,8 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
                     "physicalType": p.physical_type,
                     "required": p.required,
                     "unique": p.unique,
-                    "primaryKey": p.primary_key,
+                    # Rows stored before `primary_key` was set only have the position
+                    "primaryKey": bool(p.primary_key) or (p.primary_key_position is not None and p.primary_key_position >= 0),
                     "primaryKeyPosition": p.primary_key_position,
                     "partitioned": p.partitioned,
                     "partitionKeyPosition": p.partition_key_position,
@@ -6895,10 +6874,14 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
 
             schema_objects.append(SchemaObject(
                 name=schema_obj.name,
+                stableId=schema_obj.stable_id,
                 physicalName=schema_obj.physical_name,
                 businessName=schema_obj.business_name,
                 physicalType=schema_obj.physical_type,
                 description=schema_obj.description,
+                # The schema editor loads these and sends them back on save
+                dataGranularityDescription=schema_obj.data_granularity_description,
+                relationships=[_relationship_read(r) for r in schema_obj.relationships] or None,
                 properties=prop_items,
                 propertyCount=len(prop_items),
             ))

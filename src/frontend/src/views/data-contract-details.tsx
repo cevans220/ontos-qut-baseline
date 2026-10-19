@@ -914,7 +914,8 @@ export default function DataContractDetails() {
     if (!contractId) return
     toast({ title: t('data-contracts:detailsView.toast.creatingVersionTitle', 'Creating New Version'), description: t('data-contracts:detailsView.toast.creatingVersionDesc', 'Creating version {{version}}...', { version: newVersionString }) })
     try {
-      const res = await fetch(`/api/data-contracts/${contractId}/versions`, {
+      // A full copy (schema, quality, servers ...), like the versioning dialog
+      const res = await fetch(`/api/data-contracts/${contractId}/clone`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ new_version: newVersionString.trim() })

@@ -2001,7 +2001,8 @@ async def get_schema_properties(
             "physicalType": p.physical_type,
             "required": p.required,
             "unique": p.unique,
-            "primaryKey": p.primary_key,
+            # Rows stored before `primary_key` was set only have the position
+            "primaryKey": bool(p.primary_key) or (p.primary_key_position is not None and p.primary_key_position >= 0),
             "primaryKeyPosition": p.primary_key_position,
             "partitioned": p.partitioned,
             "partitionKeyPosition": p.partition_key_position,
