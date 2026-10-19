@@ -1965,6 +1965,7 @@ async def get_schema_properties(
     Use limit=0 to return all properties without pagination (e.g. for the edit dialog).
     """
     from sqlalchemy import func as sa_func
+    from src.utils.property_custom_properties import SCHEMA_PROPERTY_ORDER
 
     schema_obj = (
         db.query(SchemaObjectDb)
@@ -1979,7 +1980,7 @@ async def get_schema_properties(
     query = (
         db.query(SchemaPropertyDb)
         .filter(SchemaPropertyDb.object_id == schema_obj.id)
-        .order_by(SchemaPropertyDb.name)
+        .order_by(*SCHEMA_PROPERTY_ORDER)  # the contract's column order
     )
     if limit > 0:
         query = query.offset(skip).limit(limit)

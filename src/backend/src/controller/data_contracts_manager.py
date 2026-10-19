@@ -111,6 +111,7 @@ from src.db_models.data_contracts import (
 from src.repositories.data_contracts_repository import data_contract_repo
 from src.utils.odcs_quality_operators import odcs_quality_check, operator_columns
 from src.utils.schema_editor_fields import keep_unsent_fields
+from src.utils.property_custom_properties import SCHEMA_PROPERTY_ORDER
 from src.utils.property_custom_properties import (
     custom_properties_by_property,
     object_custom_property_rows,
@@ -1761,7 +1762,7 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
 
             properties = schema_dict.get('properties', [])
 
-            for prop_data in (properties or []):
+            for position, prop_data in enumerate(properties or []):
                 if hasattr(prop_data, 'model_dump'):
                     prop_dict = prop_data.model_dump()
                 else:
@@ -1801,6 +1802,7 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
                     unique=prop_dict.get('unique', False),
                     partitioned=prop_dict.get('partitioned', False),
                     primary_key=bool(prop_dict.get('primaryKey')),
+                    position=position,
                     primary_key_position=prop_dict.get('primaryKeyPosition', -1) if prop_dict.get('primaryKey') else -1,
                     partition_key_position=prop_dict.get('partitionKeyPosition', -1) if prop_dict.get('partitioned') else -1,
                     classification=prop_dict.get('classification'),
@@ -6868,7 +6870,7 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
             all_props = (
                 db.query(SchemaPropertyDb)
                 .filter(SchemaPropertyDb.object_id.in_(schema_obj_ids))
-                .order_by(SchemaPropertyDb.name)
+                .order_by(*SCHEMA_PROPERTY_ORDER)
                 .all()
             )
         prop_custom_props = custom_properties_by_property(db, [p.id for p in all_props])
