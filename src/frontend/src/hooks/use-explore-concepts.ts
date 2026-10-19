@@ -88,13 +88,33 @@ export interface UseExploreConceptsResult {
 export function useExploreConcepts(): UseExploreConceptsResult {
   const [isLoading, setIsLoading] = useState(true);
   const [collections, setCollections] = useState<KnowledgeCollection[]>([]);
-  const [groupedConcepts, setGroupedConcepts] = useState<GroupedConcepts>({});
-  const [groupedProperties, setGroupedProperties] = useState<Record<string, OntologyConcept[]>>({});
+  const [allGroupedConcepts, setGroupedConcepts] = useState<GroupedConcepts>({});
+  const [allGroupedProperties, setGroupedProperties] = useState<Record<string, OntologyConcept[]>>({});
+  // Names of built-in system sources, as reported by concepts-grouped.
+  const [systemSources, setSystemSources] = useState<string[]>([]);
   const [stats, setStats] = useState<TaxonomyStats | null>(null);
 
   const showProperties = useGlossaryPreferencesStore((s) => s.showProperties);
   const hiddenSources = useGlossaryPreferencesStore((s) => s.hiddenSources);
   const showSystemSources = useExploreSessionStore((s) => s.showSystemSources);
+
+  // System ontologies are fetched lazily: the first load skips them (smaller,
+  // faster payload); the first time the toggle is switched on they are fetched
+  // quietly, and from then on the toggle only filters client-side (like Show
+  // Properties) instead of reloading the page. A ref, so the fetchers keep a
+  // stable identity and toggling never re-runs the skeleton load.
+  const includeSystemRef = useRef(false);
+
+  const visibleGroups = useCallback(
+    <T,>(groups: Record<string, T[]>): Record<string, T[]> => {
+      if (showSystemSources || systemSources.length === 0) return groups;
+      const hidden = new Set(systemSources);
+      return Object.fromEntries(Object.entries(groups).filter(([source]) => !hidden.has(source)));
+    },
+    [showSystemSources, systemSources],
+  );
+  const groupedConcepts = useMemo(() => visibleGroups(allGroupedConcepts), [visibleGroups, allGroupedConcepts]);
+  const groupedProperties = useMemo(() => visibleGroups(allGroupedProperties), [visibleGroups, allGroupedProperties]);
 
   // Extract unique source contexts (unaffected by filter — for the panel).
   // Include both concept-derived sources AND all editable collection sources
@@ -162,7 +182,7 @@ export function useExploreConcepts(): UseExploreConceptsResult {
     try {
       const [collectionsRes, conceptsRes, statsRes] = await Promise.all([
         fetch('/api/knowledge/collections?hierarchical=true'),
-        fetch(`/api/semantic-models/concepts-grouped${systemSourcesQuery(showSystemSources)}`),
+        fetch(`/api/semantic-models/concepts-grouped${systemSourcesQuery(includeSystemRef.current)}`),
         fetch('/api/semantic-models/stats'),
       ]);
 
@@ -173,6 +193,7 @@ export function useExploreConcepts(): UseExploreConceptsResult {
       if (conceptsRes.ok) {
         const data = await conceptsRes.json();
         setGroupedConcepts(data.grouped_concepts || {});
+        setSystemSources(data.system_sources || []);
       }
       if (statsRes.ok) {
         const data = await statsRes.json();
@@ -183,7 +204,7 @@ export function useExploreConcepts(): UseExploreConceptsResult {
     } finally {
       setIsLoading(false);
     }
-  }, [showSystemSources]);
+  }, []);
 
   // Quiet refetch: refreshes data without showing the skeleton loader. Used for
   // mutations (rename, delete) where the list should stay visible and just update
@@ -192,7 +213,7 @@ export function useExploreConcepts(): UseExploreConceptsResult {
     try {
       const [collectionsRes, conceptsRes, statsRes] = await Promise.all([
         fetch('/api/knowledge/collections?hierarchical=true'),
-        fetch(`/api/semantic-models/concepts-grouped${systemSourcesQuery(showSystemSources)}`),
+        fetch(`/api/semantic-models/concepts-grouped${systemSourcesQuery(includeSystemRef.current)}`),
         fetch('/api/semantic-models/stats'),
       ]);
 
@@ -203,6 +224,7 @@ export function useExploreConcepts(): UseExploreConceptsResult {
       if (conceptsRes.ok) {
         const data = await conceptsRes.json();
         setGroupedConcepts(data.grouped_concepts || {});
+        setSystemSources(data.system_sources || []);
       }
       if (statsRes.ok) {
         const data = await statsRes.json();
@@ -211,11 +233,11 @@ export function useExploreConcepts(): UseExploreConceptsResult {
     } catch (error) {
       console.error('Failed to quietly refetch explore concepts:', error);
     }
-  }, [showSystemSources]);
+  }, []);
 
   const fetchProperties = useCallback(async () => {
     try {
-      const response = await fetch(`/api/semantic-models/properties-grouped${systemSourcesQuery(showSystemSources)}`);
+      const response = await fetch(`/api/semantic-models/properties-grouped${systemSourcesQuery(includeSystemRef.current)}`);
       if (!response.ok) throw new Error('Failed to fetch properties');
       const data = await response.json();
 
@@ -232,7 +254,7 @@ export function useExploreConcepts(): UseExploreConceptsResult {
     } catch (err) {
       console.error('Failed to fetch properties:', err);
     }
-  }, [showSystemSources]);
+  }, []);
 
   useEffect(() => {
     if (showProperties) {
@@ -245,6 +267,14 @@ export function useExploreConcepts(): UseExploreConceptsResult {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // First switch-on of "Show system ontologies": fetch them once, quietly.
+  useEffect(() => {
+    if (!showSystemSources || includeSystemRef.current) return;
+    includeSystemRef.current = true;
+    quietRefetch();
+    if (showProperties) fetchProperties();
+  }, [showSystemSources, showProperties, quietRefetch, fetchProperties]);
 
   // Refetch when any view (this one or another — Settings/RDF Sources rebuild,
   // ontology generator save, concept/collection edits) bumps the global nonce.

@@ -50,4 +50,37 @@ describe('useExploreConcepts system-ontology toggle', () => {
       expect(calledUrls()).toContain('/api/semantic-models/properties-grouped?include_system=true'),
     );
   });
+
+  it('toggling after the first load filters client-side without a reload', async () => {
+    const payload = (includeSystem: boolean) => ({
+      grouped_concepts: {
+        'my-scheme': [{ iri: 'urn:a', label: 'A', source_context: 'my-scheme', concept_type: 'concept' }],
+        ...(includeSystem
+          ? { 'ontos-ontology': [{ iri: 'urn:s', label: 'S', source_context: 'ontos-ontology', concept_type: 'class' }] }
+          : {}),
+      },
+      system_sources: ['ontos-ontology'],
+    });
+    fetchMock.mockImplementation(async (url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => (String(url).includes('concepts-grouped') ? payload(String(url).includes('include_system')) : {}),
+    }));
+
+    const { result } = renderHook(() => useExploreConcepts());
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(Object.keys(result.current.groupedConcepts)).toEqual(['my-scheme']);
+
+    act(() => useExploreSessionStore.getState().setShowSystemSources(true));
+    await waitFor(() => expect(Object.keys(result.current.groupedConcepts)).toContain('ontos-ontology'));
+    expect(result.current.isLoading).toBe(false);
+
+    fetchMock.mockClear();
+    act(() => useExploreSessionStore.getState().setShowSystemSources(false));
+    expect(Object.keys(result.current.groupedConcepts)).toEqual(['my-scheme']);
+    expect(result.current.filteredConcepts.map((c) => c.iri)).toEqual(['urn:a']);
+    act(() => useExploreSessionStore.getState().setShowSystemSources(true));
+    expect(Object.keys(result.current.groupedConcepts)).toContain('ontos-ontology');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
