@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import i18n from '@/i18n/config';
-import { contractVersionErrorText } from './contract-version-error';
+import { contractDraftErrorText, contractVersionErrorText } from './contract-version-error';
 
 const REFUSED = {
   errorCode: 'invalid_version_format',
@@ -33,6 +33,35 @@ describe('contractVersionErrorText', () => {
   it('gives the generic message for any other failure', () => {
     expect(contractVersionErrorText({ errorCode: null, errorParams: null }, '2.0.0', i18n.t)).toBe(
       'Failed to create new version.',
+    );
+  });
+});
+
+describe('contractDraftErrorText', () => {
+  afterEach(async () => {
+    await i18n.changeLanguage('en');
+  });
+
+  const REFUSED_DRAFT = {
+    error: 'new_version must be in format X.Y.Z or X.Y.Z-draft',
+    errorCode: 'invalid_version_format',
+    errorParams: { version: '1.0-draft' },
+  };
+
+  it("names the contract's own version, in Portuguese", async () => {
+    await i18n.changeLanguage('pt');
+
+    expect(contractDraftErrorText(REFUSED_DRAFT, '1.0', i18n.t)).toBe(
+      'A versão "1.0" deste contrato não está no formato X.Y.Z, então não é possível criar um rascunho pessoal a partir dela. Crie uma nova versão (por exemplo 2.0.0).',
+    );
+  });
+
+  it("shows the API's message for another failure, never an object", () => {
+    expect(contractDraftErrorText({ error: 'Contract not found', errorCode: null }, '1.0', i18n.t)).toBe(
+      'Contract not found',
+    );
+    expect(contractDraftErrorText({ error: null, errorCode: null }, '1.0', i18n.t)).toBe(
+      'Failed to create personal draft',
     );
   });
 });

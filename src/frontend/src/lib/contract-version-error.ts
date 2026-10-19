@@ -18,3 +18,25 @@ export function contractVersionErrorText(
   }
   return t('data-contracts:detailsView.errors.createVersionFailed', 'Failed to create new version.');
 }
+
+/**
+ * The message for a failed "Clone for Editing" (`POST /clone-for-editing`): the personal
+ * draft gets the version `<version>-draft`, so a contract whose version isn't X.Y.Z (an
+ * imported `1.0`, say) is refused with `invalid_version_format`. The message names the
+ * contract's own version; any other failure shows the API's message, or the generic one.
+ */
+export function contractDraftErrorText(
+  response: Pick<ApiResponse<unknown>, 'error' | 'errorCode' | 'errorParams'>,
+  contractVersion: string | undefined,
+  t: TFunction,
+): string {
+  if (response.errorCode === 'invalid_version_format') {
+    return t('data-contracts:detailsView.errors.draftVersionFormat', {
+      version: contractVersion ?? '',
+    });
+  }
+  return (
+    response.error ||
+    t('data-contracts:detailsView.errors.createDraftFailed', 'Failed to create personal draft')
+  );
+}

@@ -521,7 +521,8 @@
       "approveFailed": "Falha ao aprovar",
       "rejectFailed": "Falha ao rejeitar",
       "startProfilingFailed": "Falha ao iniciar perfilamento",
-      "invalidVersionFormat": "\"{{version}}\" não é uma versão válida: uma nova versão usa o formato X.Y.Z, por exemplo 2.0.0."
+      "invalidVersionFormat": "\"{{version}}\" não é uma versão válida: uma nova versão usa o formato X.Y.Z, por exemplo 2.0.0.",
+      "draftVersionFormat": "A versão \"{{version}}\" deste contrato não está no formato X.Y.Z, então não é possível criar um rascunho pessoal a partir dela. Crie uma nova versão (por exemplo 2.0.0)."
     }
   },
   "list": {

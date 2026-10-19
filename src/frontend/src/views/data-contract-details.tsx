@@ -64,7 +64,7 @@ import type { DataProduct } from '@/types/data-product'
 import type { DataProfilingRun } from '@/types/data-contract'
 import { useCopilotContext } from '@/hooks/use-copilot-context'
 import { useApi } from '@/hooks/use-api'
-import { contractVersionErrorText } from '@/lib/contract-version-error'
+import { contractDraftErrorText, contractVersionErrorText } from '@/lib/contract-version-error'
 import CertificationBadge from '@/components/common/certification-badge'
 import PublicationScopeBadge from '@/components/common/publication-scope-badge'
 import { DirectCertifyDialog, DirectPublishDialog } from '@/components/common/direct-lifecycle-dialogs'
@@ -804,15 +804,11 @@ export default function DataContractDetails() {
   const handleCloneForEditing = async () => {
     if (!contractId) return
     try {
-      const res = await fetch(`/api/data-contracts/${contractId}/clone-for-editing`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      })
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}))
-        throw new Error(errorData.detail || t('data-contracts:detailsView.errors.createDraftFailed', 'Failed to create personal draft'))
+      const response = await post<{ id: string }>(`/api/data-contracts/${contractId}/clone-for-editing`, {})
+      if (response.error || !response.data?.id) {
+        throw new Error(contractDraftErrorText(response, contract?.version, t))
       }
-      const data = await res.json()
+      const data = response.data
       toast({
         title: t('data-contracts:detailsView.toast.draftCreatedTitle', 'Personal Draft Created'),
         description: t('data-contracts:detailsView.toast.draftCreatedDesc', 'You can now edit this draft. It will only be visible to you until committed.'),

@@ -2,6 +2,8 @@
 
 - A new version made by the clone wasn't added to the search index (the old
   `create_new_version` path was), so it only showed up after a full reindex.
+- Committing a personal draft didn't add the now team-visible version to the
+  index either.
 - The clone requires `X.Y.Z`; a version in another form answered a generic
   400 "Invalid contract data". It now answers `invalid_version_format` with
   the version, so the page can say it in the user's language.
@@ -65,6 +67,23 @@ def test_a_personal_draft_is_not_added_to_the_search_index(db_session, imported)
     )
 
     manager._notify_index_upsert.assert_not_called()
+
+
+def test_a_committed_personal_draft_is_added_to_the_search_index(db_session, imported):
+    manager, cid = imported
+    manager._notify_index_upsert = MagicMock()
+    draft = manager.clone_contract_for_new_version(
+        db_session, cid, '1.0.0-draft', current_user='alice', as_personal_draft=True,
+    )
+    manager._notify_index_upsert.assert_not_called()
+
+    committed = manager.commit_personal_draft(
+        db_session, draft.id, '1.1.0', 'Ready for the team', current_user='alice',
+    )
+
+    assert committed.draft_owner_id is None
+    indexed = [call.args[0].id for call in manager._notify_index_upsert.call_args_list]
+    assert any(committed.id in item_id for item_id in indexed)
 
 
 # --- version format -------------------------------------------------------

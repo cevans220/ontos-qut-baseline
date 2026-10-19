@@ -5008,12 +5008,16 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
             db.refresh(draft)
             
             logger.info(f"Personal draft {draft_id} committed as version {new_version} by {current_user}")
-            return draft
-            
         except Exception as e:
             db.rollback()
             logger.error(f"Error committing personal draft {draft_id}: {e}", exc_info=True)
             raise
+
+        # The committed version is visible to the team now, so it is found in
+        # search right away, as a version made by the clone is; a personal
+        # draft is never indexed.
+        self._update_search_index(draft, db)
+        return draft
 
     def get_diff_from_parent(
         self,

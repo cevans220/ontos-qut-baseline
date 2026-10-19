@@ -521,7 +521,8 @@
       "approveFailed": "承認に失敗しました",
       "rejectFailed": "却下に失敗しました",
       "startProfilingFailed": "プロファイリングの開始に失敗しました",
-      "invalidVersionFormat": "「{{version}}」は有効なバージョンではありません。新しいバージョンは X.Y.Z の形式です（例: 2.0.0）。"
+      "invalidVersionFormat": "「{{version}}」は有効なバージョンではありません。新しいバージョンは X.Y.Z の形式です（例: 2.0.0）。",
+      "draftVersionFormat": "この契約のバージョン「{{version}}」は X.Y.Z の形式ではないため、個人用ドラフトを作成できません。代わりに新しいバージョン（例: 2.0.0）を作成してください。"
     }
   },
   "list": {

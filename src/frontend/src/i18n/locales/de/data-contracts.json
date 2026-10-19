@@ -521,7 +521,8 @@
       "approveFailed": "Genehmigung fehlgeschlagen",
       "rejectFailed": "Ablehnung fehlgeschlagen",
       "startProfilingFailed": "Profilierung konnte nicht gestartet werden",
-      "invalidVersionFormat": "\"{{version}}\" ist keine gültige Version: Eine neue Version hat die Form X.Y.Z, zum Beispiel 2.0.0."
+      "invalidVersionFormat": "\"{{version}}\" ist keine gültige Version: Eine neue Version hat die Form X.Y.Z, zum Beispiel 2.0.0.",
+      "draftVersionFormat": "Die Version \"{{version}}\" dieses Vertrags hat nicht die Form X.Y.Z, daher kann kein persönlicher Entwurf daraus erstellt werden. Erstellen Sie stattdessen eine neue Version (zum Beispiel 2.0.0)."
     }
   },
   "list": {
