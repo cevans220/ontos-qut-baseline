@@ -19,6 +19,19 @@ describe('complianceRunErrorText', () => {
     expect(text).toBe('Não foi possível interpretar a regra: Parser error at line 1');
   });
 
+  it('translates the entity-load error with its entity type', async () => {
+    await i18n.changeLanguage('pt');
+    const text = complianceRunErrorText(i18n.t, {
+      error_message: 'Could not load the data_contract entities',
+      error_code: 'entities_load_failed',
+      error_params: { entityType: 'data_contract' },
+    });
+
+    expect(text).toBe(
+      'Não foi possível carregar as entidades data_contract, por isso a regra não pôde ser avaliada.',
+    );
+  });
+
   it('translates the tag-load error with its entity type', async () => {
     await i18n.changeLanguage('pt');
     const text = complianceRunErrorText(i18n.t, {

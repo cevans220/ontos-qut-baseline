@@ -214,6 +214,88 @@ def create_engine_from_params(
 
 
 # ============================================================================
+# Database Schema Check
+# ============================================================================
+
+class SchemaRevisionError(RuntimeError):
+    """The database schema is older than the one this code reads."""
+
+
+def _alembic_script_location(import_path: Optional[str]) -> Optional[Path]:
+    """The Alembic scripts shipped with this code, if any.
+
+    The backend source archive carries them next to the ``src`` package; a
+    source directory (and a local checkout) has them in ``backend/alembic``.
+    """
+    candidates = []
+    if import_path:
+        candidates.append(Path(import_path) / "alembic")
+    if _entry_file is not None:
+        candidates.append(Path(_entry_file).resolve().parent.parent.parent.parent / "alembic")
+    for candidate in candidates:
+        if (candidate / "versions").is_dir():
+            return candidate
+    return None
+
+
+def check_schema_revision(engine: Engine, script_location: Optional[Path]) -> None:
+    """Fail when the database is behind the Alembic head of this code.
+
+    The app migrates its database on startup, but this job doesn't: run on a
+    database that missed a migration, the queries of the code fail, and the
+    rules on the entities they read can't be evaluated (#813). A database
+    newer than this code (the job was installed by an older app version) is
+    reported but not refused: reinstalling the workflow deploys the current
+    code.
+    """
+    if script_location is None:
+        print("  WARNING: no Alembic scripts with this code, database schema revision not checked")
+        return
+
+    from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+    from alembic.script.revision import RevisionError
+    from alembic.util.exc import CommandError
+
+    script = ScriptDirectory(str(script_location))
+    head = script.get_current_head()
+    with engine.connect() as conn:
+        current = MigrationContext.configure(conn).get_current_heads()
+
+    if current == (head,):
+        print(f"  ✓ Database schema at revision {head}")
+        return
+    if not current:
+        message = (
+            f"The database has no Alembic revision, but this code expects {head}. "
+            "Start the Ontos app against this database first: it creates and migrates the schema."
+        )
+        print(f"  ERROR: {message}")
+        raise SchemaRevisionError(message)
+
+    known = []
+    for revision in current:
+        try:
+            known.append(script.get_revision(revision) is not None)
+        except (CommandError, RevisionError):
+            known.append(False)
+    if not all(known):
+        print(
+            f"  WARNING: database schema revision {', '.join(current)} is newer than this "
+            f"code (head {head}); reinstall the Compliance Checks workflow to deploy the current code"
+        )
+        return
+
+    message = (
+        f"The database schema is at revision {', '.join(current)}, behind the revision "
+        f"this code expects ({head}). Upgrade the database before running compliance checks: "
+        "restart the Ontos app (it migrates on startup) or run `alembic upgrade head`."
+    )
+    print(f"  ERROR: {message}")
+    raise SchemaRevisionError(message)
+
+
+# ============================================================================
 # Policy Loading & Execution
 # ============================================================================
 
@@ -370,7 +452,7 @@ def main() -> None:
 
     args, _ = parser.parse_known_args()
 
-    _add_backend_source_path(args.backend_source_path)
+    import_path = _add_backend_source_path(args.backend_source_path)
 
     # Parse arguments
     policy_filter = args.policy_filter
@@ -424,6 +506,9 @@ def main() -> None:
         instance_name=args.lakebase_instance_name
     )
     print("  ✓ Database connection established")
+
+    print("\nChecking the database schema revision...")
+    check_schema_revision(engine, _alembic_script_location(import_path))
 
     # Create session
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -484,6 +569,15 @@ def main() -> None:
                 print(f"  - {r['policy_name']}: {status} (score: {score}%)")
 
         print("")
+
+        # A run that couldn't evaluate its rule fails the job, so the failure
+        # shows on the job run and not only in the run history of the policy.
+        not_evaluated = [r for r in results if r.get("status") in ("failed", "error")]
+        if not_evaluated:
+            print(f"ERROR: {len(not_evaluated)} of {len(results)} policies could not be evaluated:")
+            for r in not_evaluated:
+                print(f"  - {r['policy_name']}: {r.get('error')}")
+            sys.exit(1)
 
     finally:
         db.close()

@@ -250,6 +250,24 @@ class AppEntityLoader(EntityLoader):
             tags_by_entity[str(entity_id)] = values
         return tags_by_entity
 
+    def _load(self, entity_type: str, query):
+        """Rows of one entity type, read by ``query()`` in a savepoint.
+
+        A failure raises EntityLoadError: the rules on that type must fail,
+        not pass with no entities to check, as they did when the table didn't
+        match the schema the code expects (#813). The savepoint keeps the
+        session usable on Postgres, so the run can still be recorded as failed.
+        """
+        try:
+            with self.db.begin_nested():
+                return query()
+        except Exception as e:
+            logger.exception("Failed to load %s entities for compliance", entity_type)
+            error = EntityLoadError(f"Could not load the {entity_type} entities")
+            # A code the UI translates; the message stays the fallback
+            error.error_code, error.error_params = 'entities_load_failed', {'entityType': entity_type}
+            raise error from e
+
     def load_entities(
         self,
         entity_types: List[str],
@@ -259,92 +277,84 @@ class AppEntityLoader(EntityLoader):
 
         NOTE: repositories expose get_multi() (CRUDBase), not list(); the Db
         models carry owner_team_id/domain_id rather than owner/domain/tags
-        attributes. Each entity type loads in its own try block so a failure
-        in one type cannot silently suppress every other type.
+        attributes. Only the types a rule matches are loaded; a type that
+        can't be loaded raises EntityLoadError (see _load).
         """
         # Data Products
         if 'data_product' in entity_types:
-            try:
-                from src.repositories.data_products_repository import data_product_repo
-                from src.repositories.entity_domain_association_repository import entity_domain_repo
+            from src.repositories.data_products_repository import data_product_repo
+            from src.repositories.entity_domain_association_repository import entity_domain_repo
+
+            def products_and_domains():
                 # is_admin: the products repo is fail-closed per caller scope;
                 # compliance evaluates system-wide and its route is already
                 # permission-checked, so it must see every product.
                 products = data_product_repo.get_multi(self.db, limit=1000, is_admin=True)
                 # Domain moved to the entity_domain_associations junction; batch-load the
                 # primary domain name per product (the legacy `domain` column was dropped).
-                domains_map = entity_domain_repo.get_domains_for_entities(
+                domains = entity_domain_repo.get_domains_for_entities(
                     self.db, entity_type="data_product", entity_ids=[str(p.id) for p in products]
                 ) if products else {}
-                tags_map = self._tags_by_entity('data_product', [str(p.id) for p in products])
-                for product in products:
-                    assigned = domains_map.get(str(product.id), [])
-                    primary_domain = next((a.domain_name for a in assigned if a.is_primary), None)
-                    yield {
-                        'type': 'data_product',
-                        'id': product.id,
-                        'name': product.name,
-                        'description': getattr(product, 'description_purpose', None)
-                                       or getattr(product, 'description', None),
-                        'domain': primary_domain,
-                        'status': product.status,
-                        'version': getattr(product, 'version', None),
-                        'owner': getattr(product, 'owner_team_id', None),
-                        'tags': tags_map.get(str(product.id), {}),
-                        'created_at': getattr(product, 'created_at', None),
-                        'updated_at': getattr(product, 'updated_at', None),
-                    }
-            except EntityLoadError:
-                raise
-            except Exception:
-                logger.exception("Failed to load data products for compliance")
+                return products, domains
+
+            products, domains_map = self._load('data_product', products_and_domains)
+            tags_map = self._tags_by_entity('data_product', [str(p.id) for p in products])
+            for product in products:
+                assigned = domains_map.get(str(product.id), [])
+                primary_domain = next((a.domain_name for a in assigned if a.is_primary), None)
+                yield {
+                    'type': 'data_product',
+                    'id': product.id,
+                    'name': product.name,
+                    'description': getattr(product, 'description_purpose', None)
+                                   or getattr(product, 'description', None),
+                    'domain': primary_domain,
+                    'status': product.status,
+                    'version': getattr(product, 'version', None),
+                    'owner': getattr(product, 'owner_team_id', None),
+                    'tags': tags_map.get(str(product.id), {}),
+                    'created_at': getattr(product, 'created_at', None),
+                    'updated_at': getattr(product, 'updated_at', None),
+                }
 
         # Data Contracts
         if 'data_contract' in entity_types:
-            try:
-                from src.repositories.data_contracts_repository import data_contract_repo
-                contracts = data_contract_repo.get_multi(self.db, limit=1000)
-                tags_map = self._tags_by_entity('data_contract', [str(c.id) for c in contracts])
-                for contract in contracts:
-                    yield {
-                        'type': 'data_contract',
-                        'id': contract.id,
-                        'name': contract.name,
-                        'description': getattr(contract, 'description_purpose', None),
-                        'status': contract.status,
-                        'version': getattr(contract, 'version', None),
-                        'owner': getattr(contract, 'owner_team_id', None),
-                        'domain': getattr(contract, 'domain_id', None),
-                        'tags': tags_map.get(str(contract.id), {}),
-                        'created_at': getattr(contract, 'created_at', None),
-                        'updated_at': getattr(contract, 'updated_at', None),
-                    }
-            except EntityLoadError:
-                raise
-            except Exception:
-                logger.exception("Failed to load data contracts for compliance")
+            from src.repositories.data_contracts_repository import data_contract_repo
+            contracts = self._load(
+                'data_contract', lambda: data_contract_repo.get_multi(self.db, limit=1000)
+            )
+            tags_map = self._tags_by_entity('data_contract', [str(c.id) for c in contracts])
+            for contract in contracts:
+                yield {
+                    'type': 'data_contract',
+                    'id': contract.id,
+                    'name': contract.name,
+                    'description': getattr(contract, 'description_purpose', None),
+                    'status': contract.status,
+                    'version': getattr(contract, 'version', None),
+                    'owner': getattr(contract, 'owner_team_id', None),
+                    'domain': getattr(contract, 'domain_id', None),
+                    'tags': tags_map.get(str(contract.id), {}),
+                    'created_at': getattr(contract, 'created_at', None),
+                    'updated_at': getattr(contract, 'updated_at', None),
+                }
 
         # Domains
         if 'domain' in entity_types:
-            try:
-                from src.repositories.data_domain_repository import data_domain_repo
-                domains = data_domain_repo.get_multi(self.db, limit=1000)
-                tags_map = self._tags_by_entity('data_domain', [str(d.id) for d in domains])
-                for domain in domains:
-                    yield {
-                        'type': 'domain',
-                        'id': domain.id,
-                        'name': domain.name,
-                        'description': getattr(domain, 'description', None),
-                        'owner': getattr(domain, 'owner_team_id', None),
-                        'tags': tags_map.get(str(domain.id), {}),
-                        'created_at': getattr(domain, 'created_at', None),
-                        'updated_at': getattr(domain, 'updated_at', None),
-                    }
-            except EntityLoadError:
-                raise
-            except Exception:
-                logger.exception("Failed to load domains for compliance")
+            from src.repositories.data_domain_repository import data_domain_repo
+            domains = self._load('domain', lambda: data_domain_repo.get_multi(self.db, limit=1000))
+            tags_map = self._tags_by_entity('data_domain', [str(d.id) for d in domains])
+            for domain in domains:
+                yield {
+                    'type': 'domain',
+                    'id': domain.id,
+                    'name': domain.name,
+                    'description': getattr(domain, 'description', None),
+                    'owner': getattr(domain, 'owner_team_id', None),
+                    'tags': tags_map.get(str(domain.id), {}),
+                    'created_at': getattr(domain, 'created_at', None),
+                    'updated_at': getattr(domain, 'updated_at', None),
+                }
 
         # Glossary Terms - Now stored as RDF concepts in KnowledgeCollections
         # Compliance checks for glossary terms should query the semantic models manager
@@ -355,22 +365,20 @@ class AppEntityLoader(EntityLoader):
 
         # Reviews
         if 'review' in entity_types:
-            try:
-                from src.repositories.data_asset_reviews_repository import data_asset_review_repo
-                for review in data_asset_review_repo.get_multi(self.db, limit=1000):
-                    yield {
-                        'type': 'review',
-                        'id': review.id,
-                        'asset_id': getattr(review, 'asset_id', None),
-                        'asset_type': getattr(review, 'asset_type', None),
-                        'status': review.status,
-                        'reviewer': getattr(review, 'reviewer', None),
-                        'requester': getattr(review, 'requester', None),
-                        'created_at': getattr(review, 'created_at', None),
-                        'updated_at': getattr(review, 'updated_at', None),
-                    }
-            except Exception:
-                logger.exception("Failed to load reviews for compliance")
+            from src.repositories.data_asset_reviews_repository import data_asset_review_repo
+            reviews = self._load('review', lambda: data_asset_review_repo.get_multi(self.db, limit=1000))
+            for review in reviews:
+                yield {
+                    'type': 'review',
+                    'id': review.id,
+                    'asset_id': getattr(review, 'asset_id', None),
+                    'asset_type': getattr(review, 'asset_type', None),
+                    'status': review.status,
+                    'reviewer': getattr(review, 'reviewer', None),
+                    'requester': getattr(review, 'requester', None),
+                    'created_at': getattr(review, 'created_at', None),
+                    'updated_at': getattr(review, 'updated_at', None),
+                }
 
 
 class EntityIterator:
