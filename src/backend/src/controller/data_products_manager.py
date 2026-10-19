@@ -1585,11 +1585,9 @@ class DataProductsManager(DeliveryMixin, SearchableAsset):
         Raises:
             ValueError: If product not found or invalid status
         """
-        from datetime import datetime
         from uuid import uuid4
         from src.common.workflow_triggers import get_trigger_registry
         from src.models.process_workflows import EntityType
-        from src.models.data_asset_reviews import AssetType, ReviewedAssetStatus
         
         product_db = self._repo.get(db=self._db, id=product_id)
         if not product_db:
@@ -1605,34 +1603,12 @@ class DataProductsManager(DeliveryMixin, SearchableAsset):
         # Then transition to UNDER_REVIEW
         self.transition_status(product_id, 'under_review', current_user)
         
-        now = datetime.utcnow()
         request_id = str(uuid4())
-        
-        # Create asset review record
-        try:
-            from src.controller.data_asset_reviews_manager import DataAssetReviewManager
-            from src.models.data_asset_reviews import ReviewedAsset as ReviewedAssetApi
-            
-            if not self._notifications_manager:
-                logger.warning("NotificationsManager not available for review workflow")
-            
-            review_manager = DataAssetReviewManager(
-                db=self._db, 
-                ws_client=self._ws_client, 
-                notifications_manager=self._notifications_manager
-            )
-            
-            review_asset = ReviewedAssetApi(
-                id=str(uuid4()),
-                asset_fqn=f"product:{product_id}",
-                asset_type=AssetType.DATA_PRODUCT,
-                status=ReviewedAssetStatus.PENDING,
-                updated_at=now
-            )
-            logger.info(f"Created asset review record for product {product_id}")
-        except Exception as e:
-            logger.warning(f"Failed to create asset review record: {e}", exc_info=True)
-        
+
+        # The review record is created by the review workflow's
+        # ``create_asset_review`` step (as ``product:<id>``, type DATA_PRODUCT),
+        # which also resolves the reviewer when none is named.
+
         # Fire the ON_REQUEST_REVIEW trigger
         trigger_registry = get_trigger_registry(self._db)
         executions = trigger_registry.on_request_review(

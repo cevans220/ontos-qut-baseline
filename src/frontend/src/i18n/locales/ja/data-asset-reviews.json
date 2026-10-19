@@ -120,6 +120,8 @@
     "fqnLabel": "FQN:",
     "typeLabel": "タイプ:",
     "contentPreview": "コンテンツプレビュー / 定義",
+    "openDataProduct": "データプロダクトを開く",
+    "openDataContract": "データ契約を開く",
     "yourReview": "あなたのレビュー",
     "statusLabel": "ステータス *",
     "statusPlaceholder": "ステータスを設定",

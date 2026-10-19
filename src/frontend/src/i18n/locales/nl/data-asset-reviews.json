@@ -120,6 +120,8 @@
     "fqnLabel": "FQN:",
     "typeLabel": "Type:",
     "contentPreview": "Inhoudsvoorbeeld / Definitie",
+    "openDataProduct": "Dataproduct openen",
+    "openDataContract": "Datacontract openen",
     "yourReview": "Jouw Beoordeling",
     "statusLabel": "Status *",
     "statusPlaceholder": "Status instellen",

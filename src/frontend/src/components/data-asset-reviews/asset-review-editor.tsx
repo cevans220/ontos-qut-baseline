@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
+import { appEntityAssetLink } from '@/lib/app-entity-asset';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from '@/components/ui/textarea';
@@ -262,6 +264,20 @@ export default function AssetReviewEditor({
 
         if (asset.asset_type === AssetType.MODEL) {
             return <p className="text-sm text-muted-foreground">{t('data-asset-reviews:editor.modelReviewNotImplemented')}</p>;
+        }
+
+        // A data product or contract is reviewed on its own page
+        const entityLink = appEntityAssetLink(asset);
+        if (entityLink) {
+            return (
+                <Button asChild variant="outline" size="sm">
+                    <Link to={entityLink}>
+                        {asset.asset_type === AssetType.DATA_PRODUCT
+                            ? t('data-asset-reviews:editor.openDataProduct')
+                            : t('data-asset-reviews:editor.openDataContract')}
+                    </Link>
+                </Button>
+            );
         }
 
         return <p className="text-sm text-muted-foreground">{t('data-asset-reviews:editor.noPreviewAvailable')}</p>;

@@ -1523,6 +1523,7 @@ class CreateAssetReviewStepHandler(StepHandler):
             
             # Determine asset FQN
             asset_fqns = []
+            title = None
             if use_entity_as_asset:
                 # Try to get FQN from entity (TriggerContext attributes)
                 entity_type = tc.entity_type if tc else ''
@@ -1544,14 +1545,12 @@ class CreateAssetReviewStepHandler(StepHandler):
                            entity_name or entity_id)
                     if fqn:
                         asset_fqns.append(fqn)
-                elif entity_type == 'data_contract':
-                    fqn = context.entity.get('name') or entity_data.get('name') or entity_name or entity_id
-                    if fqn:
-                        asset_fqns.append(f"contract:{fqn}")
-                elif entity_type == 'data_product':
-                    fqn = context.entity.get('name') or entity_data.get('name') or entity_name or entity_id
-                    if fqn:
-                        asset_fqns.append(f"product:{fqn}")
+                elif entity_type in ('data_contract', 'data_product'):
+                    # App entities are reviewed by id (names change and aren't unique)
+                    prefix = 'contract' if entity_type == 'data_contract' else 'product'
+                    if entity_id:
+                        asset_fqns.append(f"{prefix}:{entity_id}")
+                        title = f"Review of {entity_name or entity_id}"[:200]
                 else:
                     # Generic fallback
                     fqn = entity_name or entity_id
@@ -1571,7 +1570,7 @@ class CreateAssetReviewStepHandler(StepHandler):
             from src.repositories.data_asset_reviews_repository import data_asset_review_repo
             from src.models.data_asset_reviews import (
                 DataAssetReviewRequest, ReviewedAsset, 
-                ReviewRequestStatus, ReviewedAssetStatus, AssetType
+                ReviewRequestStatus, ReviewedAssetStatus, AssetType, app_entity_asset_type,
             )
             from uuid import uuid4
             from datetime import datetime
@@ -1581,15 +1580,8 @@ class CreateAssetReviewStepHandler(StepHandler):
             # Build assets list
             assets_to_review = []
             for fqn in asset_fqns:
-                # Determine asset type from FQN prefix
-                if fqn.startswith('dataset:'):
-                    asset_type = AssetType.TABLE  # Datasets map to tables
-                elif fqn.startswith('contract:'):
-                    asset_type = AssetType.TABLE  # Contracts map to tables
-                elif fqn.startswith('product:'):
-                    asset_type = AssetType.TABLE  # Products map to tables
-                else:
-                    asset_type = AssetType.TABLE  # Default for UC assets
+                # Contracts and products by their prefix; datasets and UC assets are tables
+                asset_type = app_entity_asset_type(fqn) or AssetType.TABLE
                 
                 assets_to_review.append(ReviewedAsset(
                     id=str(uuid4()),
@@ -1604,6 +1596,7 @@ class CreateAssetReviewStepHandler(StepHandler):
                 id=review_id,
                 requester_email=requester_email,
                 reviewer_email=reviewer_email,
+                title=title,
                 status=ReviewRequestStatus.QUEUED,
                 notes=full_notes,
                 created_at=datetime.utcnow(),
@@ -1637,7 +1630,7 @@ class CreateAssetReviewStepHandler(StepHandler):
         """The reviewer's email: the one named in the request, else the first
         person ``reviewer_role`` resolves to other than the requester (as the
         approval steps resolve it), else a member of the groups of the role it
-        resolves to (or of ``reviewer_role`` itself)."""
+        resolves to (or of ``reviewer_role`` itself), else an admin."""
         tc = context.trigger_context
         requester = requester_email.lower()
         requested = (tc.entity_data or {}).get('reviewer_email') if tc else None
@@ -1651,8 +1644,12 @@ class CreateAssetReviewStepHandler(StepHandler):
                 roles.append(recipient)
             elif '@' in recipient and recipient.lower() != requester:
                 return recipient
-        # A role (e.g. Data Stewards when a domain has no owner): one of its members
-        for role_name in roles or [reviewer_role]:
+        # A role (e.g. Data Stewards when a domain has no owner): one of its members,
+        # and the admins last, as for owner approvals (``_owner_approvers``)
+        roles = roles or [reviewer_role]
+        if not any(r.lower().replace(' ', '').replace('_', '') == 'admin' for r in roles):
+            roles.append('Admin')
+        for role_name in roles:
             reviewer = self._resolve_reviewer_from_role(role_name, exclude=requester_email)
             if reviewer:
                 return reviewer

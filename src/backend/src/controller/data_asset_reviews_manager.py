@@ -24,7 +24,7 @@ from src.models.data_asset_reviews import (
     DataAssetReviewRequestUpdateStatus,
     ReviewedAsset as ReviewedAssetApi,
     ReviewedAssetUpdate,
-    ReviewRequestStatus, ReviewedAssetStatus, AssetType,
+    ReviewRequestStatus, ReviewedAssetStatus, AssetType, app_entity_asset_type,
     AssetAnalysisRequest, AssetAnalysisResponse # Added LLM models
 )
 # Import Repository
@@ -117,6 +117,9 @@ class DataAssetReviewManager(SearchableAsset): # Inherit from SearchableAsset
             return AssetType.MDM_MATCH
         if fqn.startswith('term-mapping://'):
             return AssetType.CONCEPT_MAPPING_SUGGESTION
+        app_entity_type = app_entity_asset_type(fqn)
+        if app_entity_type:
+            return app_entity_type
 
         if not self._ws_client:
             logger.warning(f"Cannot determine asset type for {fqn}: WorkspaceClient not available.")

@@ -66,6 +66,21 @@ class AssetType(str, Enum):
     EXTERNAL = "external"
     OTHER = "other"
 
+
+# App entities are reviewed under ``<prefix><entity id>`` instead of a UC name.
+APP_ENTITY_FQN_PREFIXES = {
+    'contract:': AssetType.DATA_CONTRACT,
+    'product:': AssetType.DATA_PRODUCT,
+}
+
+
+def app_entity_asset_type(fqn: str) -> Optional[AssetType]:
+    """The asset type of an app entity FQN (``product:<id>``, ``contract:<id>``), else None."""
+    for prefix, asset_type in APP_ENTITY_FQN_PREFIXES.items():
+        if fqn.startswith(prefix):
+            return asset_type
+    return None
+
 # --- Pydantic Models --- #
 
 # Model for an asset being reviewed within a request
