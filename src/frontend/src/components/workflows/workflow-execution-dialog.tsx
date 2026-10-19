@@ -364,7 +364,7 @@ export function WorkflowExecutionDialog({
             <div className="flex items-start gap-2 p-3 rounded-lg bg-destructive/10 border border-destructive/30">
               <AlertCircle className="h-4 w-4 text-destructive mt-0.5" />
               <div className="text-sm text-destructive">
-                <ExecutionErrorText message={execution.error_message} />
+                <ExecutionErrorText execution={stepResults ? { ...execution, step_executions: stepResults } : execution} t={t} />
               </div>
             </div>
           )}
@@ -374,8 +374,23 @@ export function WorkflowExecutionDialog({
   );
 }
 
-// The execution's error; a shipped fail step's message in the user's language
-function ExecutionErrorText({ message }: { message: string }) {
+// The execution's error. When it is the failed step's error and that step sent a
+// code, the step's translated text; otherwise a shipped fail step's message in
+// the user's language.
+export function getExecutionErrorText(
+  execution: Pick<WorkflowExecution, 'error_message' | 'step_executions'>,
+  t: TFunction
+): string | undefined {
+  const message = execution.error_message || undefined;
+  if (!message) return undefined;
+  const codedRun = [...(execution.step_executions || [])].reverse().find(
+    run => run.error_message === message && typeof run.result_data?.error_code === 'string'
+  );
+  return codedRun ? getStepErrorText(codedRun, t) : undefined;
+}
+
+function ExecutionErrorText({ execution, t }: { execution: WorkflowExecution; t: TFunction }) {
   const defaultWorkflowText = useDefaultWorkflowText();
-  return <>{defaultWorkflowText(message)}</>;
+  const message = execution.error_message || '';
+  return <>{getExecutionErrorText(execution, t) ?? defaultWorkflowText(message)}</>;
 }
