@@ -89,6 +89,7 @@ from src.models.data_products import (
 )
 from src.models.import_results import BatchImportResult, ImportItemResult
 from src.common.entity_kind import classify_import_entity, describe_import_entity
+from src.common.api_errors import CodedValueError
 from src.common.lifecycle_status import (
     PRODUCT_STATUSES,
     check_status_unchanged,
@@ -1903,6 +1904,18 @@ class DataProductsManager(DeliveryMixin, SearchableAsset):
                         index=index, source_file=filename, source_id=source_id,
                         entity_id=created.id, name=created.name, status="created",
                         **(status_note or {}),
+                    ))
+                except CodedValueError as e:
+                    # The app's own refusal (e.g. ``certified`` as a status):
+                    # its English message is safe to show, and its code lets
+                    # the UI translate it.
+                    logger.info(
+                        "Refused product at batch index %d (file %s): %s", index, filename, e,
+                    )
+                    result.add(ImportItemResult(
+                        index=index, source_file=filename, source_id=source_id,
+                        name=product_data.get('name'), status="failed",
+                        message=str(e), code=e.code, params=e.params or None,
                     ))
                 except Exception as e:
                     # Log full detail (may carry SQL/internal text); keep the

@@ -215,7 +215,7 @@ def test_a_rejected_product_review_returns_to_draft(db_session):
     assert _complete_product_review(db_session, product, False) == 'draft'
 
 
-def test_a_blocking_gate_stops_a_product_review_and_tells_the_requester(db_session):
+def test_a_blocking_gate_stops_a_product_review_and_tells_requester_and_approver(db_session):
     from src.db_models.notifications import NotificationDb
 
     _gate(db_session, entity_types=('data_product',))
@@ -223,8 +223,14 @@ def test_a_blocking_gate_stops_a_product_review_and_tells_the_requester(db_sessi
 
     assert _complete_product_review(db_session, product, True) == 'under_review'
     notes = db_session.query(NotificationDb).filter(NotificationDb.subtitle == product.name).all()
-    assert [n.recipient for n in notes] == ['producer@example.com']
-    assert json.loads(notes[0].data)['i18n']['description'] == 'notifications:statusChangeNotApplied.refused'
+    assert sorted(n.recipient for n in notes) == ['producer@example.com', 'steward@example.com']
+    for note in notes:
+        i18n = json.loads(note.data)['i18n']
+        assert i18n['description'] == 'notifications:statusChangeNotApplied.reviewNotApplied'
+        assert i18n['statusNamespace'] == 'data-products'
+        # The gate's refusal, coded, for the bell to translate
+        assert i18n['error']['code'] == 'status_change_blocked'
+        assert i18n['error']['params']['reasons'][0]['workflow'] == 'Blocking Gate'
 
 
 def test_a_product_no_longer_in_review_is_left_alone(db_session):

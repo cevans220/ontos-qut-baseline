@@ -119,3 +119,8 @@ def test_certified_is_still_refused_on_import(kind, product_manager, contract_ma
         )
 
     assert (result.created, result.failed) == (0, 1)
+    # The refusal says why, with a code the UI translates (not "See server logs")
+    item = result.items[0]
+    assert item.code == 'certified_is_not_a_status'
+    assert "'certified' is not a status" in item.message
+    assert 'server logs' not in item.message

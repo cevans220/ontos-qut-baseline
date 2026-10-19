@@ -3087,13 +3087,41 @@ class WorkflowExecutor:
             )
             self._notify_status_not_changed(
                 trigger_context, target_status, str(e), responded_by,
-                'notApplied', {'reason': str(e)},
+                'notApplied', {'reason': str(e)}, error=e,
+            )
+            # The workflow has already told the requester the review was
+            # decided; say that the contract's status didn't follow.
+            self._notify_status_not_changed(
+                trigger_context, target_status, str(e), trigger_context.user_email,
+                'requesterNotApplied', {'reason': str(e)}, error=e,
+                description=(
+                    f"The review of your contract was decided, but the contract was not "
+                    f"set to '{target_status}': {e}"
+                ),
             )
             return
         logger.info(
             "Data contract %s moved to '%s' after its review was decided",
             contract_id, target_status,
         )
+
+    @staticmethod
+    def _coded_error_i18n(error: Optional[Exception]) -> Dict[str, Any]:
+        """``data.i18n`` entries for the reason a status change was refused.
+
+        A refusal the app raises with a code (a blocking gate, a gate that
+        couldn't be evaluated, an invalid transition) is sent as
+        ``error = {code, message, params}``, so the bell can show the reason in
+        the user's language the same way the status change dialogs do. Any
+        other error keeps only its English text in ``params.reason``.
+        """
+        from src.common.api_errors import CodedValueError
+
+        if not isinstance(error, CodedValueError):
+            return {}
+        return {'error': {
+            'code': error.code, 'message': str(error), 'params': error.params or {},
+        }}
 
     def _notify_status_not_changed(
         self,
@@ -3103,11 +3131,15 @@ class WorkflowExecutor:
         responded_by: Optional[str],
         description_key: str,
         params: Dict[str, str],
+        error: Optional[Exception] = None,
+        description: Optional[str] = None,
     ) -> None:
-        """Warn the approver that their decision didn't change the contract.
+        """Warn ``responded_by`` that a review decision didn't change the contract.
 
         The English texts are stored; ``data.i18n`` carries the keys of the
-        frontend's ``notifications`` namespace so the bell can translate them.
+        frontend's ``notifications`` namespace so the bell can translate them,
+        the namespace of the contract status labels, and the coded error of a
+        refused transition (see ``_coded_error_i18n``).
         """
         if not responded_by:
             return
@@ -3121,7 +3153,7 @@ class WorkflowExecutor:
             type=NotificationType.WARNING,
             title="Contract status not changed",
             subtitle=trigger_context.entity_name or trigger_context.entity_id,
-            description=(
+            description=description or (
                 f"Your review decision was recorded, but the contract was not set to "
                 f"'{target_status}': {reason}"
             ),
@@ -3131,6 +3163,8 @@ class WorkflowExecutor:
                 'title': 'notifications:contractStatusNotChanged.title',
                 'description': f'notifications:contractStatusNotChanged.{description_key}',
                 'params': {'toStatus': target_status, **params},
+                'statusNamespace': 'data-contracts',
+                **self._coded_error_i18n(error),
             }},
         ))
         self._db.commit()
@@ -3299,11 +3333,12 @@ class WorkflowExecutor:
                 )
                 self._notify_status_change_not_applied(
                     trigger_context, product_id,
-                    f"The review of the data product ended, but the change to "
+                    f"The review of the data product was decided, but the change to "
                     f"'{target_status}' could not be applied: {e}",
-                    recipients=[trigger_context.user_email],
-                    description_key='refused',
+                    recipients=[trigger_context.user_email, responded_by],
+                    description_key='reviewNotApplied',
                     params={'toStatus': target_status, 'reason': str(e)},
+                    error=e,
                 )
                 return
         logger.info(
@@ -3393,6 +3428,7 @@ class WorkflowExecutor:
                 recipients=[trigger_context.user_email],
                 description_key='refused',
                 params={'toStatus': target_status, 'reason': str(e)},
+                error=e,
             )
             return
         logger.info(
@@ -3408,6 +3444,7 @@ class WorkflowExecutor:
         recipients: List[Optional[str]],
         description_key: str,
         params: Dict[str, Any],
+        error: Optional[Exception] = None,
     ) -> None:
         """Tell the given people that an approved status change was not applied.
 
@@ -3437,6 +3474,8 @@ class WorkflowExecutor:
                     'title': 'notifications:statusChangeNotApplied.title',
                     'description': f'notifications:statusChangeNotApplied.{description_key}',
                     'params': params,
+                    'statusNamespace': 'data-products',
+                    **self._coded_error_i18n(error),
                 }},
             ))
         if sent:
