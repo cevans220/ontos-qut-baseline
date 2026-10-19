@@ -680,7 +680,11 @@ class TriggerContext(BaseModel):
 class WorkflowStepExecutionResult(BaseModel):
     """Result of a step execution."""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    step_id: str
+    # The step's row id; None once the step was removed from the workflow
+    step_id: Optional[str] = None
+    # The step's step_id and name when it ran, kept if the step is removed
+    step_key: Optional[str] = None
+    step_name: Optional[str] = None
     status: StepExecutionStatus
     passed: Optional[bool] = None
     result_data: Optional[Dict[str, Any]] = None

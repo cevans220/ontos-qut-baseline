@@ -404,7 +404,11 @@ export interface TriggerContext {
 // Step execution result
 export interface WorkflowStepExecutionResult {
   id: string;
-  step_id: string;
+  // The step's row id; null once the step was removed from the workflow
+  step_id: string | null;
+  // The step's step_id and name when it ran, kept if the step is removed
+  step_key?: string | null;
+  step_name?: string | null;
   status: StepExecutionStatus;
   passed?: boolean;
   result_data?: Record<string, unknown>;

@@ -478,6 +478,8 @@
     "triggeredBy": "Acionado por: {{user}}",
     "workflowSteps": "Etapas do fluxo de trabalho",
     "loadDefinitionFailed": "Falha ao carregar definição do fluxo de trabalho",
+    "removedSteps": "Etapas removidas",
+    "removedStepsHint": "Estas etapas rodaram nesta execução e depois foram removidas do workflow.",
     "stepErrors": {
       "rule_entity_load_failed": "Não foi possível carregar {{entityType}} {{entityId}} para avaliar a regra",
       "rule_entity_not_found": "{{entityType}} {{entityId}} não foi encontrado, então a regra não pode ser avaliada"

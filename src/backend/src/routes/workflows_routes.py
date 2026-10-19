@@ -1748,6 +1748,8 @@ async def get_execution(
         step_executions.append({
             'id': se.id,
             'step_id': se.step_id,
+            'step_key': se.step_key,
+            'step_name': se.step_name,
             'status': se.status,
             'passed': se.passed,
             'result_data': json.loads(se.result_data) if se.result_data else None,

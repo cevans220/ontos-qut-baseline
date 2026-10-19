@@ -246,7 +246,8 @@ class ProcessWorkflowRepository:
         and are deleted with it, so recreating every step on save erased the
         results of all past executions. A step whose ``step_id`` is still in
         the workflow keeps its row and is updated in place; only the steps that
-        are no longer in it are deleted, with their results.
+        are no longer in it are deleted; their results stay, with the step's
+        ``step_id`` and name (``step_key``, ``step_name``) and no row id.
         """
         existing: Dict[str, WorkflowStepDb] = {}
         for db_step in db_workflow.steps:
@@ -429,11 +430,26 @@ class WorkflowExecutionRepository:
         result_data: Optional[dict] = None,
         error_message: Optional[str] = None,
         duration_ms: Optional[float] = None,
+        step_key: Optional[str] = None,
+        step_name: Optional[str] = None,
     ) -> WorkflowStepExecutionDb:
-        """Add a step execution result."""
+        """Add a step execution result.
+
+        ``step_id`` is the step's row id. The step's ``step_id`` and name are
+        stored with the result (``step_key``, ``step_name``), read from the step
+        when not given, so the result still names its step if the step is
+        removed from the workflow later.
+        """
+        if step_key is None or step_name is None:
+            db_step = db.get(WorkflowStepDb, step_id)
+            if db_step is not None:
+                step_key = step_key if step_key is not None else db_step.step_id
+                step_name = step_name if step_name is not None else db_step.name
         db_step_exec = WorkflowStepExecutionDb(
             execution_id=execution_id,
             step_id=step_id,
+            step_key=step_key,
+            step_name=step_name,
             status=status,
             passed=passed,
             result_data=json.dumps(result_data) if result_data else None,

@@ -5,6 +5,10 @@ Step results (``workflow_step_executions``) reference the step's row id, with
 with ``steps``, Load Defaults with ``update_existing``) deleted all the steps
 and created them again, so the results of every past execution were deleted
 and Recent Executions showed their steps as Pending.
+
+A step removed from the workflow loses its row, but its results stay
+(``ON DELETE SET NULL``, migration b7_workflow_step_results_kept) and keep the
+step's ``step_id`` and name.
 """
 import os
 
@@ -154,7 +158,18 @@ def test_results_survive_a_save_when_the_database_cascades(fk_session):
     assert count == 2
 
 
-def test_only_the_results_of_a_removed_step_go_with_it(fk_session):
+def test_a_result_names_its_step(db_session):
+    workflow = _workflow(db_session)
+    execution = _run(db_session, workflow)
+
+    results = db_session.query(WorkflowStepExecutionDb).filter(
+        WorkflowStepExecutionDb.execution_id == execution.id,
+    ).all()
+    assert {(r.step_key, r.step_name) for r in results} == {('check', 'Check'), ('done', 'Done')}
+
+
+def test_the_results_of_a_removed_step_stay_with_its_name(fk_session):
+    """Removing a step keeps its results: no row id any more, but its step_id and name."""
     workflow = _workflow(fk_session)
     execution = _run(fk_session, workflow)
     kept_check = _row_ids(workflow)['check']
@@ -167,4 +182,28 @@ def test_only_the_results_of_a_removed_step_go_with_it(fk_session):
     results = fk_session.query(WorkflowStepExecutionDb).filter(
         WorkflowStepExecutionDb.execution_id == execution.id,
     ).all()
-    assert [r.step_id for r in results] == [kept_check]
+    by_key = {r.step_key: r for r in results}
+    assert set(by_key) == {'check', 'done'}
+    assert by_key['check'].step_id == kept_check
+    assert by_key['done'].step_id is None
+    assert by_key['done'].step_name == 'Done'
+    assert fk_session.query(WorkflowStepDb).filter(
+        WorkflowStepDb.workflow_id == workflow.id, WorkflowStepDb.step_id == 'done',
+    ).count() == 0
+
+
+def test_an_execution_lists_the_result_of_a_removed_step(fk_session):
+    """The API model of the execution carries the removed step's result with its name."""
+    from src.common.workflow_executor import WorkflowExecutor
+
+    workflow = _workflow(fk_session)
+    execution = _run(fk_session, workflow)
+    process_workflow_repo.update(
+        fk_session, workflow.id, ProcessWorkflowUpdate(steps=[_steps()[0], _steps()[2]]),
+    )
+    fk_session.expire_all()
+
+    db_execution = workflow_execution_repo.get(fk_session, execution.id)
+    model = WorkflowExecutor(fk_session)._db_to_model(db_execution, workflow.name)
+    removed = [se for se in model.step_executions if se.step_id is None]
+    assert [(se.step_key, se.step_name) for se in removed] == [('done', 'Done')]
