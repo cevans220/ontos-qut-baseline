@@ -4,6 +4,7 @@ Tags tools for LLM.
 Tools for managing tags and assigning them to app objects.
 """
 
+import asyncio
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -63,7 +64,9 @@ class SearchTagsTool(BaseTool):
 
         try:
             # Tag index items store the namespace under extra_data['category'].
-            data = ctx.search_manager.query_index(
+            # Off the event loop: the query may be embedded by a remote endpoint (#1061).
+            data = await asyncio.to_thread(
+                ctx.search_manager.query_index,
                 query,
                 type_filter="tag",
                 filters={"category": namespace},

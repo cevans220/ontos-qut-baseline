@@ -4,6 +4,7 @@ Domains tools for LLM.
 Tools for searching, creating, updating, and deleting data domains.
 """
 
+import asyncio
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -57,7 +58,9 @@ class SearchDomainsTool(BaseTool):
             return ToolResult(success=False, error="Search not available", data={"domains": []})
 
         try:
-            data = ctx.search_manager.query_index(
+            # Off the event loop: the query may be embedded by a remote endpoint (#1061).
+            data = await asyncio.to_thread(
+                ctx.search_manager.query_index,
                 query,
                 type_filter="data-domain",
                 limit=limit,

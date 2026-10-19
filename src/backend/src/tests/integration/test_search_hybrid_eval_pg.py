@@ -196,3 +196,35 @@ def test_lakebase_engine_evaluation(capsys):
         assert r["hybrid"].recall_at_5 > r["semantic"].recall_at_5
     finally:
         teardown()
+
+
+def test_a_failing_semantic_list_degrades_to_keyword_results(pg_eval):
+    """A SQL error in the semantic list (here a query vector of the wrong size)
+    must not fail the search: it answers from the keyword lists."""
+    backend, config = pg_eval
+    with backend._session_factory() as db:
+        res = repo.hybrid_search(db, "inventory levels", query_vector=[0.1, 0.2, 0.3], config=config,
+                                 engine=backend.engine)
+        lexical = repo.search(db, "inventory levels", config=config, engine=backend.engine)
+    assert res["total_count"] == lexical["total_count"] > 0
+    assert [r["id"] for r in res["results"]] == [r["id"] for r in lexical["results"]]
+
+
+def test_typo_fallback_paging_is_exact_too(pg_eval):
+    backend, _ = pg_eval
+    query = "demmand forcast"  # no keyword match: trigram list + semantic list
+    titles = " ".join(f"{i.title} {i.description}" for i in ev.load_items()).lower()
+    assert not any(t in titles for t in query.split())   # really only the fallback matches
+    full = backend.search(query, mode="hybrid", limit=100)
+    assert full["total_count"] > 0
+    paged = [r["id"] for off in range(0, full["total_count"], 3)
+             for r in backend.search(query, mode="hybrid", limit=3, offset=off, include_facets=False)["results"]]
+    assert len(paged) == len(set(paged)) == full["total_count"]
+    assert sum(full["facets"]["type"].values()) == full["total_count"]
+
+
+def test_tag_queries_are_not_embedded(pg_eval):
+    backend, _ = pg_eval
+    calls = backend._embedder.stats.calls
+    backend.search_items("tag:pii", mode="hybrid")
+    assert backend._embedder.stats.calls == calls

@@ -4,6 +4,7 @@ Search tools for LLM.
 Tools for global search across all indexed features.
 """
 
+import asyncio
 from typing import Any, Dict, List, Optional
 
 from src.common.logging import get_logger
@@ -65,7 +66,9 @@ class GlobalSearchTool(BaseTool):
         try:
             # MCP has its own scope-based access control via tokens, so no per-user
             # permission filtering here — we search the shared index directly.
-            data = ctx.search_manager.query_index(
+            # Off the event loop: the query may be embedded by a remote endpoint (#1061).
+            data = await asyncio.to_thread(
+                ctx.search_manager.query_index,
                 query,
                 type_filter=type,
                 limit=limit,

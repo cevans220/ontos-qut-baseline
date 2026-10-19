@@ -4,6 +4,7 @@ Data Products tools for LLM.
 Tools for searching, creating, updating, and deleting data products.
 """
 
+import asyncio
 import json
 import uuid
 from typing import Any, Dict, List, Optional
@@ -212,7 +213,9 @@ class SearchDataProductsTool(BaseTool):
                 )
 
         try:
-            data = ctx.search_manager.query_index(
+            # Off the event loop: the query may be embedded by a remote endpoint (#1061).
+            data = await asyncio.to_thread(
+                ctx.search_manager.query_index,
                 query,
                 type_filter="data-product",
                 # 'domains' = full assigned-domain set, so the filter matches ANY

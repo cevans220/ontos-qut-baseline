@@ -964,7 +964,8 @@ async def update_search_config(
             }
 
         if config_update.hybrid is not None:
-            updates["hybrid"] = config_update.hybrid.model_dump(mode="json")
+            # Only the fields the request set, so a partial update keeps the rest.
+            updates["hybrid"] = config_update.hybrid.model_dump(mode="json", exclude_unset=True)
         
         # Apply updates
         updated_config = loader.update(updates)

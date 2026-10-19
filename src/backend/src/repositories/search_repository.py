@@ -187,7 +187,9 @@ def _matches_cte(
     return cte, s.params, s.order_by
 
 
-def _row_to_result(row: Any, with_score: bool, fields: Optional[List[str]] = None) -> Dict[str, Any]:
+def _row_to_result(
+    row: Any, with_score: bool, fields: Optional[List[str]] = None, score: Optional[float] = None,
+) -> Dict[str, Any]:
     """Postgres backend row → MCP result dict (mirror of ``_to_result`` in
     ``search_scoring.py``). ``feature_id`` is intentionally omitted; it
     duplicates ``type`` for MCP consumers."""
@@ -211,7 +213,9 @@ def _row_to_result(row: Any, with_score: bool, fields: Optional[List[str]] = Non
     for f in _RESULT_FIELDS:
         if extra.get(f):
             result[f] = extra[f]
-    if with_score:
+    if score is not None:  # fused RRF score (hybrid): small values, so more digits
+        result["relevance_score"] = round(float(score), 6)
+    elif with_score:
         result["relevance_score"] = round(float(m["score"]), 4)
     if fields:
         allowed = set(fields) | {"id"}
@@ -739,6 +743,7 @@ class _Fused:
     prefix: str
     rel: str
     params: Dict[str, Any]
+    rows: Dict[str, Any]  # full rows already read (the keyword window)
 
 
 def _rrf(lists: Sequence[tuple[float, Dict[str, int]]], k: int) -> Dict[str, float]:
@@ -747,6 +752,18 @@ def _rrf(lists: Sequence[tuple[float, Dict[str, int]]], k: int) -> Dict[str, flo
         for doc_id, rank in ranks.items():
             scores[doc_id] = scores.get(doc_id, 0.0) + weight / (k + rank)
     return scores
+
+
+def _optional_list(db: Session, what: str, fn) -> List[tuple[str, float]]:
+    """Run an optional ranked list (semantic, BM25) in a savepoint: if its SQL
+    fails (an index or operator missing, a vector of the wrong size), the
+    transaction stays usable and the search answers from the other lists."""
+    try:
+        with db.begin_nested():
+            return list(fn())
+    except Exception as e:
+        logger.warning(f"Hybrid search: {what} list unavailable, continuing without it: {e}")
+        return []
 
 
 def _fuse(
@@ -773,46 +790,50 @@ def _fuse(
     params.update(dparams)
 
     lists: List[tuple[float, Dict[str, int]]] = []
-    prefix, rel, lex_total, lex_ranks = "", "", 0, {}
-    order_by = ""
+    prefix, rel, lex_total, lex_ranks, window = "", "", 0, {}, {}
+    rank_sql = ""  # SELECT id, rn over the whole keyword list (for hits past the window)
     if mode == "hybrid":
         prefix, sparams, order_by = _matches_cte(config, tokens, where)
         params.update(sparams)
         n = max(h.candidate_limit, need)
         rows = list(db.execute(
-            text(f"{prefix}SELECT id, count(*) OVER() AS total_count FROM matches ORDER BY {order_by} LIMIT :hy_n"),
+            text(f"{prefix}SELECT *, count(*) OVER() AS total_count FROM matches ORDER BY {order_by} LIMIT :hy_n"),
             {**params, "hy_n": n},
         ))
         rel = "matches"
-        if rows:
-            lex_total = int(rows[0]._mapping["total_count"])
-            lex_ranks = {r._mapping["id"]: i for i, r in enumerate(rows, 1)}
-        elif engine is not None and engine.has_trgm:
+        rank_sql = f"{prefix}SELECT id, row_number() OVER (ORDER BY {order_by}) AS rn FROM matches"
+        if not rows and engine is not None and engine.has_trgm:
             fb = _trgm_fallback(db, query, where, params, trgm_threshold, limit=n, offset=0, engine=engine)
             if fb is not None:
-                fb_rows, lex_total, rel, params = fb
-                prefix, order_by = "", ""
-                lex_ranks = {r._mapping["id"]: i for i, r in enumerate(fb_rows, 1)}
+                rows, _, rel, params = fb
+                prefix = ""
+                rank_sql = (f"SELECT r.id, row_number() OVER (ORDER BY r.score DESC, "
+                            f"{search_scoring_sql.list_order_sql()}) AS rn FROM {rel} AS r")
+        if rows:
+            lex_total = int(rows[0]._mapping["total_count"])
+            window = {r._mapping["id"]: r for r in rows}
+            lex_ranks = {r._mapping["id"]: i for i, r in enumerate(rows, 1)}
         lists.append((h.lexical_weight, lex_ranks))
         if engine is not None and engine.has_bm25 and h.bm25_weight > 0:
-            bm = bm25_rank(db, query, config=config, engine=engine, type_filter=type_filter, filters=filters,
-                           allowed_features=allowed_features, limit=h.candidate_limit)
+            bm = _optional_list(db, "BM25", lambda: bm25_rank(
+                db, query, config=config, engine=engine, type_filter=type_filter, filters=filters,
+                allowed_features=allowed_features, limit=h.candidate_limit))
             lists.append((h.bm25_weight, {i: r for r, (i, _) in enumerate(bm, 1)}))
     if query_vector and h.vector_weight > 0:
-        vec = vector_rank(db, query_vector, config=config, engine=engine, type_filter=type_filter,
-                          filters=filters, allowed_features=allowed_features, limit=h.candidate_limit)
+        vec = _optional_list(db, "semantic", lambda: vector_rank(
+            db, query_vector, config=config, engine=engine, type_filter=type_filter,
+            filters=filters, allowed_features=allowed_features, limit=h.candidate_limit))
         lists.append((h.vector_weight, {
-            i: r for r, (i, sim) in enumerate((x for x in vec if x[1] >= h.min_vector_similarity), 1)
+            i: r for r, (i, _) in enumerate((x for x in vec if x[1] >= h.min_vector_similarity), 1)
         }))
 
     non_lexical = lists[1:] if mode == "hybrid" else lists
     others = {i for _, ranks in non_lexical for i in ranks} - set(lex_ranks)
-    if others and lex_total > len(lex_ranks) and order_by:
-        # Hits from the other lists that are keyword matches past the window: exact rank.
-        beyond = db.execute(text(
-            f"{prefix}SELECT id, rn FROM (SELECT id, row_number() OVER (ORDER BY {order_by}) AS rn "
-            "FROM matches) m WHERE id = ANY(:hy_ids)"
-        ), {**params, "hy_ids": list(others)})
+    if others and lex_total > len(lex_ranks):
+        # Hits from the other lists that are keyword matches past the window:
+        # exact keyword rank, so they're neither under-ranked nor counted twice.
+        beyond = db.execute(text(f"SELECT id, rn FROM ({rank_sql}) m WHERE id = ANY(:hy_ids)"),
+                            {**params, "hy_ids": list(others)})
         for r in beyond:
             lex_ranks[r._mapping["id"]] = int(r._mapping["rn"])
     extras = sorted(others - set(lex_ranks))
@@ -829,13 +850,13 @@ def _fuse(
     else:
         facet_rel = "(SELECT id, type, extra_data, tags FROM search_documents WHERE id = ANY(:hy_extra))"
     return _Fused(order=order, total=lex_total + len(extras), prefix=prefix, rel=facet_rel,
-                  params={**params, "hy_extra": extras})
+                  params={**params, "hy_extra": extras}, rows=window)
 
 
 def _rows_by_id(db: Session, ids: List[str]) -> Dict[str, Any]:
     if not ids:
         return {}
-    rows = db.execute(text(f"SELECT {_COLS}, 0.0 AS score FROM search_documents WHERE id = ANY(:ids)"),
+    rows = db.execute(text(f"SELECT {_COLS} FROM search_documents WHERE id = ANY(:ids)"),
                       {"ids": ids})
     return {r._mapping["id"]: r for r in rows}
 
@@ -873,16 +894,9 @@ def hybrid_search(
     if fused is None:
         return _empty(query, limit, offset)
     page = fused.order[offset:offset + limit]
-    rows = _rows_by_id(db, [i for i, _ in page])
-    results = []
-    for doc_id, score in page:
-        if doc_id in rows:
-            res = _row_to_result(rows[doc_id], with_score=True, fields=None)
-            res["relevance_score"] = round(score, 6)
-            if fields:
-                allowed = set(fields) | {"id"}
-                res = {k: v for k, v in res.items() if k in allowed}
-            results.append(res)
+    rows = {**fused.rows, **_rows_by_id(db, [i for i, _ in page if i not in fused.rows])}
+    results = [_row_to_result(rows[i], with_score=True, fields=fields, score=score)
+               for i, score in page if i in rows]
     return {
         "results": results,
         "total_count": fused.total,
@@ -919,5 +933,5 @@ def hybrid_search_items(
     if fused is None:
         return []
     ids = [i for i, _ in fused.order[:limit]]
-    rows = _rows_by_id(db, ids)
+    rows = {**fused.rows, **_rows_by_id(db, [i for i in ids if i not in fused.rows])}
     return [_row_to_item(rows[i]) for i in ids if i in rows]

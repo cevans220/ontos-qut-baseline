@@ -41,3 +41,13 @@ def test_out_of_range_values_are_rejected_not_saved(loader):
     with pytest.raises(ValidationError):
         loader.update({"hybrid": {"rrf_k": 0}})
     assert SearchConfigLoader(config_path=loader.config_path).load(force_reload=True).hybrid.rrf_k == 20
+
+
+def test_api_partial_update_sends_only_the_fields_set(loader):
+    """PUT {"hybrid": {"rrf_k": 30}} must not reset the other hybrid settings."""
+    from src.models.search_config import SearchConfigUpdate
+    loader.update({"hybrid": {"min_vector_similarity": 0.62}})
+    body = SearchConfigUpdate.model_validate({"hybrid": {"rrf_k": 30}})
+    loader.update({"hybrid": body.hybrid.model_dump(mode="json", exclude_unset=True)})
+    h = SearchConfigLoader(config_path=loader.config_path).load(force_reload=True).hybrid
+    assert h.rrf_k == 30 and h.min_vector_similarity == pytest.approx(0.62)

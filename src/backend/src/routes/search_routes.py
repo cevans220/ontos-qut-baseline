@@ -1,6 +1,7 @@
 from typing import List, Dict, Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from src.controller.search_manager import SearchManager
 # Import the search interfaces
 from src.common.search_interfaces import SearchableAsset, SearchIndexItem
@@ -55,7 +56,10 @@ async def search_items(
         override_role_name = settings_manager.get_role_override_name_for_user(current_user.email)
         
         # Perform search with authorization filtering
-        results = manager.search(search_term, auth_manager, current_user, team_role_override=override_role_name)
+        # In a worker thread: hybrid search may embed the query via a remote endpoint (#1061).
+        results = await run_in_threadpool(
+            manager.search, search_term, auth_manager, current_user, team_role_override=override_role_name,
+        )
         return results
     except Exception as e:
         logger.exception(f"Error during search for query '{search_term}': {e}")

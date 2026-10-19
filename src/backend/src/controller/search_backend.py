@@ -215,7 +215,9 @@ class PostgresBackend(SearchBackend):
 
     def _query_vector(self, query: str) -> Optional[List[float]]:
         from src.controller.search_scoring import is_list_query, tokenize
-        if self._query_vectors is None or is_list_query(query) or not tokenize(query or ""):
+        q = (query or "").strip()
+        # tag: queries are answered from tags alone; don't pay for an embedding.
+        if self._query_vectors is None or is_list_query(q) or q.lower().startswith("tag:") or not tokenize(q):
             return None
         try:
             return self._query_vectors.get(query)

@@ -4,6 +4,7 @@ Data Contracts tools for LLM.
 Tools for searching, creating, updating, and deleting data contracts.
 """
 
+import asyncio
 import json
 from typing import Any, Dict, List, Optional
 
@@ -383,7 +384,9 @@ class SearchDataContractsTool(BaseTool):
                 )
 
         try:
-            data = ctx.search_manager.query_index(
+            # Off the event loop: the query may be embedded by a remote endpoint (#1061).
+            data = await asyncio.to_thread(
+                ctx.search_manager.query_index,
                 query,
                 type_filter="data-contract",
                 filters={"domain": domain, "status": status},

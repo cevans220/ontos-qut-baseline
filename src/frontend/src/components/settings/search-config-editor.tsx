@@ -55,6 +55,61 @@ const ASSET_TYPE_DISPLAY_NAME_KEYS: Record<string, string> = {
   'data-domain': 'search.assetType.dataDomain',
 };
 
+const HYBRID_NUMBER_FIELDS: {
+  key: keyof HybridConfig; min: number; max: number; step: number; integer: boolean;
+}[] = [
+  { key: 'lexical_weight', min: 0, max: 10, step: 0.1, integer: false },
+  { key: 'bm25_weight', min: 0, max: 10, step: 0.1, integer: false },
+  { key: 'vector_weight', min: 0, max: 10, step: 0.1, integer: false },
+  { key: 'rrf_k', min: 1, max: 1000, step: 1, integer: true },
+  { key: 'candidate_limit', min: 1, max: 500, step: 1, integer: true },
+  { key: 'min_vector_similarity', min: -1, max: 1, step: 0.01, integer: false },
+];
+
+interface HybridNumberInputProps {
+  id: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  integer: boolean;
+  disabled?: boolean;
+  onCommit: (value: number) => void;
+}
+
+/** Number field that keeps the typed text while editing and validates on
+ *  blur/Enter: empty or invalid input reverts, values are clamped, and integer
+ *  settings are rounded (the API rejects fractions for them). */
+function HybridNumberInput({ id, value, min, max, step, integer, disabled, onCommit }: HybridNumberInputProps) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => setDraft(String(value)), [value]);
+  const commit = () => {
+    const parsed = Number(draft);
+    if (draft.trim() === '' || Number.isNaN(parsed)) {
+      setDraft(String(value));
+      return;
+    }
+    const clamped = Math.min(max, Math.max(min, integer ? Math.round(parsed) : parsed));
+    setDraft(String(clamped));
+    if (clamped !== value) onCommit(clamped);
+  };
+  return (
+    <Input
+      id={id}
+      type="number"
+      inputMode={integer ? 'numeric' : 'decimal'}
+      min={min}
+      max={max}
+      step={step}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === 'Enter') commit(); }}
+      disabled={disabled}
+    />
+  );
+}
+
 interface FieldConfigEditorProps {
   fieldName: string;
   config: FieldConfig;
@@ -602,28 +657,18 @@ export default function SearchConfigEditor() {
                   <p className="text-xs text-muted-foreground">{t('settings:search.hybrid.modeHelp')}</p>
                 </div>
                 <div className="grid gap-4 md:grid-cols-3">
-                  {([
-                    ['lexical_weight', 0, 10, 0.1],
-                    ['bm25_weight', 0, 10, 0.1],
-                    ['vector_weight', 0, 10, 0.1],
-                    ['rrf_k', 1, 1000, 1],
-                    ['candidate_limit', 1, 500, 1],
-                    ['min_vector_similarity', -1, 1, 0.01],
-                  ] as [keyof HybridConfig, number, number, number][]).map(([key, min, max, step]) => (
+                  {HYBRID_NUMBER_FIELDS.map(({ key, min, max, step, integer }) => (
                     <div key={key} className="space-y-2">
                       <Label htmlFor={`hybrid-${key}`}>{t(`settings:search.hybrid.fields.${key}`)}</Label>
-                      <Input
+                      <HybridNumberInput
                         id={`hybrid-${key}`}
-                        type="number"
+                        value={config.hybrid[key] as number}
                         min={min}
                         max={max}
                         step={step}
-                        value={config.hybrid[key] as number}
-                        onChange={(e) => {
-                          const v = Number(e.target.value);
-                          if (!Number.isNaN(v)) updateHybrid({ [key]: Math.min(max, Math.max(min, v)) } as Partial<HybridConfig>);
-                        }}
+                        integer={integer}
                         disabled={!hasWriteAccess}
+                        onCommit={(v) => updateHybrid({ [key]: v } as Partial<HybridConfig>)}
                       />
                       <p className="text-xs text-muted-foreground">{t(`settings:search.hybrid.help.${key}`)}</p>
                     </div>
