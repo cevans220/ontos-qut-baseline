@@ -213,7 +213,7 @@ E2E is skipped in CI, so each implementation PR documents this path on a local i
 ### Dependencies
 
 - Merged: #1005 (Compliance DSL tag actions), #1011 (`entity_owner` recipients), #1012 (blocking gates), #1015 / #1016 (default workflows at startup), #1019 (rules on the stored entity), #1028 (approved status change requests apply the status), #1074 (notification i18n keys).
-- Migration order: the lifecycle columns come after `b3_property_custom_props` (#1077, merged) and `b4_compliance_run_error_code` (#1081), as `b5_lifecycle_deprecation_fields` in #1042.
+- Migration order: the lifecycle columns come after `b3_property_custom_props` (#1077, merged), `b4_compliance_run_error_code` (#1081) and `b5_lifecycle_status_cleanup` (the fix that makes status change only through a transition), as `b6_lifecycle_deprecation_fields` in #1042.
 
 ### Open questions
 
