@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
@@ -14,12 +14,41 @@ const DOMAINS = [
   { id: 'd2', name: 'Logistics', description: null },
 ];
 
-// Radix Select relies on pointer-capture APIs that jsdom does not implement.
-beforeAll(() => {
-  const proto = window.HTMLElement.prototype as any;
-  proto.hasPointerCapture ??= () => false;
-  proto.releasePointerCapture ??= () => {};
-  proto.setPointerCapture ??= () => {};
+// Swap Radix Select for a native <select>: driving Radix's pointer/portal
+// machinery through jsdom hung the CI runner. The dialog's behaviour (which
+// options exist, what picking one does) is what this file tests.
+vi.mock('@/components/ui/select', async () => {
+  const React = await import('react');
+  const SelectTrigger = (_: { 'aria-label'?: string; children?: React.ReactNode }) => null;
+  const SelectValue = () => null;
+  const SelectContent = ({ children }: { children?: React.ReactNode }) => <>{children}</>;
+  const SelectItem = ({ value, children }: { value: string; children?: React.ReactNode }) => (
+    <option value={value}>{children}</option>
+  );
+  const Select = ({
+    value,
+    onValueChange,
+    children,
+  }: {
+    value?: string;
+    onValueChange?: (v: string) => void;
+    children?: React.ReactNode;
+  }) => {
+    let label: string | undefined;
+    const options: React.ReactNode[] = [];
+    React.Children.forEach(children, (child) => {
+      if (!React.isValidElement(child)) return;
+      const el = child as React.ReactElement<any>;
+      if (el.type === SelectTrigger) label = el.props['aria-label'];
+      else options.push(el);
+    });
+    return (
+      <select aria-label={label} value={value} onChange={(e) => onValueChange?.(e.target.value)}>
+        {options}
+      </select>
+    );
+  };
+  return { Select, SelectTrigger, SelectValue, SelectContent, SelectItem };
 });
 
 function GeneratorProbe() {
@@ -62,15 +91,14 @@ describe('GuidedGenerateDialog', () => {
     const user = userEvent.setup();
     renderDialog();
 
-    await user.click(screen.getByRole('combobox', { name: 'Data domain' }));
-    const listbox = await screen.findByRole('listbox');
-    expect(within(listbox).getByRole('option', { name: 'Finance' })).toBeInTheDocument();
-    expect(within(listbox).getByRole('option', { name: 'Logistics' })).toBeInTheDocument();
-    expect(within(listbox).getByRole('option', { name: /No data domain/ })).toBeInTheDocument();
+    const select = screen.getByRole('combobox', { name: 'Data domain' });
+    expect(within(select).getByRole('option', { name: 'Finance' })).toBeInTheDocument();
+    expect(within(select).getByRole('option', { name: 'Logistics' })).toBeInTheDocument();
+    expect(within(select).getByRole('option', { name: /No data domain/ })).toBeInTheDocument();
     // Hardcoded example chips are gone.
     expect(screen.queryByText('Supply chain')).not.toBeInTheDocument();
 
-    await user.click(within(listbox).getByRole('option', { name: 'Logistics' }));
+    await user.selectOptions(select, 'd2');
     expect(screen.getByLabelText('What domain are you working in?')).toHaveValue('Logistics');
   });
 
