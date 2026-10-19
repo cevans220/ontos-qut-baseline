@@ -59,6 +59,11 @@ from sqlalchemy.orm import Session
 
 from src.models.import_results import BatchImportResult, ImportItemResult
 from src.common.entity_kind import classify_import_entity, describe_import_entity
+from src.common.lifecycle_status import (
+    CONTRACT_STATUSES,
+    check_status_unchanged,
+    normalize_new_status,
+)
 from src.models.data_contracts import (
     ColumnDefinition,
     DataContract,
@@ -2427,7 +2432,9 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
             # When an owner team is supplied the draft is team-visible from the
             # start, so we leave draft_owner_id unset (tier-2 visibility). The
             # draft_owner_id is cleared again on the draft->proposed transition.
-            status_value = data_dict.get('status', 'draft')
+            # A new contract starts in one of the lifecycle statuses; `certified`
+            # is certification_level, set by the certify action.
+            status_value = normalize_new_status(data_dict.get('status'), CONTRACT_STATUSES)
             draft_owner_id = (
                 current_user
                 if (status_value or '').lower() == 'draft' and not owner_team_id
@@ -2564,6 +2571,11 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
             db_obj = data_contract_repo.get(db, id=contract_id)
             if not db_obj:
                 raise ValueError("Contract not found")
+
+            # The status changes only through transition_status (change-status,
+            # request-status-change, approve/reject), which runs the gates; an
+            # update may only repeat it.
+            check_status_unchanged(db_obj.status, data_dict.get('status'))
             
             # Validate required fields
             if data_dict.get('name') is not None and (not data_dict['name'] or not data_dict['name'].strip()):
@@ -3006,7 +3018,7 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
                 'uploaded_contract'
             )
             version_val = parsed_odcs.get('version', '1.0.0')
-            status_val = parsed_odcs.get('status', 'draft')
+            status_val = normalize_new_status(parsed_odcs.get('status'), CONTRACT_STATUSES)
             owner_val = parsed_odcs.get('owner') or current_user or 'system'
             kind_val = parsed_odcs.get('kind', 'DataContract')
             api_version_val = parsed_odcs.get('apiVersion') or parsed_odcs.get('api_version', 'v3.1.0')
@@ -6307,12 +6319,15 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
             allowed_transitions = self._get_allowed_status_transitions(from_status)
             if target_status_lower not in allowed_transitions:
                 raise ValueError(f"Invalid transition from '{from_status}' to '{target_status}'")
-            
-            contract.status = target_status_lower
-            contract.updated_at = now
-            db.commit()
-            db.refresh(contract)
-            self._update_search_index(contract, db)
+
+            # Through transition_status, like a product's approved request, so
+            # the before_status_change gates run and on_status_change fires.
+            contract = self.transition_status(
+                db=db,
+                contract_id=contract_id,
+                new_status=target_status_lower,
+                current_user=current_user,
+            )
             
             notification_title = "Status Change Approved"
             notification_desc = f"Your request to change status of contract '{contract.name}' from '{from_status}' to '{target_status}' has been approved."
@@ -6376,18 +6391,14 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
         }
     
     def _get_allowed_status_transitions(self, current_status: str) -> List[str]:
-        """Get allowed status transitions from current status."""
-        transitions = {
-            'draft': ['proposed', 'deprecated'],
-            'proposed': ['draft', 'under_review', 'deprecated'],
-            'under_review': ['draft', 'approved', 'deprecated'],
-            'approved': ['active', 'deprecated'],
-            'active': ['certified', 'deprecated'],
-            'certified': ['deprecated'],
-            'deprecated': ['retired'],
-            'retired': [],
-        }
-        return transitions.get(current_status.lower(), [])
+        """Get allowed status transitions from current status.
+
+        The lifecycle map's (``DATA_CONTRACT_TRANSITIONS``), the one
+        ``transition_status`` applies. Certification isn't a status.
+        """
+        from src.models.lifecycle import DATA_CONTRACT_TRANSITIONS
+
+        return list(DATA_CONTRACT_TRANSITIONS.get((current_status or 'draft').lower(), []))
     
     def get_team_members_for_import(
         self,

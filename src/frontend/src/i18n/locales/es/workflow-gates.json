@@ -10,5 +10,8 @@
       "pending": "pendiente",
       "running": "en ejecución"
     }
-  }
+  },
+  "requiresTransition": "Una edición no puede cambiar el estado de {{fromStatus}} a {{toStatus}}. Usa Cambiar estado, que comprueba la transición y ejecuta los workflows de cambio de estado.",
+  "certifiedIsNotAStatus": "Certificado no es un estado: la certificación se establece con Certificar, en una entidad activa.",
+  "invalidStatus": "{{status}} no es un estado del ciclo de vida. Usa uno de: {{allowed}}."
 }

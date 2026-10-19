@@ -10,5 +10,8 @@
       "pending": "ausstehend",
       "running": "läuft"
     }
-  }
+  },
+  "requiresTransition": "Eine Bearbeitung kann den Status nicht von {{fromStatus}} zu {{toStatus}} ändern. Verwenden Sie Status ändern, das den Übergang prüft und die Statusänderungs-Workflows ausführt.",
+  "certifiedIsNotAStatus": "Zertifiziert ist kein Status: Die Zertifizierung wird mit Zertifizieren gesetzt, bei einer aktiven Entität.",
+  "invalidStatus": "{{status}} ist kein Lebenszyklus-Status. Verwenden Sie einen von: {{allowed}}."
 }

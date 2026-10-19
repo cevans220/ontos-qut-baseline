@@ -10,5 +10,8 @@
       "pending": "in attesa",
       "running": "in esecuzione"
     }
-  }
+  },
+  "requiresTransition": "Una modifica non può cambiare lo stato da {{fromStatus}} a {{toStatus}}. Usa Modifica stato, che verifica la transizione ed esegue i workflow di cambio di stato.",
+  "certifiedIsNotAStatus": "Certificato non è uno stato: la certificazione si imposta con Certifica, su un'entità attiva.",
+  "invalidStatus": "{{status}} non è uno stato del ciclo di vita. Usa uno di: {{allowed}}."
 }

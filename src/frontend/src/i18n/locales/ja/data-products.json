@@ -541,7 +541,8 @@
       "failedToSerialize": "UI の状態を JSON にシリアライズできませんでした。",
       "unexpectedError": "予期しないエラーが発生しました。"
     },
-    "syntaxErrorLabel": "構文エラー:"
+    "syntaxErrorLabel": "構文エラー:",
+    "statusChangeHint": "ステータスはページの「ステータスを変更」で変更します。遷移を確認し、ステータス変更ワークフローを実行します。"
   },
   "import": {
     "title": "データ製品をインポート",
@@ -918,7 +919,8 @@
       "createNewContract": "新しい契約を作成",
       "linkContract": "契約をリンク",
       "linking": "リンク中..."
-    }
+    },
+    "statusFilterNote": "「active」または「approved」ステータスのコントラクトのみ表示されます。特定のバージョンを選んでください。同名のコントラクトにはバージョンが並べて表示されます。"
   },
   "hierarchy": {
     "title": "データ階層",

@@ -198,7 +198,8 @@
     "validationErrorTitle": "Validation Error",
     "nameRequired": "Contract name is required",
     "versionRequired": "Version is required",
-    "saveError": "Failed to save contract"
+    "saveError": "Failed to save contract",
+    "statusChangeHint": "The status changes with Change Status on the page, which checks the transition and runs the status change workflows."
   },
   "import": {
     "title": "Import Data Contract",
@@ -345,7 +346,7 @@
       "createProduct": "Create Data Product",
       "noneYet": "No linked data products yet",
       "emptyHint": "Create a data product that uses this contract to govern a deliverable",
-      "statusRequirement": "Contract must be in 'active', 'approved', or 'certified' status",
+      "statusRequirement": "Contract must be in 'active' or 'approved' status",
       "unnamedProduct": "Unnamed Product",
       "deliverables_one": "Deliverable: {{ports}}",
       "deliverables_other": "Deliverables: {{ports}}"
