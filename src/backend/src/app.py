@@ -88,6 +88,7 @@ from src.controller.data_contracts_manager import DataContractsManager
 from src.controller.semantic_models_manager import SemanticModelsManager
 from src.controller.search_manager import SearchManager
 from src.common.workspace_client import get_workspace_client
+from src.common.health_status import add_health_warning, health_issue, set_db_error
 from src.controller.settings_manager import SettingsManager
 from src.controller.users_manager import UsersManager
 from src.controller.authorization_manager import AuthorizationManager
@@ -141,8 +142,11 @@ async def startup_event():
         "ws_ok": False,
         "seed_ok": True,
         "warnings": [],
+        "warning_details": [],
         "db_error": None,
+        "db_error_code": None,
         "seed_error": None,
+        "seed_error_code": None,
     }
     
     # Skip startup tasks if running tests
@@ -159,7 +163,7 @@ async def startup_event():
         initialize_database()
         app.state.health["db_ok"] = True
     except Exception as e:
-        app.state.health["db_error"] = str(e)
+        set_db_error(app.state.health)
         logger.critical(f"Database init failed — entering maintenance mode: {e}", exc_info=True)
         return  # Skip manager init; MaintenanceMiddleware will serve the maintenance page
 
@@ -526,25 +530,29 @@ async def retry_startup():
         initialize_database()
         app.state.health["db_ok"] = True
         app.state.health["db_error"] = None
+        app.state.health["db_error_code"] = None
     except Exception as e:
-        app.state.health["db_error"] = str(e)
+        set_db_error(app.state.health)
         logger.critical(f"Database retry failed: {e}", exc_info=True)
-        return JSONResponse({"status": "error", "detail": str(e)}, status_code=503)
+        return JSONResponse(
+            {"status": "error", "detail": health_issue("database_unavailable")}, status_code=503
+        )
 
     try:
         app.state.health["warnings"] = []  # Reset warnings before retry
+        app.state.health["warning_details"] = []
         app.state.health["seed_ok"] = True  # Reset seed health; initialize_managers will flip if it fails
         app.state.health["seed_error"] = None
+        app.state.health["seed_error_code"] = None
         initialize_managers(app)  # Sets health["ws_ok"] / health["seed_ok"] internally
         _seed_default_workflows()
     except Exception as e:
-        app.state.health["warnings"].append(f"Manager init failed on retry: {e}")
+        add_health_warning(app.state.health, "manager_init_failed")
         logger.error(f"Manager init failed on retry: {e}", exc_info=True)
 
     if not app.state.health.get("seed_ok", True):
         return JSONResponse(
-            {"status": "error", "detail": app.state.health.get("seed_error") or "seeding failed"},
-            status_code=503,
+            {"status": "error", "detail": health_issue("seeding_failed")}, status_code=503
         )
 
     return {"status": "ok", "health": app.state.health}

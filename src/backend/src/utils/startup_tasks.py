@@ -11,6 +11,7 @@ from src.common.logging import get_logger
 from src.common.database import init_db, get_session_factory, Base, engine, cleanup_db
 from src.common.workspace_client import get_workspace_client
 from src.common.features import FeatureAccessLevel, APP_FEATURES, get_feature_config
+from src.common.health_status import add_health_warning, set_seed_error
 from src.models.settings import AppRoleCreate, AppRole as AppRoleApi
 from src.controller.settings_manager import SettingsManager
 from src.controller.jobs_manager import JobsManager
@@ -30,6 +31,7 @@ from src.controller.tags_manager import TagsManager # Import TagsManager
 from src.controller.semantic_models_manager import SemanticModelsManager
 from src.controller.teams_manager import TeamsManager
 from src.controller.projects_manager import ProjectsManager
+from src.controller.approvals_manager import ApprovalsManager
 
 # Import repositories (needed for manager instantiation)
 from src.repositories.settings_repository import AppRoleRepository
@@ -166,9 +168,8 @@ def initialize_managers(app: FastAPI):
             health["ws_ok"] = True
         except Exception as ws_err:
             ws_client = None
-            msg = f"Workspace client unavailable: {ws_err}"
-            logger.warning(msg, exc_info=True)
-            health.setdefault("warnings", []).append(msg)
+            logger.warning(f"Workspace client unavailable: {ws_err}", exc_info=True)
+            add_health_warning(health, 'workspace_client_unavailable')
             health["ws_ok"] = False
         
         # --- Initialize Connector Registry ---
@@ -219,6 +220,9 @@ def initialize_managers(app: FastAPI):
         # Store the global settings object on app.state for easy access
         app.state.settings = settings
         logger.info(f"Stored global settings object on app.state.settings: {type(app.state.settings)}")
+
+        # Stateless; without it the approvals routes build one per request
+        app.state.approvals_manager = ApprovalsManager()
 
         # Instantiate SettingsManager first, passing settings
         app.state.settings_manager = SettingsManager(db=db_session, settings=settings, workspace_client=ws_client)
@@ -486,13 +490,12 @@ def initialize_managers(app: FastAPI):
         logger.critical(f"Fatal startup error (role/team seeding): {e}", exc_info=True)
         if db_session: db_session.rollback()
         health["seed_ok"] = False
-        health["seed_error"] = str(e)
-        health.setdefault("warnings", []).append(f"Seeding failed: {e}")
+        set_seed_error(health)
+        add_health_warning(health, 'seeding_failed')
     except Exception as e:
         logger.critical(f"Failed during application startup (manager init): {e}", exc_info=True)
         if db_session: db_session.rollback()
-        msg = f"Manager initialization failed: {e}"
-        health.setdefault("warnings", []).append(msg)
+        add_health_warning(health, 'manager_init_failed')
     finally:
         # Keep the DB session open for manager singletons that rely on it.
         # It will be managed at application shutdown.
