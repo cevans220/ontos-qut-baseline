@@ -747,6 +747,7 @@ const workflowToElements = (
     type: 'trigger',
     data: { trigger: workflow.trigger },
     position: { x: 0, y: 0 },
+    deletable: false,
   });
 
   // Add step nodes (use 'default' for unregistered step_type so we never get an empty box)
@@ -1136,6 +1137,7 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
           type: 'trigger',
           data: { trigger: { type: 'on_create', entity_types: ['table'] } },
           position: { x: 100, y: 50 },
+          deletable: false,
         }]);
         
         // Set original state for new workflow dirty tracking
@@ -1373,27 +1375,32 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
     setSelectedNodeId(stepId);
   };
 
-  // Delete step
-  const deleteStep = (stepId: string) => {
-    // Its connections are removed with it, so no step may still point at it:
+  // Delete steps: the trash button and the Delete / Backspace key both end here
+  const removeSteps = (stepIds: string[]) => {
+    const gone = new Set(stepIds);
+    if (gone.size === 0) return;
+    // Their connections are removed with them, so no step may still point at them:
     // on_pass / on_fail of those steps are cleared, as when an edge is deleted.
     const unlink = (s: WorkflowStepCreate): WorkflowStepCreate => ({
       ...s,
-      ...(s.on_pass === stepId ? { on_pass: undefined } : {}),
-      ...(s.on_fail === stepId ? { on_fail: undefined } : {}),
+      ...(s.on_pass && gone.has(s.on_pass) ? { on_pass: undefined } : {}),
+      ...(s.on_fail && gone.has(s.on_fail) ? { on_fail: undefined } : {}),
     });
-    const remaining = steps.filter(s => s.step_id !== stepId).map(unlink);
-    setSteps(remaining);
+    const remaining = steps.filter(s => !gone.has(s.step_id)).map(unlink);
+    // Functional update: React Flow also clears links in onEdgesChange in the same batch
+    setSteps(prev => prev.filter(s => !gone.has(s.step_id)).map(unlink));
     setNodes(prev => prev
-      .filter(n => n.id !== stepId)
+      .filter(n => !gone.has(n.id))
       .map(n => (n.data?.step ? { ...n, data: { ...n.data, step: unlink(n.data.step) } } : n)));
     // The trigger moves on to the step that is now first
     setEdges(prev => withTriggerEdge(
-      prev.filter(e => e.source !== stepId && e.target !== stepId),
+      prev.filter(e => !gone.has(e.source) && !gone.has(e.target)),
       remaining[0]?.step_id,
     ));
-    setSelectedNodeId(null);
+    setSelectedNodeId(prev => (prev && gone.has(prev) ? null : prev));
   };
+
+  const deleteStep = (stepId: string) => removeSteps([stepId]);
 
   // Update step
   const updateStep = (stepId: string, updates: Partial<WorkflowStepCreate>) => {
@@ -1656,6 +1663,7 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
             nodes={nodes}
             edges={edgesWithDelete}
             onNodesChange={onNodesChange}
+            onNodesDelete={deleted => removeSteps(deleted.map(n => n.id))}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onReconnect={onReconnect}

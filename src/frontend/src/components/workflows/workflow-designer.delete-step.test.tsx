@@ -94,6 +94,51 @@ describe('WorkflowDesigner deleting a step', () => {
     expect(steps[0].on_fail).toBeUndefined();
   });
 
+  it('removes the step when its node is deleted with the keyboard', async () => {
+    const { container } = renderDesigner();
+    fireEvent.change(await screen.findByPlaceholderText(/workflow name/i), { target: { value: 'Keyboard delete' } });
+    const first = await addConditional('Conditional', 'Condition');
+    fireEvent.click(within(first).getByTestId('step-config-done'));
+    const second = await addConditional('Conditional', 'Condition');
+    fireEvent.click(within(second).getByTestId('step-config-done'));
+
+    const stepNodes = () => Array.from(container.querySelectorAll('.react-flow__node'))
+      .filter(n => !n.classList.contains('react-flow__node-trigger'));
+    await waitFor(() => expect(stepNodes()).toHaveLength(2));
+    // Select the node with the keyboard (jsdom can't drag), then press Delete
+    const last = stepNodes()[1] as HTMLElement;
+    last.focus();
+    fireEvent.keyDown(last, { key: 'Enter', code: 'Enter' });
+    fireEvent.keyUp(last, { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(last.classList.contains('selected')).toBe(true));
+    fireEvent.keyDown(last, { key: 'Delete', code: 'Delete' });
+    fireEvent.keyUp(last, { key: 'Delete', code: 'Delete' });
+    await waitFor(() => expect(stepNodes()).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole('button', { name: /^Save/ }));
+
+    await waitFor(() => expect(savedWorkflow()).toBeDefined());
+    const steps = savedWorkflow().steps;
+    expect(steps).toHaveLength(1);
+    expect(steps[0].on_pass).toBeUndefined();
+  });
+
+  it('keeps the trigger node when it is deleted with the keyboard', async () => {
+    const { container } = renderDesigner();
+    const trigger = await waitFor(() => {
+      const node = container.querySelector('.react-flow__node-trigger');
+      expect(node).not.toBeNull();
+      return node as HTMLElement;
+    });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: 'Enter', code: 'Enter' });
+    fireEvent.keyUp(trigger, { key: 'Enter', code: 'Enter' });
+    fireEvent.keyDown(trigger, { key: 'Delete', code: 'Delete' });
+    fireEvent.keyUp(trigger, { key: 'Delete', code: 'Delete' });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(container.querySelector('.react-flow__node-trigger')).not.toBeNull();
+  });
+
   it('shows the errors of a refused save in the user language', async () => {
     await i18n.changeLanguage('pt');
     api.post.mockImplementation(async (url: string) => {
