@@ -748,6 +748,10 @@ async def handle_steward_review_response(
         
     except ValueError as e:
         logger.error("Handle review validation error for contract_id=%s: %s", contract_id, e)
+        if isinstance(e, CodedValueError):
+            # e.g. a before_status_change gate refused the decision: send its
+            # code and parameters so the UI can explain it
+            raise HTTPException(status_code=409, detail=str(e))
         error_status = 404 if "not found" in str(e).lower() else (400 if "must be" in str(e).lower() else 409)
         raise HTTPException(status_code=error_status, detail="Invalid review response")
     except HTTPException:

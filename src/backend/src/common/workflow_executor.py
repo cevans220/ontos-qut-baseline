@@ -3213,16 +3213,9 @@ class WorkflowExecutor:
                     
             # Handle data product activation completion
             elif entity_type == 'data_product' and trigger_type in ('on_request_review', 'ON_REQUEST_REVIEW'):
-                from src.repositories.data_products_repository import data_product_repo
-                db_product = data_product_repo.get(db=self._db, id=entity_id)
-                if db_product:
-                    if succeeded:
-                        db_product.status = 'active'
-                        logger.info(f"Data product {entity_id} status updated to 'active' after approval")
-                    else:
-                        db_product.status = 'draft'
-                        logger.info(f"Data product {entity_id} status reverted to 'draft' after rejection")
-                    self._db.commit()
+                self._apply_product_review_outcome(
+                    trigger_context, entity_id, succeeded, responded_by
+                )
 
             # Approved status change request: apply the requested transition,
             # with the same validation and gates as a direct status change
@@ -3241,6 +3234,83 @@ class WorkflowExecutor:
             logger.error(f"Error updating entity status after workflow completion: {e}", exc_info=True)
             # Don't fail the workflow for status update issues
     
+    # A reviewed product goes active through the lifecycle steps it still
+    # needs, or back to draft; each step is a transition_status call.
+    _PRODUCT_ACTIVATION_STEPS = {
+        'proposed': ['under_review', 'approved', 'active'],
+        'under_review': ['approved', 'active'],
+        'approved': ['active'],
+    }
+
+    def _apply_product_review_outcome(
+        self,
+        trigger_context: TriggerContext,
+        product_id: str,
+        succeeded: bool,
+        responded_by: Optional[str],
+    ) -> None:
+        """Activate a reviewed data product, or return it to draft.
+
+        The outcome is the run's, as before: a succeeded review activates the
+        product, any other ending returns it to draft. Each status step goes
+        through ``transition_status``, so the lifecycle rules, the
+        before_status_change gates and the on_status_change trigger apply as
+        for a change from the product page. A product that is no longer in
+        review (changed meanwhile) is left alone. If a step is refused (e.g.
+        a gate blocks), the product stays where it got to and the requester
+        is told, since the workflow has already ended.
+        """
+        from src.common.app_state import get_app_state_manager
+        from src.controller.data_products_manager import DataProductsManager
+        from src.db_models.data_products import DataProductDb
+
+        product = self._db.get(DataProductDb, product_id)
+        if product is None:
+            return
+        current_status = (product.status or 'draft').lower()
+        target_status = 'active' if succeeded else 'draft'
+        if current_status == target_status:
+            return
+        if succeeded:
+            steps = self._PRODUCT_ACTIVATION_STEPS.get(current_status)
+        else:
+            steps = [target_status] if current_status in self._PRODUCT_ACTIVATION_STEPS else None
+        if not steps:
+            logger.warning(
+                "Review outcome of data product %s not applied: it is no longer in review "
+                "(status '%s')",
+                product_id, current_status,
+            )
+            return
+
+        manager = DataProductsManager(
+            db=self._db, notifications_manager=get_app_state_manager('notifications_manager'),
+        )
+        search_manager = get_app_state_manager('search_manager')
+        if search_manager:
+            manager.set_search_manager(search_manager)
+        for step in steps:
+            try:
+                manager.transition_status(product_id, step, responded_by)
+            except ValueError as e:
+                logger.warning(
+                    "Review outcome of data product %s: the change to '%s' was refused: %s",
+                    product_id, step, e,
+                )
+                self._notify_status_change_not_applied(
+                    trigger_context, product_id,
+                    f"The review of the data product ended, but the change to "
+                    f"'{target_status}' could not be applied: {e}",
+                    recipients=[trigger_context.user_email],
+                    description_key='refused',
+                    params={'toStatus': target_status, 'reason': str(e)},
+                )
+                return
+        logger.info(
+            "Data product %s moved to '%s' after its review",
+            product_id, target_status,
+        )
+
     def _apply_requested_status_change(
         self,
         trigger_context: TriggerContext,

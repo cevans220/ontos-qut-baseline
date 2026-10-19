@@ -3370,6 +3370,7 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
                     result.add(ImportItemResult(
                         index=index, source_file=filename, source_id=source_id,
                         entity_id=created.id, name=created.name, status="created",
+                        **(status_note or {}),
                     ))
                 except Exception as e:
                     # Log full detail (may carry SQL/internal text); keep the
@@ -5369,11 +5370,16 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
         if schema_object_count == 0:
             raise ReviewSchemaRequiredError()
 
-        # Transition to PROPOSED. Clear the personal-draft owner so the contract
-        # is promoted from tier-1 (creator-only) to organisation visibility; a
-        # contract under steward review must be discoverable by stewards and
-        # other team members, not just its author (PRD #442).
-        contract.status = 'proposed'
+        # Transition to PROPOSED through transition_status, so the lifecycle
+        # check and the before_status_change gates run (a gate refusal raises
+        # its coded error here). Then clear the personal-draft owner so the
+        # contract is promoted from tier-1 (creator-only) to organisation
+        # visibility; a contract under steward review must be discoverable by
+        # stewards and other team members, not just its author (PRD #442).
+        contract = self.transition_status(
+            db=db, contract_id=contract_id, new_status='proposed',
+            current_user=current_user,
+        )
         contract.draft_owner_id = None
         db.add(contract)
         db.flush()
@@ -5809,17 +5815,25 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
         from_status = (contract.status or '').lower()
         now = datetime.utcnow()
         
-        # Update contract status based on decision
+        # Update contract status based on decision, through transition_status
+        # so the lifecycle check and the before_status_change gates run
         if decision == 'approve':
             if from_status not in ('proposed', 'under_review'):
                 raise ValueError(f"Cannot approve from status {contract.status}")
-            contract.status = 'approved'
+            contract = self.transition_status(
+                db=db, contract_id=contract_id, new_status='approved',
+                current_user=current_user,
+            )
             notification_title = "Contract Review Approved"
             notification_desc = f"Your contract '{contract.name}' has been approved by the data steward."
         elif decision == 'reject':
             if from_status not in ('proposed', 'under_review'):
                 raise ValueError(f"Cannot reject from status {contract.status}")
-            contract.status = 'draft'  # ODCS: rejected contracts return to draft for revisions
+            # ODCS: rejected contracts return to draft for revisions
+            contract = self.transition_status(
+                db=db, contract_id=contract_id, new_status='draft',
+                current_user=current_user,
+            )
             notification_title = "Contract Review Rejected"
             notification_desc = f"Your contract '{contract.name}' was rejected and needs revisions."
         else:  # clarify
