@@ -44,7 +44,7 @@
       "updatedSuccess": "Workflow aggiornato correttamente",
       "createFailed": "Impossibile creare il workflow: {{error}}",
       "updateFailed": "Impossibile aggiornare il workflow: {{error}}",
-      "stepConfigInvalid": "Passo \"{{step}}\": {{issue}}"
+      "stepConfigInvalid": "Passaggio \"{{step}}\": {{issue}}"
     },
     "badges": {
       "default": "Predefinito",
@@ -267,7 +267,7 @@
       "pythonPlaceholder": "if not entity.get('description'):\n    result = {'passed': False, 'message': 'Missing description'}",
       "sqlPlaceholder": "SELECT COUNT(*) FROM ${entity_id}",
       "timeout": "Timeout (secondi)",
-      "timeoutHelp": "Il passo fallisce quando lo script dura più a lungo.",
+      "timeoutHelp": "Il passaggio fallisce quando lo script dura più a lungo.",
       "variablesTitle": "Variabili disponibili",
       "pythonVariables": {
         "entity": "I dati dell'entità (un dizionario)",
@@ -275,10 +275,10 @@
         "entity_id": "L'ID dell'entità",
         "entity_name": "Il nome dell'entità",
         "user_email": "Email dell'utente che ha avviato il workflow",
-        "step_results": "Risultati dei passi già eseguiti, per ID del passo"
+        "step_results": "Risultati dei passaggi già eseguiti, per ID del passaggio"
       },
-      "pythonResultHelp": "Imposta result per scegliere il ramo: result = {'passed': False, 'message': '...'} segue il ramo Fail; senza result il passo riesce. Sono disponibili solo i built-in di base: niente import, file o rete.",
-      "sqlHelp": "Viene eseguito sul SQL warehouse impostato nelle Impostazioni. I segnaposto ${variable} vengono sostituiti prima dell'esecuzione; il passo riesce quando l'istruzione riesce. L'istruzione attende fino a 50 secondi.",
+      "pythonResultHelp": "Imposta result per scegliere il ramo: result = {'passed': False, 'message': '...'} segue il ramo Fail; senza result il passaggio riesce. Sono disponibili solo i built-in di base: niente import, file o rete.",
+      "sqlHelp": "Viene eseguito sul SQL warehouse impostato nelle Impostazioni. I segnaposto ${variable} vengono sostituiti prima dell'esecuzione; il passaggio riesce quando l'istruzione riesce. L'istruzione attende fino a 50 secondi.",
       "errors": {
         "script_code_required": "Inserisci il codice dello script.",
         "script_timeout_invalid": "Inserisci un numero intero di secondi, almeno {{minimum}}.",

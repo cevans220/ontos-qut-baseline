@@ -32,7 +32,7 @@ describe('workflowValidationIssueText', () => {
     expect(workflowValidationIssueText(
       { code: 'condition_required', message: "Step 'check': Enter a condition.", params: { step: 'check' } },
       i18n.t,
-    )).toBe('Passo "check": Informe uma condição.');
+    )).toBe('Etapa "check": Informe uma condição.');
   });
 
   it('shows the English text of an error it has no text for', () => {
