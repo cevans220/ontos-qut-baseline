@@ -71,6 +71,15 @@
     "published": "Published",
     "archived": "Archived"
   },
+  "statusDescriptions": {
+    "draft": "Under development, not yet submitted for review",
+    "proposed": "Submitted for review consideration",
+    "under_review": "Being reviewed by data steward",
+    "approved": "Approved by steward, ready to activate",
+    "active": "In production use, governing data assets",
+    "deprecated": "Still available but marked for retirement",
+    "retired": "No longer in use, archived"
+  },
   "details": {
     "backToList": "Back to List",
     "edit": "Edit",
@@ -1132,6 +1141,14 @@
       "requestDescription": "Request approval to change the lifecycle status of this contract.",
       "currentStatusLabel": "Current Status:",
       "recommendedLabel": "Recommended:",
+      "recommended": {
+        "draft": "Submit for review (Proposed) when ready",
+        "proposed": "Wait for steward to move to Under Review",
+        "under_review": "Steward will approve or request changes",
+        "approved": "Activate when ready to govern production data",
+        "active": "Deprecate when planning retirement; use the certification panel for certification",
+        "deprecated": "Retire when no longer in use"
+      },
       "selectTargetLabel": "Select Target Status *",
       "chooseTargetPlaceholder": "Choose target status...",
       "terminalStateLabel": "Terminal State:",

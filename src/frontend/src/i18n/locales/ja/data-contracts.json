@@ -71,6 +71,15 @@
     "published": "公開済み",
     "archived": "アーカイブ済み"
   },
+  "statusDescriptions": {
+    "draft": "開発中で、まだレビューに提出されていません",
+    "proposed": "レビューのために提出済み",
+    "under_review": "データスチュワードがレビュー中",
+    "approved": "スチュワードが承認済みで、有効化できます",
+    "active": "本番で使用中で、データ資産を管理しています",
+    "deprecated": "引き続き利用できますが、廃止予定です",
+    "retired": "使用されておらず、アーカイブ済み"
+  },
   "details": {
     "backToList": "リストに戻る",
     "edit": "編集",
@@ -1132,6 +1141,14 @@
       "requestDescription": "このコントラクトのライフサイクルステータスを変更する承認をリクエストします。",
       "currentStatusLabel": "現在のステータス:",
       "recommendedLabel": "推奨:",
+      "recommended": {
+        "draft": "準備ができたらレビューに提出してください（提案済み）",
+        "proposed": "スチュワードがレビュー中に移すのを待ってください",
+        "under_review": "スチュワードが承認するか、変更を依頼します",
+        "approved": "本番データを管理する準備ができたら有効化してください",
+        "active": "廃止を計画するときは非推奨にしてください。認証には認証パネルを使用します",
+        "deprecated": "使用されなくなったら廃止してください"
+      },
       "selectTargetLabel": "対象ステータスを選択 *",
       "chooseTargetPlaceholder": "対象ステータスを選択...",
       "terminalStateLabel": "終端状態:",

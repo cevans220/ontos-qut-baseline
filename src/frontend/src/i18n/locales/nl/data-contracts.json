@@ -71,6 +71,15 @@
     "published": "Gepubliceerd",
     "archived": "Gearchiveerd"
   },
+  "statusDescriptions": {
+    "draft": "In ontwikkeling, nog niet ter beoordeling ingediend",
+    "proposed": "Ingediend ter beoordeling",
+    "under_review": "Wordt beoordeeld door de data steward",
+    "approved": "Goedgekeurd door de steward, klaar om te activeren",
+    "active": "In productie, beheert data-assets",
+    "deprecated": "Nog beschikbaar, maar gemarkeerd voor uitfasering",
+    "retired": "Niet meer in gebruik, gearchiveerd"
+  },
   "details": {
     "backToList": "Terug naar Lijst",
     "edit": "Bewerken",
@@ -1132,6 +1141,14 @@
       "requestDescription": "Vraag goedkeuring aan om de levenscyclusstatus van dit contract te wijzigen.",
       "currentStatusLabel": "Huidige status:",
       "recommendedLabel": "Aanbevolen:",
+      "recommended": {
+        "draft": "Dien in ter beoordeling (Voorgesteld) zodra het klaar is",
+        "proposed": "Wacht tot de steward het naar In beoordeling zet",
+        "under_review": "De steward keurt goed of vraagt om wijzigingen",
+        "approved": "Activeer het zodra het productiedata moet beheren",
+        "active": "Markeer als verouderd wanneer uitfasering gepland is; gebruik het certificeringspaneel voor certificering",
+        "deprecated": "Faseer het uit wanneer het niet meer wordt gebruikt"
+      },
       "selectTargetLabel": "Selecteer doelstatus *",
       "chooseTargetPlaceholder": "Kies doelstatus...",
       "terminalStateLabel": "Eindstatus:",

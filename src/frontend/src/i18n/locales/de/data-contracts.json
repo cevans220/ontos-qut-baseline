@@ -71,6 +71,15 @@
     "published": "Veröffentlicht",
     "archived": "Archiviert"
   },
+  "statusDescriptions": {
+    "draft": "In Entwicklung, noch nicht zur Prüfung eingereicht",
+    "proposed": "Zur Prüfung eingereicht",
+    "under_review": "Wird vom Data Steward geprüft",
+    "approved": "Vom Steward genehmigt, bereit zur Aktivierung",
+    "active": "In Produktion, regelt Datenbestände",
+    "deprecated": "Noch verfügbar, aber zur Außerbetriebnahme vorgesehen",
+    "retired": "Nicht mehr in Verwendung, archiviert"
+  },
   "details": {
     "backToList": "Zurück zur Liste",
     "edit": "Bearbeiten",
@@ -1132,6 +1141,14 @@
       "requestDescription": "Beantragen Sie die Genehmigung zur Änderung des Lebenszyklusstatus dieses Vertrags.",
       "currentStatusLabel": "Aktueller Status:",
       "recommendedLabel": "Empfohlen:",
+      "recommended": {
+        "draft": "Zur Prüfung einreichen (Vorgeschlagen), sobald bereit",
+        "proposed": "Warten, bis der Steward auf In Prüfung setzt",
+        "under_review": "Der Steward genehmigt oder fordert Änderungen an",
+        "approved": "Aktivieren, sobald er Produktionsdaten regeln soll",
+        "active": "Bei geplanter Außerbetriebnahme als veraltet markieren; für die Zertifizierung das Zertifizierungs-Panel verwenden",
+        "deprecated": "Außer Betrieb nehmen, wenn nicht mehr verwendet"
+      },
       "selectTargetLabel": "Zielstatus auswählen *",
       "chooseTargetPlaceholder": "Zielstatus auswählen...",
       "terminalStateLabel": "Endstatus:",

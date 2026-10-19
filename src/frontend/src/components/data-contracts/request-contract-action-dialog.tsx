@@ -17,7 +17,8 @@ import AccessRequestFields from '@/components/access/access-request-fields';
 import {
   getAllowedTransitions,
   getStatusConfig,
-  getRecommendedAction,
+  getStatusText,
+  getRecommendedActionText,
 } from '@/lib/odcs-lifecycle';
 
 type RequestType = 'access' | 'review' | 'deploy' | 'publish' | 'certify' | 'status_change';
@@ -388,7 +389,7 @@ export default function RequestContractActionDialog({
             )}
             {contractStatus && (
               <div className="text-xs text-muted-foreground mt-1">
-                {t('data-contracts:requests.statusLabel', 'Status:')} <span className="uppercase">{contractStatus}</span>
+                {t('data-contracts:requests.statusLabel', 'Status:')} <span className="uppercase">{getStatusText(contractStatus, t).label}</span>
               </div>
             )}
           </div>
@@ -710,18 +711,18 @@ export default function RequestContractActionDialog({
                   <div className="flex items-center gap-2 mb-1">
                     <Label className="text-sm font-semibold">{t('data-contracts:requests.statusChange.currentStatusLabel', 'Current Status:')}</Label>
                     <span className="text-lg">{getStatusConfig(contractStatus).icon}</span>
-                    <span className="font-medium">{getStatusConfig(contractStatus).label}</span>
+                    <span className="font-medium">{getStatusText(contractStatus, t).label}</span>
                   </div>
-                  <p className="text-xs text-muted-foreground">{getStatusConfig(contractStatus).description}</p>
+                  <p className="text-xs text-muted-foreground">{getStatusText(contractStatus, t).description}</p>
                 </div>
               )}
 
               {/* Recommended Action */}
-              {contractStatus && getRecommendedAction(contractStatus) && (
+              {contractStatus && getRecommendedActionText(contractStatus, t) && (
                 <Alert>
                   <Info className="h-4 w-4" />
                   <AlertDescription className="text-sm">
-                    <strong>{t('data-contracts:requests.statusChange.recommendedLabel', 'Recommended:')}</strong> {getRecommendedAction(contractStatus)}
+                    <strong>{t('data-contracts:requests.statusChange.recommendedLabel', 'Recommended:')}</strong> {getRecommendedActionText(contractStatus, t)}
                   </AlertDescription>
                 </Alert>
               )}
@@ -736,7 +737,7 @@ export default function RequestContractActionDialog({
                         {targetStatus && (
                           <div className="flex items-center gap-2">
                             <span className="text-lg">{getStatusConfig(targetStatus).icon}</span>
-                            <span>{getStatusConfig(targetStatus).label}</span>
+                            <span>{getStatusText(targetStatus, t).label}</span>
                           </div>
                         )}
                       </SelectValue>
@@ -748,7 +749,7 @@ export default function RequestContractActionDialog({
                           <SelectItem key={status} value={status}>
                             <div className="flex items-center gap-2">
                               <span className="text-lg">{config.icon}</span>
-                              <span>{config.label}</span>
+                              <span>{getStatusText(status, t).label}</span>
                             </div>
                           </SelectItem>
                         );
@@ -757,7 +758,7 @@ export default function RequestContractActionDialog({
                   </Select>
                   {targetStatus && (
                     <div className="p-3 bg-muted/50 rounded-lg border text-sm">
-                      <p className="text-muted-foreground">{getStatusConfig(targetStatus).description}</p>
+                      <p className="text-muted-foreground">{getStatusText(targetStatus, t).description}</p>
                     </div>
                   )}
                 </div>
@@ -765,7 +766,7 @@ export default function RequestContractActionDialog({
                 <Alert variant="destructive">
                   <AlertCircle className="h-4 w-4" />
                   <AlertDescription>
-                    <strong>{t('data-contracts:requests.statusChange.terminalStateLabel', 'Terminal State:')}</strong> {t('data-contracts:requests.statusChange.noTransitions', 'No transitions available from {{status}} status.', { status: contractStatus ? getStatusConfig(contractStatus).label : 'current' })}
+                    <strong>{t('data-contracts:requests.statusChange.terminalStateLabel', 'Terminal State:')}</strong> {t('data-contracts:requests.statusChange.noTransitions', 'No transitions available from {{status}} status.', { status: contractStatus ? getStatusText(contractStatus, t).label : 'current' })}
                   </AlertDescription>
                 </Alert>
               )}

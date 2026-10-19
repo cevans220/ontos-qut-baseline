@@ -71,6 +71,15 @@
     "published": "Publicado",
     "archived": "Archivado"
   },
+  "statusDescriptions": {
+    "draft": "En desarrollo, aún no enviado a revisión",
+    "proposed": "Enviado para su revisión",
+    "under_review": "En revisión por el data steward",
+    "approved": "Aprobado por el steward, listo para activar",
+    "active": "En uso en producción, gobierna activos de datos",
+    "deprecated": "Aún disponible, pero marcado para su retirada",
+    "retired": "Ya no se usa, archivado"
+  },
   "details": {
     "backToList": "Volver a la Lista",
     "edit": "Editar",
@@ -1132,6 +1141,14 @@
       "requestDescription": "Solicita aprobación para cambiar el estado del ciclo de vida de este contrato.",
       "currentStatusLabel": "Estado actual:",
       "recommendedLabel": "Recomendado:",
+      "recommended": {
+        "draft": "Envíalo a revisión (Propuesto) cuando esté listo",
+        "proposed": "Espera a que el steward lo pase a En revisión",
+        "under_review": "El steward aprobará o pedirá cambios",
+        "approved": "Actívalo cuando esté listo para gobernar datos de producción",
+        "active": "Márcalo como obsoleto al planificar su retirada; usa el panel de certificación para certificar",
+        "deprecated": "Retíralo cuando ya no se use"
+      },
       "selectTargetLabel": "Selecciona el estado de destino *",
       "chooseTargetPlaceholder": "Elige el estado de destino...",
       "terminalStateLabel": "Estado terminal:",
