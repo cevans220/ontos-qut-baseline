@@ -585,7 +585,17 @@ class ApprovalStepHandler(StepHandler):
         try:
             # Resolve approvers - returns list of (identifier, role_id or None)
             resolved_approvers = self._resolve_approvers(approvers, context)
-            
+
+            # An approver spec can legitimately resolve to nobody (e.g. a
+            # business role with no owner assigned on this entity). Route to
+            # the Admin role rather than dead-ending the request silently.
+            if not resolved_approvers and approvers != 'admins':
+                logger.warning(
+                    f"Approval step: no approvers resolved for '{approvers}' on "
+                    f"{context.entity_type}:{context.entity_id}; falling back to Admin role"
+                )
+                resolved_approvers = self._resolve_approvers('admins', context)
+
             if not resolved_approvers:
                 return StepResult(passed=False, error="Could not resolve any approvers")
             

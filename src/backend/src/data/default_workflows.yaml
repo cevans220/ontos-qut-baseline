@@ -769,12 +769,12 @@ workflows:
   # Concept Review Workflow
   # =========================================================================
 
-  # Concept Review Approval
+  # Concept Reviewer Approval (default)
   # Fired by submit_concept_for_review (draft -> under_review). The approval
   # decision is reflected onto the concept by the executor (approve ->
   # approved; reject -> draft with the reason as the reviewer comment).
   - id: "concept-review-approval"
-    name: "Concept Review Approval"
+    name: "Concept Reviewer Approval (Default)"
     description: "Routes concepts submitted for review to the chosen reviewer for approval and notifies the submitter of the decision."
     trigger:
       type: "on_request_status_change"

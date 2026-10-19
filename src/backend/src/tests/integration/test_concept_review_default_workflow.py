@@ -1,4 +1,4 @@
-"""The default "Concept Review Approval" workflow governs concept submits.
+"""The default "Concept Reviewer Approval (Default)" workflow governs concept submits.
 
 Before it shipped, ``submit_concept_for_review`` fired
 ``on_request_status_change`` for ``ontology_concept`` but no default workflow
@@ -28,7 +28,7 @@ from src.controller.workflows_manager import WorkflowsManager
 from src.db_models.notifications import NotificationDb
 from src.models.process_workflows import ProcessWorkflowCreate
 
-WORKFLOW_NAME = "Concept Review Approval"
+WORKFLOW_NAME = "Concept Reviewer Approval (Default)"
 
 
 @pytest.fixture
@@ -152,3 +152,57 @@ def test_submit_without_reviewer_falls_back_to_admin_role(client, smm, db_sessio
     notes = _approval_notifications(db_session, iri)
     assert len(notes) == 1
     assert notes[0].recipient == "Admin"
+
+
+def test_governed_submit_skips_parallel_data_asset_review(client, smm, db_session):
+    """With a reviewer, a governed submit must not also open a DataAssetReview
+    (that fires a second approval to DataSteward via the default review workflow)."""
+    _seeded_workflow(db_session)
+    iri = _make_draft_concept(client, "Margin")
+
+    out = smm.submit_concept_for_review(
+        concept_iri=iri,
+        reviewer_email="reviewer@example.com",
+        submitted_by="author@example.com",
+    )
+
+    assert out["governed"] is True
+    assert out["review_request_id"] is None
+
+
+def test_unresolvable_approver_falls_back_to_admin(client, smm, db_session):
+    """An approver spec that resolves to nobody (e.g. a business role or owner not
+    assigned on the entity) used to dead-end the
+    approval ("Could not resolve any approvers") with nobody notified."""
+    mgr, _ = _seeded_workflow(db_session)
+    name = f"Unresolvable approver review {uuid.uuid4().hex[:6]}"
+    mgr.create_workflow(ProcessWorkflowCreate.model_validate({
+        "name": name,
+        "trigger": {
+            "type": "on_request_status_change",
+            "entity_types": ["ontology_concept"],
+            "from_status": "draft",
+            "to_status": "under_review",
+        },
+        "scope": {"type": "all"},
+        "is_active": True,
+        "steps": [
+            {"step_id": "approve", "name": "Approve", "step_type": "approval",
+             "config": {"approvers": "owner"}, "on_pass": "done"},
+            {"step_id": "done", "name": "Done", "step_type": "pass"},
+        ],
+    }))
+    iri = _make_draft_concept(client, "Churn")
+
+    smm.submit_concept_for_review(
+        concept_iri=iri, reviewer_email=None, submitted_by="author@example.com",
+    )
+
+    rows = db_session.query(NotificationDb).filter(
+        NotificationDb.action_type == "workflow_approval"
+    ).all()
+    notes = [
+        n for n in rows
+        if _payload(n).get("entity_id") == iri and _payload(n).get("workflow_name") == name
+    ]
+    assert [n.recipient for n in notes] == ["Admin"]
