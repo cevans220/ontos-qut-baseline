@@ -73,11 +73,8 @@ function relativeTime(iso?: string | null): string {
 // The three output "rungs" — a glossary -> taxonomy -> ontology maturity ladder.
 // Defined once, rendered both in the top legend and (via BuildsRow) inside every
 // path card, so the same icon vocabulary is taught once and reused everywhere.
-// `vocab` is the advanced-only "what gets written" line shown under each rung in
-// the legend. Mirrors the backend's _resolve_concept_rdf_types / create_concept.
-// Note: parents picked in the concept editor are written as skos:broader for
-// every entry type (classes included); rdfs:subClassOf comes from imported or
-// generated ontologies.
+// `vocab` is the advanced-only "what gets written" note behind each rung's info
+// icon. Mirrors the backend's _resolve_concept_rdf_types / create_concept.
 const RUNGS = [
   {
     key: 'glossary',
@@ -99,7 +96,7 @@ const RUNGS = [
     Icon: Share2,
     blurb: 'typed relationships a machine can reason over',
     vocab:
-      'OWL + RDFS. owl:Class, owl:ObjectProperty / owl:DatatypeProperty with rdfs:domain / rdfs:range, owl:NamedIndividual. Imported/generated ontologies use rdfs:subClassOf; classes authored in Ontos currently link parents with skos:broader. Labels/definitions still use SKOS.',
+      'OWL + RDFS. owl:Class with rdfs:subClassOf, owl:ObjectProperty / owl:DatatypeProperty with rdfs:domain / rdfs:range, owl:NamedIndividual. Labels/definitions still use SKOS.',
   },
 ] as const;
 
@@ -281,25 +278,32 @@ export default function DefineView() {
           card below (the "Builds" row), lit for what that path produces. Teach the
           vocabulary once here, then show it per card. Glossary -> taxonomy ->
           ontology is a maturity progression: start simple, harden where needed. */}
-      <div className="mb-6 flex flex-wrap items-start gap-x-5 gap-y-2 rounded-lg border bg-muted/30 px-3.5 py-2.5 text-xs">
-        <span className="font-medium text-foreground">What you can build:</span>
+      <div className="mb-6 flex flex-nowrap items-center gap-x-5 overflow-x-auto rounded-lg border bg-muted/30 px-3.5 py-2.5 text-xs">
+        <span className="font-medium text-foreground whitespace-nowrap">What you can build:</span>
         {RUNGS.map((r, i) => (
-          <div key={r.key} className="flex items-start gap-2 max-w-[340px]">
+          <div key={r.key} className="flex items-center gap-2 whitespace-nowrap">
             {i > 0 && <span className="text-muted-foreground/40 -ml-3 mr-1">→</span>}
             <r.Icon className="h-4 w-4 text-foreground shrink-0" />
-            <div>
-              <span className="font-medium text-foreground">{r.label}</span>
-              <span className="text-muted-foreground"> — {r.blurb}</span>
-              {/* Advanced view only: the RDF vocabulary this rung is written in. */}
-              <p className="adv-only mt-0.5 font-mono text-[10px] leading-snug text-muted-foreground/80">
-                {r.vocab}
-              </p>
-            </div>
+            <span className="font-medium text-foreground">{r.label}</span>
+            <span className="text-muted-foreground">— {r.blurb}</span>
+            {/* Advanced view only: the RDF vocabulary this rung is written in. */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  className="adv-only cursor-help text-xs text-muted-foreground border rounded-full h-4 w-4 inline-flex items-center justify-center"
+                  aria-label={`${r.label} vocabulary`}
+                  data-testid={`rung-vocab-${r.key}`}
+                >
+                  i
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-[280px] text-xs">
+                <span className="font-mono">{r.vocab}</span>
+                <span className="block mt-1 text-muted-foreground">Every scheme is a skos:ConceptScheme.</span>
+              </TooltipContent>
+            </Tooltip>
           </div>
         ))}
-        <p className="adv-only basis-full font-mono text-[10px] text-muted-foreground/80">
-          Every scheme is a skos:ConceptScheme.
-        </p>
       </div>
 
       {/* Path cards */}

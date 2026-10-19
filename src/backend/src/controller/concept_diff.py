@@ -36,6 +36,7 @@ from rdflib.namespace import RDF, RDFS, SKOS, OWL
 # Mirrors ONTOS in semantic_models_manager.py (defined inline there too — no
 # shared namespaces module exists). Used to surface ontos:sourceFile provenance.
 ONTOS = Namespace("http://ontos.app/ontology#")
+_ONTOS_NS = str(ONTOS)
 
 from src.common.logging import get_logger
 
@@ -77,11 +78,22 @@ _LIST_LITERAL_FIELDS: Dict[str, URIRef] = {
     "synonyms": SKOS.altLabel,
     "examples": SKOS.example,
 }
+# ``broader_iris`` is extracted separately (see ``_PARENT_PREDICATES``): parent
+# links may be skos:broader (SKOS), rdfs:subClassOf (classes) or
+# rdfs:subPropertyOf (properties).
 _LIST_URI_FIELDS: Dict[str, URIRef] = {
-    "broader_iris": SKOS.broader,
     "narrower_iris": SKOS.narrower,
     "related_iris": SKOS.related,
 }
+
+# Mirrors semantic_models_manager._PARENT_PREDICATES.
+_PARENT_PREDICATES = (RDFS.subClassOf, RDFS.subPropertyOf, SKOS.broader)
+_VOCAB_PREFIXES = (
+    "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "http://www.w3.org/2000/01/rdf-schema#",
+    "http://www.w3.org/2004/02/skos/core#",
+    "http://www.w3.org/2002/07/owl#",
+)
 
 
 @dataclass
@@ -131,6 +143,11 @@ def _canonical_triples_by_subject(graph: Graph) -> Dict[str, frozenset]:
             # itself. Its canonical label is deterministic post-URDNA2015, so it
             # already contributes a stable object-fingerprint wherever a named
             # subject points at it.
+            continue
+        if str(pred).startswith(_ONTOS_NS):
+            # Ontos governance/bookkeeping (status, owners, timestamps, review
+            # state) is stamped on import and never part of the uploaded
+            # content; comparing it made every re-upload look "modified".
             continue
         by_subject.setdefault(str(subj), set()).add(
             (str(pred), _object_fingerprint(obj))
@@ -282,5 +299,27 @@ def _extract_changes(graph: Graph, iri: str) -> Dict[str, object]:
         vals = [str(o) for o in graph.objects(subj, pred) if isinstance(o, URIRef)]
         if vals:
             changes[field_name] = vals
+
+    # Parent links from every parent predicate. ``_parent_predicates`` records
+    # the predicate(s) each parent was asserted with in the file so the publish
+    # writes it back unchanged (a class keeps rdfs:subClassOf, a SKOS concept
+    # skos:broader). Blank nodes (restrictions) and vocabulary IRIs are not
+    # parents; they stay in the copied triple set untouched.
+    parents: List[str] = []
+    parent_predicates: Dict[str, List[str]] = {}
+    for pred in _PARENT_PREDICATES:
+        for o in graph.objects(subj, pred):
+            if not isinstance(o, URIRef):
+                continue
+            o_str = str(o)
+            if o_str.startswith("urn:ontos:bnode:") or o_str.startswith(_VOCAB_PREFIXES):
+                continue
+            if o_str not in parent_predicates:
+                parents.append(o_str)
+                parent_predicates[o_str] = []
+            parent_predicates[o_str].append(str(pred))
+    if parents:
+        changes["broader_iris"] = parents
+        changes["_parent_predicates"] = parent_predicates
 
     return changes

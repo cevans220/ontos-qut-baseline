@@ -137,19 +137,15 @@ describe('DefineView', () => {
     expect(importDialogOpen).toBe(true);
   });
 
-  it('legend shows an advanced-only vocabulary line under each rung', () => {
+  it('legend puts each rung vocabulary behind an advanced-only info icon', () => {
     renderDefine();
     expect(screen.queryByRole('button', { name: 'What gets written' })).not.toBeInTheDocument();
-    const glossary = screen.getByText(/skos:prefLabel \/ skos:altLabel \/ skos:definition/);
-    const taxonomy = screen.getByText(/skos:broader \/ skos:narrower \(skos:related/);
-    const ontology = screen.getByText(/OWL \+ RDFS\. owl:Class/);
-    const scheme = screen.getByText('Every scheme is a skos:ConceptScheme.');
-    for (const el of [glossary, taxonomy, ontology, scheme]) {
-      expect(el).toHaveClass('adv-only');
+    for (const key of ['glossary', 'taxonomy', 'ontology']) {
+      const icon = screen.getByTestId(`rung-vocab-${key}`);
+      expect(icon).toHaveClass('adv-only');
     }
-    // Truthful about authored classes: parents are written as skos:broader.
-    expect(ontology.textContent).toMatch(/classes authored in Ontos currently link parents with skos:broader/);
-    expect(document.querySelectorAll('.adv-only').length).toBeGreaterThanOrEqual(4);
+    // Vocabulary text lives in tooltips, not inline under the rungs.
+    expect(screen.queryByText(/skos:prefLabel \/ skos:altLabel/)).not.toBeInTheDocument();
   });
 
   it('shows in-progress generator runs from the runs endpoint', async () => {

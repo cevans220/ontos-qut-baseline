@@ -486,6 +486,7 @@ class RdfTriplesRepository(CRUDBase[RdfTripleDb, dict, dict]):
         predicate_uri: str,
         context_name: Optional[str] = None,
         concept_version_id: object = _UNSET,
+        keep_object_prefixes: tuple = (),
     ) -> int:
         """Remove all triples matching subject and predicate.
 
@@ -497,6 +498,10 @@ class RdfTriplesRepository(CRUDBase[RdfTripleDb, dict, dict]):
         copied set WITHOUT touching the prior version's frozen snapshot. Left at
         the sentinel default = not scoped (delete across all versions, legacy
         behaviour for the plain update path).
+
+        ``keep_object_prefixes``: rows whose object value starts with any of
+        these prefixes are kept (e.g. ``urn:ontos:bnode:`` so an owl:Restriction
+        hanging off rdfs:subClassOf survives a parent-link rewrite).
         """
         query = db.query(RdfTripleDb).filter(
             and_(
@@ -504,6 +509,8 @@ class RdfTriplesRepository(CRUDBase[RdfTripleDb, dict, dict]):
                 RdfTripleDb.predicate_uri == predicate_uri,
             )
         )
+        for prefix in keep_object_prefixes:
+            query = query.filter(~RdfTripleDb.object_value.startswith(prefix))
         if context_name:
             query = query.filter(RdfTripleDb.context_name == context_name)
         if concept_version_id is not _UNSET:

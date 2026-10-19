@@ -113,6 +113,27 @@ def _is_vocab_iri(iri) -> bool:
     return any(str(iri).startswith(p) for p in _VOCAB_PARENT_PREFIXES)
 
 
+# Every predicate that expresses a direct "parent" link. Writers pick ONE per
+# concept type (see ``_parent_predicate_for_type``) so an OWL class gets
+# rdfs:subClassOf, an OWL property rdfs:subPropertyOf and a SKOS concept/term
+# skos:broader. Readers accept ALL of them so legacy data (e.g. a class that
+# was written with skos:broader before this rule) keeps showing its parent.
+_PARENT_PREDICATES = (RDFS.subClassOf, RDFS.subPropertyOf, SKOS.broader)
+
+
+_PARENT_PREDICATE_STRS = frozenset(str(p) for p in _PARENT_PREDICATES)
+
+
+def _parent_predicate_for_type(concept_type: Optional[str]) -> URIRef:
+    """The predicate used to WRITE a parent link for ``concept_type``."""
+    ct = _normalise_concept_type(concept_type)
+    if ct == "class":
+        return RDFS.subClassOf
+    if ct == "property":
+        return RDFS.subPropertyOf
+    return SKOS.broader
+
+
 def _sanitize_context_name(name: str) -> str:
     """Sanitize a name for use in URN context identifiers.
     
@@ -3029,31 +3050,19 @@ class SemanticModelsManager(SearchableAsset):
                     # Get parent concepts/properties. RDF/RDFS/OWL/SKOS
                     # vocabulary IRIs (owl:Class, owl:Thing, ...) are never valid
                     # parents and are filtered out of every source below.
-                    parent_concepts = []
-                    # Handle rdfs:subClassOf relationships (class-to-class)
-                    for parent in context.objects(concept_uri, RDFS.subClassOf):
-                        parent_str = str(parent)
-                        if not isinstance(parent, BNode) and not self._is_skolemized_bnode(parent_str) and not _is_vocab_iri(parent_str):
-                            parent_concepts.append(parent_str)
+                    # Asserted parents via rdfs:subClassOf (classes),
+                    # rdfs:subPropertyOf (properties) and skos:broader (SKOS
+                    # concepts + legacy classes), de-duplicated.
+                    parent_concepts = self._direct_parent_iris(context, concept_uri)
                     # Handle owl:equivalentClass + owl:intersectionOf (A ≡ B ∩ C implies A ⊑ B)
                     for parent_iri in self._extract_parents_from_owl_equivalent_class(context, concept_uri):
                         if not _is_vocab_iri(parent_iri) and parent_iri not in parent_concepts:
                             parent_concepts.append(parent_iri)
-                    # Handle rdfs:subPropertyOf relationships (property-to-property)
-                    for parent in context.objects(concept_uri, RDFS.subPropertyOf):
-                        parent_str = str(parent)
-                        if not isinstance(parent, BNode) and not self._is_skolemized_bnode(parent_str) and not _is_vocab_iri(parent_str):
-                            parent_concepts.append(parent_str)
-                    # Handle SKOS broader relationships
-                    for parent in context.objects(concept_uri, SKOS.broader):
-                        parent_str = str(parent)
-                        if not isinstance(parent, BNode) and not self._is_skolemized_bnode(parent_str) and not _is_vocab_iri(parent_str):
-                            parent_concepts.append(parent_str)
                     # Handle rdf:type relationships (instance-to-class)
                     for parent_type in context.objects(concept_uri, RDF.type):
                         # Only include custom types, not basic RDF/RDFS/SKOS/OWL types
                         parent_type_str = str(parent_type)
-                        if not _is_vocab_iri(parent_type_str):
+                        if not _is_vocab_iri(parent_type_str) and parent_type_str not in parent_concepts:
                             parent_concepts.append(parent_type_str)
 
                     source_context = self._extract_source_context(context_name)
@@ -3178,45 +3187,40 @@ class SemanticModelsManager(SearchableAsset):
             # Get parent concepts. RDF/RDFS/OWL/SKOS vocabulary IRIs
             # (owl:Class, owl:Thing, ...) are never valid parents and are
             # filtered out of every source below.
-            parent_concepts = []
-            # Handle rdfs:subClassOf relationships (class-to-class)
-            for parent in context.objects(concept_uri, RDFS.subClassOf):
-                parent_str = str(parent)
-                if not isinstance(parent, BNode) and not self._is_skolemized_bnode(parent_str) and not _is_vocab_iri(parent_str):
-                    parent_concepts.append(parent_str)
+            # Asserted parents via rdfs:subClassOf / rdfs:subPropertyOf /
+            # skos:broader (legacy classes may still carry skos:broader).
+            parent_concepts = self._direct_parent_iris(context, concept_uri)
             # Handle owl:equivalentClass + owl:intersectionOf (A ≡ B ∩ C implies A ⊑ B)
             for parent_iri in self._extract_parents_from_owl_equivalent_class(context, concept_uri):
                 if not _is_vocab_iri(parent_iri) and parent_iri not in parent_concepts:
                     parent_concepts.append(parent_iri)
-            # Handle SKOS broader relationships
-            for parent in context.objects(concept_uri, SKOS.broader):
-                parent_str = str(parent)
-                if not isinstance(parent, BNode) and not self._is_skolemized_bnode(parent_str) and not _is_vocab_iri(parent_str):
-                    parent_concepts.append(parent_str)
             # Handle rdf:type relationships (instance-to-class)
             for parent_type in context.objects(concept_uri, RDF.type):
                 # Only include custom types, not basic RDF/RDFS/SKOS/OWL types
                 parent_type_str = str(parent_type)
-                if not _is_vocab_iri(parent_type_str):
+                if not _is_vocab_iri(parent_type_str) and parent_type_str not in parent_concepts:
                     parent_concepts.append(parent_type_str)
             
-            # Get child concepts
+            # Get child concepts: inverse of every parent predicate
+            # (subClassOf / subPropertyOf / skos:broader), de-duplicated.
             child_concepts = []
-            # Handle rdfs:subClassOf relationships (find classes that are subclasses of this one)
-            for child in context.subjects(RDFS.subClassOf, concept_uri):
-                child_str = str(child)
-                if not isinstance(child, BNode) and not self._is_skolemized_bnode(child_str):
-                    child_concepts.append(child_str)
+            for pred in _PARENT_PREDICATES:
+                for child in context.subjects(pred, concept_uri):
+                    child_str = str(child)
+                    if (
+                        not isinstance(child, BNode)
+                        and not self._is_skolemized_bnode(child_str)
+                        and child_str not in child_concepts
+                    ):
+                        child_concepts.append(child_str)
             # Handle owl:equivalentClass + owl:intersectionOf (if B ≡ A ∩ ..., B is a child of A)
             for child_iri in self._find_children_via_owl_equivalent_class(context, concept_uri):
                 if child_iri not in child_concepts:
                     child_concepts.append(child_iri)
-            # Handle SKOS narrower relationships
-            for child in context.subjects(SKOS.broader, concept_uri):
-                child_concepts.append(str(child))
             # Handle rdf:type relationships (find instances of this class)
             for child in context.subjects(RDF.type, concept_uri):
-                child_concepts.append(str(child))
+                if str(child) not in child_concepts:
+                    child_concepts.append(str(child))
             
             source_context = self._extract_source_context(context_name)
 
@@ -4024,6 +4028,61 @@ class SemanticModelsManager(SearchableAsset):
     # CONCEPT CRUD
     # ========================================================================
 
+    def _clear_named_parent_links(
+        self,
+        concept_iri: str,
+        collection_iri: str,
+        coll_context=None,
+        **version_scope,
+    ) -> None:
+        """Remove every NAMED parent link (skos:broader / rdfs:subClassOf /
+        rdfs:subPropertyOf) of ``concept_iri`` in ``collection_iri``.
+
+        Blank-node objects (owl:Restriction etc. under rdfs:subClassOf) and
+        RDF/RDFS/OWL/SKOS vocabulary objects (e.g. ``owl:Thing``) are not
+        user-editable parents and are kept. ``version_scope`` is forwarded to
+        ``remove_by_subject_predicate`` (e.g. ``concept_version_id=...``) so a
+        publish only touches the new version's copied set. When
+        ``coll_context`` is given the in-memory graph is cleared too.
+        """
+        concept_uri = URIRef(concept_iri)
+        for pred in _PARENT_PREDICATES:
+            rdf_triples_repo.remove_by_subject_predicate(
+                self._db, concept_iri, str(pred), collection_iri,
+                keep_object_prefixes=("urn:ontos:bnode:",) + _VOCAB_PARENT_PREFIXES,
+                **version_scope,
+            )
+            if coll_context is not None:
+                for obj in list(coll_context.objects(concept_uri, pred)):
+                    if (
+                        isinstance(obj, URIRef)
+                        and not self._is_skolemized_bnode(str(obj))
+                        and not _is_vocab_iri(obj)
+                    ):
+                        coll_context.remove((concept_uri, pred, obj))
+
+    def _direct_parent_iris(self, graph, concept_uri) -> List[str]:
+        """Asserted direct parents of ``concept_uri`` in ``graph``, read from
+        ALL parent predicates (skos:broader, rdfs:subClassOf,
+        rdfs:subPropertyOf) so classes, properties and SKOS concepts (incl.
+        legacy classes stored with skos:broader) all report their parents.
+        Blank nodes and RDF/RDFS/OWL/SKOS vocabulary IRIs are excluded and the
+        result is de-duplicated (order preserved).
+        """
+        parents: List[str] = []
+        for pred in _PARENT_PREDICATES:
+            for obj in graph.objects(concept_uri, pred):
+                obj_str = str(obj)
+                if (
+                    isinstance(obj, BNode)
+                    or self._is_skolemized_bnode(obj_str)
+                    or _is_vocab_iri(obj_str)
+                    or obj_str in parents
+                ):
+                    continue
+                parents.append(obj_str)
+        return parents
+
     @staticmethod
     def _resolve_concept_rdf_types(
         concept_type: str,
@@ -4195,10 +4254,18 @@ class SemanticModelsManager(SearchableAsset):
         for ex in examples:
             triples.append((concept_iri, str(SKOS.example), ex, False))
 
+        # Parent links use the type-appropriate predicate: rdfs:subClassOf for
+        # OWL classes, rdfs:subPropertyOf for properties, skos:broader otherwise.
+        parent_predicate = _parent_predicate_for_type(normalised_concept_type)
         for broader in broader_iris:
-            triples.append((concept_iri, str(SKOS.broader), broader, True))
+            triples.append((concept_iri, str(parent_predicate), broader, True))
 
-        for narrower in narrower_iris:
+        # skos:narrower is a SKOS-only inverse. OWL/RDFS has no subclass inverse:
+        # a class's children are recorded on the child (rdfs:subClassOf), so
+        # classes/properties never get skos:narrower (the editor echoes the
+        # current children back on save).
+        writes_narrower = parent_predicate == SKOS.broader
+        for narrower in (narrower_iris if writes_narrower else []):
             triples.append((concept_iri, str(SKOS.narrower), narrower, True))
 
         for related in related_iris:
@@ -4250,8 +4317,8 @@ class SemanticModelsManager(SearchableAsset):
         for ex in examples:
             coll_context.add((concept_uri, SKOS.example, Literal(ex)))
         for broader in broader_iris:
-            coll_context.add((concept_uri, SKOS.broader, URIRef(broader)))
-        for narrower in narrower_iris:
+            coll_context.add((concept_uri, parent_predicate, URIRef(broader)))
+        for narrower in (narrower_iris if writes_narrower else []):
             coll_context.add((concept_uri, SKOS.narrower, URIRef(narrower)))
         for related in related_iris:
             coll_context.add((concept_uri, SKOS.related, URIRef(related)))
@@ -4470,19 +4537,12 @@ class SemanticModelsManager(SearchableAsset):
                 # the parent list: bad data can attach `skos:broader owl:Class`
                 # (or subClassOf owl:Thing), and those meta IRIs are never valid
                 # parents and render as dead links in the UI.
-                broader = [
-                    str(b) for b in context.objects(concept_uri, SKOS.broader)
-                    if not isinstance(b, BNode)
-                    and not self._is_skolemized_bnode(str(b))
-                    and not _is_vocab_iri(b)
-                ]
+                # Parents come from rdfs:subClassOf (classes),
+                # rdfs:subPropertyOf (properties) AND skos:broader (SKOS
+                # concepts + legacy classes written before the OWL rule).
+                broader = self._direct_parent_iris(context, concept_uri)
                 narrower = [str(n) for n in context.objects(concept_uri, SKOS.narrower)]
 
-                # Also check rdfs:subClassOf for classes
-                for parent in context.objects(concept_uri, RDFS.subClassOf):
-                    parent_str = str(parent)
-                    if not isinstance(parent, BNode) and not self._is_skolemized_bnode(parent_str) and not _is_vocab_iri(parent_str) and parent_str not in broader:
-                        broader.append(parent_str)
                 # Also check owl:equivalentClass + owl:intersectionOf
                 for parent_iri in self._extract_parents_from_owl_equivalent_class(context, concept_uri):
                     if not _is_vocab_iri(parent_iri) and parent_iri not in broader:
@@ -4692,17 +4752,29 @@ class SemanticModelsManager(SearchableAsset):
                 updates.append((concept_iri, str(SKOS.example), ex, False))
                 coll_context.add((concept_uri, SKOS.example, Literal(ex)))
         
+        # Parent links: written with the predicate matching the (target)
+        # concept type. ALL parent predicates are cleared first so the subject
+        # ends up with one type-consistent set (a legacy class carrying
+        # skos:broader is normalised to rdfs:subClassOf). A pure type change
+        # without new parents re-predicates the existing asserted parents.
+        parent_targets: Optional[List[str]] = None
         if broader_iris is not None:
-            rdf_triples_repo.remove_by_subject_predicate(self._db, concept_iri, str(SKOS.broader), collection_iri)
-            coll_context.remove((concept_uri, SKOS.broader, None))
-            for broader in broader_iris:
-                updates.append((concept_iri, str(SKOS.broader), broader, True))
-                coll_context.add((concept_uri, SKOS.broader, URIRef(broader)))
+            parent_targets = list(broader_iris)
+        elif rdf_type_change:
+            parent_targets = self._direct_parent_iris(coll_context, concept_uri)
+        if parent_targets is not None:
+            parent_predicate = _parent_predicate_for_type(target_concept_type)
+            self._clear_named_parent_links(concept_iri, collection_iri, coll_context)
+            for broader in parent_targets:
+                updates.append((concept_iri, str(parent_predicate), broader, True))
+                coll_context.add((concept_uri, parent_predicate, URIRef(broader)))
         
         if narrower_iris is not None:
             rdf_triples_repo.remove_by_subject_predicate(self._db, concept_iri, str(SKOS.narrower), collection_iri)
             coll_context.remove((concept_uri, SKOS.narrower, None))
-            for narrower in narrower_iris:
+            # SKOS-only inverse; classes/properties keep children on the child.
+            skos_typed = _parent_predicate_for_type(target_concept_type) == SKOS.broader
+            for narrower in (narrower_iris if skos_typed else []):
                 updates.append((concept_iri, str(SKOS.narrower), narrower, True))
                 coll_context.add((concept_uri, SKOS.narrower, URIRef(narrower)))
         
@@ -4781,8 +4853,10 @@ class SemanticModelsManager(SearchableAsset):
         "synonyms": SKOS.altLabel,
         "examples": SKOS.example,
     }
+    # ``broader_iris`` is NOT mapped here: its predicate depends on the concept
+    # type (subClassOf / subPropertyOf / broader) and is handled separately in
+    # ``_apply_publish_changes_to_db``.
     _PUBLISH_LIST_URI_FIELDS = {
-        "broader_iris": SKOS.broader,
         "narrower_iris": SKOS.narrower,
         "related_iris": SKOS.related,
     }
@@ -4910,7 +4984,8 @@ class SemanticModelsManager(SearchableAsset):
         #    changed predicates among rows owned by new_cv.id). DB-only here; the
         #    graph is patched AFTER commit per the recovery contract.
         self._apply_publish_changes_to_db(
-            concept_iri, collection_iri, changes, published_by, target_version_id=new_cv.id
+            concept_iri, collection_iri, changes, published_by, target_version_id=new_cv.id,
+            concept_type=existing.get("concept_type"),
         )
 
         # Optional change note as provenance on the NEW version's set.
@@ -4968,6 +5043,7 @@ class SemanticModelsManager(SearchableAsset):
         changes: Dict[str, Any],
         published_by: Optional[str],
         target_version_id=None,
+        concept_type: Optional[str] = None,
     ) -> None:
         """Overwrite the human SKOS fields on the NEW version's triple set only.
 
@@ -5014,6 +5090,33 @@ class SemanticModelsManager(SearchableAsset):
                 for val in changes[field]:
                     rdf_triples_repo.add_triple(
                         self._db, subject_uri=concept_iri, predicate_uri=str(predicate),
+                        object_value=str(val), object_is_uri=True,
+                        context_name=collection_iri, source_type="concept",
+                        source_identifier=concept_iri, created_by=published_by,
+                        concept_version_id=target_version_id,
+                    )
+
+        # Parent links: clear every named parent predicate on v2's set, then
+        # re-add each parent with the type-appropriate predicate. A file
+        # re-upload passes ``_parent_predicates`` ({iri: predicate}, from
+        # concept_diff._extract_changes, {iri: [predicate, ...]}) so the stored
+        # predicates mirror the file exactly (no churn on the next re-upload).
+        if changes.get("broader_iris") is not None:
+            default_pred = str(_parent_predicate_for_type(concept_type))
+            hints = changes.get("_parent_predicates")
+            if not isinstance(hints, dict):
+                hints = {}
+            self._clear_named_parent_links(
+                concept_iri, collection_iri, concept_version_id=target_version_id,
+            )
+            for val in changes["broader_iris"]:
+                preds = [
+                    p for p in (hints.get(str(val)) or [])
+                    if p in _PARENT_PREDICATE_STRS
+                ] or [default_pred]
+                for pred in dict.fromkeys(preds):
+                    rdf_triples_repo.add_triple(
+                        self._db, subject_uri=concept_iri, predicate_uri=pred,
                         object_value=str(val), object_is_uri=True,
                         context_name=collection_iri, source_type="concept",
                         source_identifier=concept_iri, created_by=published_by,
@@ -5144,7 +5247,9 @@ class SemanticModelsManager(SearchableAsset):
             "definition": definition,
             "synonyms": [str(o) for o in snap.objects(concept_uri, SKOS.altLabel)],
             "examples": [str(o) for o in snap.objects(concept_uri, SKOS.example)],
-            "broader": [str(o) for o in snap.objects(concept_uri, SKOS.broader)],
+            # All parent predicates (subClassOf / subPropertyOf / broader) so a
+            # class version shows its parent like a SKOS concept does.
+            "broader": self._direct_parent_iris(snap, concept_uri),
             "narrower": [str(o) for o in snap.objects(concept_uri, SKOS.narrower)],
             "related": [str(o) for o in snap.objects(concept_uri, SKOS.related)],
             "version": cv.version,
@@ -5163,7 +5268,8 @@ class SemanticModelsManager(SearchableAsset):
           - rows in ``entity_semantic_links`` for this iri (physical UC/asset
             references — the IRI is the join key baked into UC tags), PLUS
           - concept->concept references: any OTHER concept pointing at this iri
-            via skos:broader / skos:narrower / skos:related / rdfs:subClassOf in
+            via skos:broader / skos:narrower / skos:related / rdfs:subClassOf /
+            rdfs:subPropertyOf in
             the served graph.
 
         Retirement is gated on this being 0 (tombstone, never hard-delete).
@@ -5175,7 +5281,7 @@ class SemanticModelsManager(SearchableAsset):
         # Concept->concept references in the hot graph. The iri appears as the
         # OBJECT of a relationship predicate from some other subject.
         concept_uri = URIRef(concept_iri)
-        ref_predicates = (SKOS.broader, SKOS.narrower, SKOS.related, RDFS.subClassOf)
+        ref_predicates = (SKOS.broader, SKOS.narrower, SKOS.related, RDFS.subClassOf, RDFS.subPropertyOf)
         concept_refs = 0
         for pred in ref_predicates:
             for subj in self._graph.subjects(pred, concept_uri):
@@ -5752,7 +5858,13 @@ class SemanticModelsManager(SearchableAsset):
                 definition = r.object_value
             elif r.predicate_uri == str(RDFS.comment) and definition is None:
                 definition = r.object_value
-            elif r.predicate_uri in (str(SKOS.broader), str(RDFS.subClassOf)):
+            elif (
+                r.predicate_uri in _PARENT_PREDICATE_STRS
+                and r.object_is_uri
+                and not self._is_skolemized_bnode(r.object_value)
+                and not _is_vocab_iri(r.object_value)
+                and r.object_value not in broader
+            ):
                 broader.append(r.object_value)
         return {"label": label, "definition": definition, "broader": sorted(broader)}
 
