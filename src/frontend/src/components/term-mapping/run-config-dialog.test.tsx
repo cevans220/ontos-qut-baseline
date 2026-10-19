@@ -1,3 +1,4 @@
+import type React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -8,6 +9,15 @@ const mockGet = vi.fn();
 const mockPost = vi.fn();
 vi.mock('@/hooks/use-api', () => ({
   useApi: () => ({ get: mockGet, post: mockPost }),
+}));
+
+// Render Radix Popover content inline: opening it through jsdom pointer events
+// is environment-dependent (it never opened on the CI runner). What this file
+// tests is the options list and the payload, not the popover mechanics.
+vi.mock('@/components/ui/popover', () => ({
+  Popover: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+  PopoverTrigger: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+  PopoverContent: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
 }));
 
 const ASSET_TYPES = [
@@ -40,14 +50,12 @@ describe('RunConfigDialog asset-type multi-select', () => {
     // Default selection is preserved.
     expect(within(screen.getByTestId('tm-asset-types-selected')).getByText('Column')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('combobox', { expanded: false }));
     const listbox = await screen.findByRole('listbox');
     expect(within(listbox).getByRole('option', { name: 'Table' })).toBeInTheDocument();
     expect(within(listbox).getByRole('option', { name: 'View' })).toBeInTheDocument();
     expect(within(listbox).queryByRole('option', { name: 'LegacyThing' })).not.toBeInTheDocument();
 
     await user.click(within(listbox).getByRole('option', { name: 'Table' }));
-    await user.keyboard('{Escape}');
 
     await user.click(screen.getByRole('button', { name: 'Create run' }));
     await waitFor(() => expect(mockPost).toHaveBeenCalled());
