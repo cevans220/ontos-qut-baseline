@@ -264,6 +264,8 @@ def _rule_object(db: Session, context: 'StepContext') -> Dict[str, Any]:
     alone could let it pass on fields the payload doesn't carry, so the step
     fails instead (its handler turns the error into a failed result).
     ``before_create`` gates keep the payload: their entity isn't stored yet.
+    ``on_delete`` workflows keep it too: they fire after the row is deleted,
+    so there is nothing stored to load.
     """
     from src.controller.entity_dict_builder import (
         build_data_contract_dict,
@@ -272,7 +274,7 @@ def _rule_object(db: Session, context: 'StepContext') -> Dict[str, Any]:
 
     payload = context.entity if isinstance(context.entity, dict) else {}
     trigger_type = getattr(getattr(context, 'trigger_context', None), 'trigger_type', None)
-    if getattr(trigger_type, 'value', trigger_type) in ('before_update', 'before_create'):
+    if getattr(trigger_type, 'value', trigger_type) in ('before_update', 'before_create', 'on_delete'):
         return payload
     builder = {
         'data_product': build_data_product_dict,

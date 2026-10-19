@@ -165,6 +165,35 @@ def test_before_create_gates_see_the_payload(db_session):
     assert _rule_object(db_session, context) == {'name': 'p'}
 
 
+def test_on_delete_workflows_see_the_payload(db_session):
+    # on_delete fires after the row is gone: loading it would always fail.
+    from src.models.process_workflows import TriggerContext, TriggerType
+
+    context = _context('data_product', 'deleted-product', {'product_id': 'deleted-product'})
+    context.trigger_context = TriggerContext(
+        entity_type='data_product', entity_id='deleted-product',
+        trigger_type=TriggerType.ON_DELETE,
+    )
+
+    assert _rule_object(db_session, context) == {'product_id': 'deleted-product'}
+
+
+def test_a_rule_step_in_an_on_delete_workflow_runs_on_the_payload(db_session):
+    from src.models.process_workflows import TriggerContext, TriggerType
+
+    rule = "MATCH (obj:data_contract) ASSERT obj.contract_id = 'deleted-contract'"
+    context = _context('data_contract', 'deleted-contract', {'contract_id': 'deleted-contract'})
+    context.trigger_context = TriggerContext(
+        entity_type='data_contract', entity_id='deleted-contract',
+        trigger_type=TriggerType.ON_DELETE,
+    )
+
+    result = _validate(db_session, rule, context)
+
+    assert result.passed is True
+    assert result.data.get('error_code') is None
+
+
 def test_a_failing_entity_load_raises(db_session):
     with patch('src.controller.entity_dict_builder.build_data_product_dict',
                side_effect=RuntimeError('db down')):
