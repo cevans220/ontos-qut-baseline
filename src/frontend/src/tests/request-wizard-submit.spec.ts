@@ -60,7 +60,8 @@ test.describe('Approval wizard request submit', () => {
     await expect(page.getByText('Request Submitted').first()).toBeVisible()
 
     // Closing the wizard doesn't send it again
-    await page.locator('[role="dialog"]').last().getByRole('button', { name: 'Close' }).first().click()
+    // By test id: the button's accessible name is translated.
+    await page.locator('[role="dialog"]').last().getByTestId('dialog-close').first().click()
     await expect(page.locator('[role="dialog"]')).toHaveCount(0)
     await page.waitForTimeout(1000)
     expect(sent).toEqual([202])
