@@ -34,7 +34,11 @@ vi.mock('@/stores/permissions-store', () => ({
   usePermissions: () => ({ hasPermission: () => true, fetchPermissions: vi.fn(), fetchAvailableRoles: vi.fn() }),
 }));
 
-vi.mock('@/stores/breadcrumb-store', () => ({ default: () => () => undefined }));
+// Stable spy so the breadcrumb effect does not loop and its segments can be asserted.
+const setStaticSegmentsSpy = vi.fn();
+vi.mock('@/stores/breadcrumb-store', () => ({
+  default: (selector: any) => selector({ setStaticSegments: setStaticSegmentsSpy }),
+}));
 
 vi.mock('@/stores/knowledge-graph-store', () => ({
   useKnowledgeGraphStore: (selector: any) =>
@@ -115,6 +119,7 @@ beforeEach(() => {
   graphTabConcepts = null;
   availableSourcesMock = [];
   setHiddenSourcesSpy.mockClear();
+  setStaticSegmentsSpy.mockClear();
   global.fetch = vi.fn(async () => ({
     ok: true, status: 200, json: async () => ({}), text: async () => '',
   })) as unknown as typeof fetch;
@@ -139,6 +144,14 @@ function renderExplore(initialEntry = '/concepts/browser') {
 }
 
 describe('Explore unified surface', () => {
+  it('sets breadcrumbs to Concepts > Explore', () => {
+    renderExplore();
+    expect(setStaticSegmentsSpy).toHaveBeenCalledWith([
+      { label: 'Concepts', path: '/concepts' },
+      { label: 'Explore', path: '/concepts/browser' },
+    ]);
+  });
+
   it('renders the filter panel and all three view-mode options', () => {
     renderExplore();
     expect(screen.getByTestId('filter-panel')).toBeInTheDocument();

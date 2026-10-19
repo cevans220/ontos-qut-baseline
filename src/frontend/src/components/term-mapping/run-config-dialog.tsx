@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Loader2, Sparkles, Info } from 'lucide-react';
+import { Loader2, Sparkles, Info, Check, ChevronsUpDown, X } from 'lucide-react';
 import { Trans, useTranslation } from 'react-i18next';
 
 import {
@@ -18,6 +18,15 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -27,6 +36,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useApi } from '@/hooks/use-api';
 import { useConceptMode, ConceptModeSwitch } from '@/components/concepts/mode-switch';
 
+import type { AssetTypeRead } from '@/types/asset';
 import type {
   Run,
   RunCreatePayload,
@@ -59,6 +69,9 @@ interface RunConfigDialogProps {
   onCreated: (run: Run) => void;
 }
 
+/** Default asset-type filter (matches the backend's historical default). */
+const DEFAULT_ASSET_TYPE_NAMES = ['Column'];
+
 const DEFAULT_ENTITY_TYPES: TermMappingTargetEntityType[] = [
   'asset',
   'data_contract_property',
@@ -88,7 +101,10 @@ export default function RunConfigDialog({
   const [entityTypes, setEntityTypes] = useState<Set<TermMappingTargetEntityType>>(
     new Set(DEFAULT_ENTITY_TYPES),
   );
-  const [assetTypeNames, setAssetTypeNames] = useState<string>('Column');
+  const [assetTypeNames, setAssetTypeNames] = useState<string[]>(DEFAULT_ASSET_TYPE_NAMES);
+  const [assetTypes, setAssetTypes] = useState<AssetTypeRead[]>([]);
+  const [assetTypesLoading, setAssetTypesLoading] = useState(false);
+  const [assetTypesOpen, setAssetTypesOpen] = useState(false);
   const [limit, setLimit] = useState<string>('500');
   const [comment, setComment] = useState<string>('');
   const [submitting, setSubmitting] = useState<boolean>(false);
@@ -100,10 +116,11 @@ export default function RunConfigDialog({
     setAllContexts(true);
     setShippedSelected(new Set());
     setEntityTypes(new Set(DEFAULT_ENTITY_TYPES));
-    setAssetTypeNames('Column');
+    setAssetTypeNames(DEFAULT_ASSET_TYPE_NAMES);
     setLimit('500');
     setComment('');
     void fetchModels();
+    void fetchAssetTypes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
@@ -133,6 +150,36 @@ export default function RunConfigDialog({
     } finally {
       setModelsLoading(false);
     }
+  };
+
+  // Asset types come from the same endpoint as Settings > Asset Types. A
+  // failure is non-fatal: the default selection still submits.
+  const fetchAssetTypes = async () => {
+    setAssetTypesLoading(true);
+    try {
+      const res = await get<AssetTypeRead[]>('/api/asset-types?limit=100');
+      if (res.error) throw new Error(res.error);
+      const list = Array.isArray(res.data) ? res.data : [];
+      setAssetTypes(list.filter((at) => at.status !== 'deprecated'));
+    } catch {
+      setAssetTypes([]);
+    } finally {
+      setAssetTypesLoading(false);
+    }
+  };
+
+  // Options = API asset types, plus any selected name the API didn't return
+  // (e.g. the 'Column' default before types load) so it stays removable.
+  const assetTypeOptions = useMemo(() => {
+    const names = assetTypes.map((at) => at.name);
+    const extra = assetTypeNames.filter((n) => !names.includes(n));
+    return [...names, ...extra].sort((a, b) => a.localeCompare(b));
+  }, [assetTypes, assetTypeNames]);
+
+  const handleToggleAssetType = (name: string) => {
+    setAssetTypeNames((prev) =>
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name],
+    );
   };
 
   const enabledCustomerCount = models.length;
@@ -207,12 +254,7 @@ export default function RunConfigDialog({
     const payload: RunCreatePayload = {
       target_filter: {
         entity_types: Array.from(entityTypes),
-        asset_type_names: entityTypes.has('asset')
-          ? assetTypeNames
-              .split(',')
-              .map((s) => s.trim())
-              .filter(Boolean)
-          : undefined,
+        asset_type_names: entityTypes.has('asset') ? [...assetTypeNames] : undefined,
         limit: Number.isFinite(parseInt(limit, 10)) ? parseInt(limit, 10) : undefined,
       },
       include_shipped: Array.from(shippedSelected),
@@ -419,14 +461,89 @@ export default function RunConfigDialog({
             {entityTypes.has('asset') && (
               <div className="space-y-1.5 pl-1">
                 <Label htmlFor="tm-asset-types" className="text-xs text-muted-foreground">
-                  {t('runConfig.assetTypesLabel')}
+                  {t(
+                    'runConfig.assetTypesSelectLabel',
+                    'Asset types to match. Defaults to "Column".',
+                  )}
                 </Label>
-                <Input
-                  id="tm-asset-types"
-                  value={assetTypeNames}
-                  onChange={(e) => setAssetTypeNames(e.target.value)}
-                  placeholder={t('runConfig.assetTypesPlaceholder')}
-                />
+                {assetTypeNames.length > 0 && (
+                  <div className="flex flex-wrap gap-1" data-testid="tm-asset-types-selected">
+                    {assetTypeNames.map((name) => (
+                      <Badge key={name} variant="secondary" className="flex items-center gap-1">
+                        <span>{name}</span>
+                        <button
+                          type="button"
+                          className="focus:outline-none"
+                          aria-label={t('runConfig.removeAssetType', {
+                            defaultValue: 'Remove {{name}}',
+                            name,
+                          })}
+                          onClick={() => handleToggleAssetType(name)}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+                <Popover open={assetTypesOpen} onOpenChange={setAssetTypesOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="tm-asset-types"
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={assetTypesOpen}
+                      className="w-full justify-between font-normal"
+                    >
+                      <span className="truncate text-muted-foreground">
+                        {assetTypeNames.length > 0
+                          ? t('runConfig.assetTypesSelectedCount', {
+                              defaultValue: '{{count}} selected',
+                              count: assetTypeNames.length,
+                            })
+                          : t('runConfig.assetTypesSelectPlaceholder', 'Select asset types')}
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                    <Command>
+                      <CommandInput
+                        placeholder={t('runConfig.assetTypesSearch', 'Search asset types...')}
+                      />
+                      <CommandList className="max-h-60">
+                        {assetTypesLoading ? (
+                          <div className="flex items-center gap-2 p-3 text-sm text-muted-foreground">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            {t('runConfig.assetTypesLoading', 'Loading asset types...')}
+                          </div>
+                        ) : (
+                          <>
+                            <CommandEmpty>
+                              {t('runConfig.assetTypesEmpty', 'No asset types found.')}
+                            </CommandEmpty>
+                            <CommandGroup>
+                              {assetTypeOptions.map((name) => (
+                                <CommandItem
+                                  key={name}
+                                  value={name}
+                                  onSelect={() => handleToggleAssetType(name)}
+                                >
+                                  <Check
+                                    className={`mr-2 h-4 w-4 ${
+                                      assetTypeNames.includes(name) ? 'opacity-100' : 'opacity-0'
+                                    }`}
+                                  />
+                                  {name}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </>
+                        )}
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
             )}
           </section>

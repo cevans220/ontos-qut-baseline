@@ -166,7 +166,8 @@ export default function ExploreView() {
   const setStaticSegments = useBreadcrumbStore((state) => state.setStaticSegments);
   useEffect(() => {
     setStaticSegments([
-      { label: t('semantic-models:title'), path: '/concepts/browser' },
+      { label: t('semantic-models:title', 'Concepts'), path: '/concepts' },
+      { label: t('semantic-models:tabs.explore', 'Explore'), path: '/concepts/browser' },
     ]);
     return () => { setStaticSegments([]); };
   }, [setStaticSegments, t]);

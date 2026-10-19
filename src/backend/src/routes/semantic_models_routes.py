@@ -2207,6 +2207,7 @@ async def request_concept_changes_by_iri(
 
 @router.post('/knowledge/concepts/by-iri/approve')
 async def approve_concept_by_iri(
+    request: Request,
     current_user: CurrentUserDep,
     db: DBSessionDep,
     auth_manager: AuthorizationManagerDep,
@@ -2214,11 +2215,25 @@ async def approve_concept_by_iri(
     manager: SemanticModelsManager = Depends(get_semantic_models_manager),
     _: bool = Depends(PermissionChecker('semantic-models', FeatureAccessLevel.READ_WRITE))
 ) -> dict:
-    """Approve a concept that is under review."""
+    """Approve a concept that is under review.
+
+    Optional JSON body ``{"comments": "..."}``; the decision (plus comment, if
+    any) is mirrored into the concept's comment timeline."""
     _guard_review_bypass(manager, db, concept_iri, "approved", current_user, auth_manager)
-    return _set_concept_status_payload(
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    concept = _set_concept_status_payload(
         manager, concept_iri, "approved", current_user.email, error_verb="approve"
     )
+    manager.record_review_decision_comment(
+        concept_iri, "approved", current_user.email,
+        data.get("comments") or data.get("reason"),
+    )
+    return concept
 
 
 @router.post('/knowledge/concepts/by-iri/publish')

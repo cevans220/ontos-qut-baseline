@@ -3769,8 +3769,13 @@ class SemanticModelsManager(SearchableAsset):
         
         # Create triples for the collection metadata
         now = datetime.utcnow().isoformat() + "Z"
+        # A scheme is typed BOTH ontos:KnowledgeCollection (Ontos' registry
+        # type, used by get_collections) and skos:ConceptScheme (the standard
+        # SKOS type, for interoperability). The extra type lives only in the
+        # urn:meta:sources context, which concept enumeration never scans.
         triples = [
             (collection_iri, str(RDF.type), str(ONTOS.KnowledgeCollection), True),
+            (collection_iri, str(RDF.type), str(SKOS.ConceptScheme), True),
             (collection_iri, str(RDFS.label), label, False),
             (collection_iri, str(ONTOS.collectionType), collection_type, False),
             (collection_iri, str(ONTOS.scopeLevel), scope_level, False),
@@ -3806,6 +3811,7 @@ class SemanticModelsManager(SearchableAsset):
         meta_context = self._graph.get_context(URIRef(META_CONTEXT))
         coll_uri = URIRef(collection_iri)
         meta_context.add((coll_uri, RDF.type, ONTOS.KnowledgeCollection))
+        meta_context.add((coll_uri, RDF.type, SKOS.ConceptScheme))
         meta_context.add((coll_uri, RDFS.label, Literal(label)))
         meta_context.add((coll_uri, ONTOS.collectionType, Literal(collection_type)))
         meta_context.add((coll_uri, ONTOS.scopeLevel, Literal(scope_level)))
@@ -5845,9 +5851,12 @@ class SemanticModelsManager(SearchableAsset):
 
         # 3. Create the backing DataAssetReview when a review manager + reviewer
         #    are available. This is the sanctioned reuse of the review system.
+        #    Skipped when governed: the concept workflow already routes the
+        #    approval to the reviewer, and a DataAssetReview would fire a second,
+        #    parallel approval (default 'Data Asset Review Request' -> DataSteward).
         review_request_id: Optional[str] = None
         review_mgr = get_app_state_manager("data_asset_review_manager")
-        if review_mgr is not None and reviewer_email:
+        if review_mgr is not None and reviewer_email and not governed:
             try:
                 from src.models.data_asset_reviews import DataAssetReviewRequestCreate
 
@@ -6008,10 +6017,14 @@ class SemanticModelsManager(SearchableAsset):
                 concept_iri=concept_iri, new_status="approved", updated_by=decided_by
             )
             logger.info(f"Concept {concept_iri} approved by {decided_by}")
+            self.record_review_decision_comment(
+                concept_iri, decision, decided_by, comments
+            )
             return {"concept": updated, "decision": decision}
 
         if decision in ("changes_requested", "denied"):
-            if current_status == "draft":
+            already_sent_back = current_status == "draft"
+            if already_sent_back:
                 # Already sent back (idempotent) — still record the annotations.
                 updated = existing
             elif current_status != "under_review":
@@ -6032,9 +6045,73 @@ class SemanticModelsManager(SearchableAsset):
             logger.info(
                 f"Concept {concept_iri} sent back to draft ({decision}) by {decided_by}"
             )
+            # Idempotent repeat (already draft): only record a comment when the
+            # reviewer actually said something new, so a duplicate reflection
+            # (workflow + review callback) doesn't post a second bare decision.
+            if not already_sent_back or comments:
+                self.record_review_decision_comment(
+                    concept_iri, decision, decided_by, comments
+                )
             return {"concept": self.get_concept(concept_iri), "decision": decision}
 
         raise ValueError(f"Unknown review decision: {decision}")
+
+    # Human prefix for each reviewer decision when mirrored into the entity
+    # comment timeline.
+    _REVIEW_DECISION_COMMENT_PREFIX = {
+        "approved": "Approved",
+        "changes_requested": "Changes requested",
+        "denied": "Rejected",
+    }
+
+    def record_review_decision_comment(
+        self,
+        concept_iri: str,
+        decision: str,
+        decided_by: Optional[str] = None,
+        comments: Optional[str] = None,
+    ) -> None:
+        """Mirror a reviewer decision into the concept's comment timeline.
+
+        Writes an entity comment (same CommentsManager the data-product
+        CommentSidebar reads) keyed ``entity_type='ontology_concept'``,
+        ``entity_id=<concept IRI>``, authored by the reviewer. Text is
+        ``"<Decision>: <comment>"`` or just ``"<Decision>"`` without a comment.
+
+        Best-effort: a failure here is logged and swallowed so it never fails
+        the review decision itself (the status change is already committed).
+        """
+        prefix = self._REVIEW_DECISION_COMMENT_PREFIX.get(decision)
+        if not prefix:
+            return
+        note = (comments or "").strip()
+        text = f"{prefix}: {note}" if note else prefix
+        try:
+            from src.controller.comments_manager import CommentsManager
+            from src.models.comments import CommentCreate
+            from src.models.process_workflows import EntityType
+
+            CommentsManager().create_comment(
+                self._db,
+                data=CommentCreate(
+                    entity_id=concept_iri,
+                    entity_type=EntityType.ONTOLOGY_CONCEPT.value,
+                    comment=text,
+                ),
+                user_email=decided_by or "system",
+                # System-recorded on the reviewer's behalf: global (no project),
+                # which create_comment only allows for admins.
+                is_admin=True,
+            )
+        except Exception as e:
+            logger.warning(
+                f"Failed to record review-decision comment on concept "
+                f"{concept_iri} ({decision}): {e}"
+            )
+            try:
+                self._db.rollback()
+            except Exception:
+                pass
 
     # ========================================================================
     # COLLECTION EXPORT

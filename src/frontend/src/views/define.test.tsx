@@ -137,6 +137,17 @@ describe('DefineView', () => {
     expect(importDialogOpen).toBe(true);
   });
 
+  it('"What gets written" popover lists the RDF mapping', async () => {
+    renderDefine();
+    fireEvent.click(screen.getByRole('button', { name: 'What gets written' }));
+    await waitFor(() => expect(screen.getByText('owl:NamedIndividual')).toBeInTheDocument());
+    expect(screen.getByText('skos:ConceptScheme + ontos:KnowledgeCollection')).toBeInTheDocument();
+    expect(screen.getByText('owl:Class')).toBeInTheDocument();
+    expect(screen.getByText('rdfs:subClassOf')).toBeInTheDocument();
+    // The old "Under the hood" block is folded into the popover.
+    expect(screen.queryByText(/Under the hood/)).not.toBeInTheDocument();
+  });
+
   it('shows in-progress generator runs from the runs endpoint', async () => {
     renderDefine();
     await waitFor(() => {

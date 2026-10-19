@@ -14,17 +14,10 @@ import {
   Zap,
   User,
   Network,
-  Save,
   Code2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import {
   Dialog,
   DialogContent,
@@ -72,6 +65,8 @@ import { TurtleSerializationPanel } from '@/components/semantic/turtle-serializa
 import { StatusProgressBar } from '@/components/semantic/status-progress-bar';
 import KGSearch from '@/components/search/kg-search';
 import ApprovalWizardDialog from '@/components/workflows/approval-wizard-dialog';
+import { RequestConceptActionMenu } from '@/components/concepts/request-concept-action-menu';
+import { CommentSidebar } from '@/components/comments';
 
 const typeIcons: Record<string, React.ReactNode> = {
   concept: <Layers className="h-5 w-5 text-emerald-500 shrink-0" />,
@@ -199,6 +194,9 @@ export default function ConceptDetailView() {
 
   const [concept, setConcept] = useState<OntologyConcept | null>(null);
   const [collections, setCollections] = useState<KnowledgeCollection[]>([]);
+  // True once the collections fetch settled (success or failure), so the
+  // read-only versioning note doesn't flash before the scheme is known.
+  const [collectionsLoaded, setCollectionsLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -239,6 +237,7 @@ export default function ConceptDetailView() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [requestChangesOpen, setRequestChangesOpen] = useState(false);
   const [requestChangesComment, setRequestChangesComment] = useState('');
+  const [isCommentSidebarOpen, setIsCommentSidebarOpen] = useState(false);
   const selectedLanguage = i18n.language?.split('-')[0] || 'en';
 
   // Fetch the focused concept by IRI. This is intentionally separated from
@@ -282,6 +281,8 @@ export default function ConceptDetailView() {
       }
     } catch (err) {
       console.error('ConceptDetailView: failed to load collections', err);
+    } finally {
+      setCollectionsLoaded(true);
     }
   }, [get]);
 
@@ -352,7 +353,8 @@ export default function ConceptDetailView() {
   // Keep breadcrumbs in sync with the concept the URL is pointing at.
   useEffect(() => {
     setStaticSegments([
-      { label: t('semantic-models:title', 'Concepts'), path: '/concepts/browser' },
+      { label: t('semantic-models:title', 'Concepts'), path: '/concepts' },
+      { label: t('semantic-models:tabs.explore', 'Explore'), path: '/concepts/browser' },
     ]);
     if (concept) {
       setDynamicTitle(resolveLabel(concept, selectedLanguage));
@@ -401,6 +403,11 @@ export default function ConceptDetailView() {
   // approved/published/certified/deprecated.
   const versionLockedForDraft =
     concept?.status === 'draft' || concept?.status === 'under_review';
+
+  // Versioning is a governed-scheme feature: concepts from a read-only source
+  // (imported RDF, system ontologies) keep their history visible but cannot
+  // mint versions. Explained in the panel rather than silently hidden.
+  const versioningReadOnly = collectionsLoaded && !collection?.is_editable;
 
   // Linking Ontos entities to a concept and assigning ownership are stored
   // *on our side* (semantic_links / ownership tables), not in the source
@@ -811,26 +818,35 @@ export default function ConceptDetailView() {
           {t('semantic-models:details.backToList', 'Back to Concepts')}
         </Button>
         <div className="flex items-center gap-2">
-          {nextStepStatuses.length > 0 && !isProperty && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" disabled={statusBusy}>
-                  {t('semantic-models:lifecycle.changeStatus', 'Change status')}
-                  <ChevronDown className="ml-2 h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {nextStepStatuses.map((item) => (
-                  <DropdownMenuItem
-                    key={item.action || item.status}
-                    onClick={() => handleStatusTransition(item.status, item.action)}
-                    className="font-medium"
-                  >
-                    {t(item.labelKey, item.defaultLabel)}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+          {/* Single "Request" menu (mirrors data products): the direct next
+              lifecycle step(s) — Request review on a draft (wizard / dialog
+              flow unchanged), then approve / request changes / publish /
+              certify / deprecate / archive for users who may run them today —
+              plus "New version". "Save new version" is available for any
+              non-retired editable concept, NOT just drafts: publishing v2 is
+              exactly how a certified concept's definition changes. It stays
+              visible-but-disabled while the concept is draft / under review.
+              Properties have no lifecycle actions or version publishing. */}
+          {!isProperty && (
+            <RequestConceptActionMenu
+              transitions={nextStepStatuses}
+              onTransition={(status, action) => {
+                void handleStatusTransition(status, action);
+              }}
+              busy={statusBusy}
+              newVersion={
+                canPublishVersion
+                  ? {
+                      disabled: versionLockedForDraft,
+                      disabledReason: t(
+                        'semantic-models:versionHistory.saveNewVersionDraftLocked',
+                        'Available after this concept is approved (v1 must be approved before a new version).',
+                      ),
+                      onSelect: () => setPublishOpen(true),
+                    }
+                  : null
+              }
+            />
           )}
           {currentStatus === 'under_review' && canWrite && (
             <Button
@@ -842,34 +858,7 @@ export default function ConceptDetailView() {
               {t('semantic-models:lifecycle.withdrawReview', 'Withdraw Review')}
             </Button>
           )}
-          {/* "Save new version" is available for any non-retired editable concept,
-              NOT just drafts — publishing v2 is exactly how a certified concept's
-              definition changes. Edit/Delete stay draft-only (isEditable).
-              Properties do not support versioning. */}
-          {canPublishVersion && !isProperty && (
-            // Wrapping span carries the title so the tooltip still shows while
-            // the button is disabled (disabled buttons don't fire hover events).
-            <span
-              title={
-                versionLockedForDraft
-                  ? t(
-                      'semantic-models:versionHistory.saveNewVersionDraftLocked',
-                      'Available after this concept is approved (v1 must be approved before a new version).',
-                    )
-                  : undefined
-              }
-            >
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={versionLockedForDraft}
-                onClick={() => setPublishOpen(true)}
-              >
-                <Save className="mr-2 h-4 w-4" />
-                {t('semantic-models:versionHistory.saveNewVersion', 'Save new version')}
-              </Button>
-            </span>
-          )}
+          {/* Edit/Delete stay draft-only (isEditable). */}
           {isEditable && (
             <>
               <Button variant="outline" size="sm" onClick={() => setEditorOpen(true)}>
@@ -887,6 +876,13 @@ export default function ConceptDetailView() {
               </Button>
             </>
           )}
+          <CommentSidebar
+            entityType="ontology_concept"
+            entityId={concept.iri}
+            isOpen={isCommentSidebarOpen}
+            onToggle={() => setIsCommentSidebarOpen(!isCommentSidebarOpen)}
+            className="h-8"
+          />
           {/* Power-user SPARQL — Advanced view only. Opens the query surface in
               a modal on this page instead of navigating to the legacy Search
               Concepts page. Seeded with a query scoped to this concept. */}
@@ -946,23 +942,6 @@ export default function ConceptDetailView() {
             "Change status" dropdown. */}
         {concept.status && !isProperty && (
           <StatusProgressBar status={concept.status} className="mt-0.5" />
-        )}
-        {/* Reviewer-comment callout — shown whenever a reviewer left a
-            send-back comment and it is still relevant: in draft (post
-            send-back, so the owner knows what to fix) or under_review. A
-            fresh submit clears the comment, so it won't linger past the next
-            submission. */}
-        {(concept.status === 'draft' || concept.status === 'under_review') && concept.review_comment && (
-          <div className="rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-900 dark:bg-blue-950 p-2.5 space-y-1.5">
-            <div className="flex items-center gap-2 text-sm font-medium text-blue-900 dark:text-blue-100">
-              {concept.review_decision === 'denied'
-                ? t('semantic-models:concept.reviewerCommentDenied', 'Denied — reviewer comment')
-                : t('semantic-models:concept.reviewerComment', 'Reviewer comment')}
-            </div>
-            <div className="text-xs text-blue-800 dark:text-blue-200 whitespace-pre-wrap">
-              {concept.review_comment}
-            </div>
-          </div>
         )}
         {/* Raw IRI + external link — ontology layer, advanced only, own row. */}
         <div className="adv-only flex items-center gap-2 text-xs text-muted-foreground min-w-0">
@@ -1067,8 +1046,10 @@ export default function ConceptDetailView() {
           - Row 1: Owners + Details
           - Row 2: Related concepts + Hierarchy
           - Row 3: Linked assets (full width)
-          - Row 4: Metadata + Change history
-          - Row 5: Neighbourhood graph (full width) */}
+          - Row 4: Version history (full width)
+          - Row 5: Relations / neighbourhood graph (full width)
+          - Row 6: Metadata (full width)
+          - Advanced-only: Turtle serialization (last) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Row 1: Owners panel */}
         <OwnershipPanel
@@ -1206,18 +1187,24 @@ export default function ConceptDetailView() {
           />
         </div>
 
-        {/* Row 4: Metadata */}
-        <EntityMetadataPanel entityType="concept" entityId={concept.iri} />
-
-        {/* Row 4: Version history — live, drives versioning contract §1 + §2. */}
-        {!isProperty && (
-          <div id="concept-version-history">
-            <VersionHistoryPanel
-              conceptIri={concept.iri}
-              refreshNonce={versionRefreshNonce}
-            />
-          </div>
-        )}
+        {/* Row 4: Version history (full width) — live, drives versioning
+            contract §1 + §2. Shown for every concept type. On a read-only
+            (imported / non-editable) scheme it stays visible but read-only,
+            with a note instead of silently hiding the version controls. */}
+        <div id="concept-version-history" className="md:col-span-2">
+          <VersionHistoryPanel
+            conceptIri={concept.iri}
+            refreshNonce={versionRefreshNonce}
+            readOnlyNote={
+              versioningReadOnly
+                ? t(
+                    'semantic-models:versionHistory.readOnlyNote',
+                    'Versioning applies to governed (editable) concept schemes. This concept comes from a read-only source, so new versions cannot be saved here.',
+                  )
+                : undefined
+            }
+          />
+        </div>
 
         {/* Row 5: Relations + neighbourhood graph — ONE block, two views over
             the same /neighbors data. List = relations; Graph = node-link. */}
@@ -1290,6 +1277,11 @@ export default function ConceptDetailView() {
             </CollapsibleContent>
           </div>
         </Collapsible>
+
+        {/* Metadata (notes / links / documents) — full width at the bottom. */}
+        <div className="md:col-span-2">
+          <EntityMetadataPanel entityType="concept" entityId={concept.iri} />
+        </div>
 
         {/* Advanced-only: RDF (Turtle) serialization — kept as the LAST grid
             block so toggling Advanced only APPENDS it at the bottom and never

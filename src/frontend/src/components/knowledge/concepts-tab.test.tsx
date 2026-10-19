@@ -13,8 +13,10 @@ import type { OntologyConcept } from '@/types/ontology';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, fallback?: any) =>
-      typeof fallback === 'string' ? fallback : key,
+    t: (key: string, fallback?: any, opts?: Record<string, unknown>) =>
+      typeof fallback === 'string'
+        ? fallback.replace(/\{\{(\w+)\}\}/g, (m, k) => (opts && k in opts ? String(opts[k]) : m))
+        : key,
     i18n: { language: 'en', changeLanguage: vi.fn() },
   }),
 }));
@@ -78,6 +80,7 @@ const baseProps = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  storeState.conceptListSearch = '';
 });
 
 describe('ConceptsTab view modes', () => {
@@ -124,5 +127,62 @@ describe('ConceptsTab view modes', () => {
     // Child sorts before Parent.
     expect(labels[0]).toBe('Child');
     expect(labels[1]).toBe('Parent');
+  });
+});
+
+describe('ConceptsTab search (list view)', () => {
+  const CUSTOMER = {
+    iri: 'urn:customer',
+    label: 'Customer',
+    labels: { en: 'Customer', nl: 'Klant' },
+    concept_type: 'concept',
+    parent_concepts: [],
+    child_concepts: [],
+  } as unknown as OntologyConcept;
+  const CUSTOMS = {
+    iri: 'urn:customs',
+    label: 'Customs duty',
+    concept_type: 'concept',
+    parent_concepts: [],
+    child_concepts: [],
+  } as unknown as OntologyConcept;
+  const ACCOUNT = {
+    iri: 'urn:account',
+    label: 'Account customer',
+    concept_type: 'concept',
+    parent_concepts: [],
+    child_concepts: [],
+  } as unknown as OntologyConcept;
+  const props = { ...baseProps, filteredConcepts: [ACCOUNT, CUSTOMS, CUSTOMER] };
+
+  it('filters the list by the search query', () => {
+    storeState.conceptListSearch = 'parent';
+    render(<ConceptsTab {...baseProps} viewMode="list" />);
+    expect(screen.getByTestId('concept-row-urn:parent')).toBeInTheDocument();
+    expect(screen.queryByTestId('concept-row-urn:child')).not.toBeInTheDocument();
+  });
+
+  it('matches another-language label and shows a "matched: nl" hint', () => {
+    storeState.conceptListSearch = 'klant';
+    render(<ConceptsTab {...props} viewMode="list" />);
+    expect(screen.getByTestId('concept-row-urn:customer')).toBeInTheDocument();
+    expect(screen.queryByTestId('concept-row-urn:customs')).not.toBeInTheDocument();
+    expect(screen.getByTestId('concept-match-lang-urn:customer')).toHaveTextContent('matched: nl');
+  });
+
+  it('sorts prefix matches before substring matches', () => {
+    storeState.conceptListSearch = 'custom';
+    render(<ConceptsTab {...props} viewMode="list" />);
+    const rows = screen.getAllByTestId(/^concept-row-/).map((r) => r.getAttribute('data-testid'));
+    // Customer + Customs duty are prefix hits (alphabetical), Account customer is a substring hit.
+    expect(rows).toEqual(['concept-row-urn:customer', 'concept-row-urn:customs', 'concept-row-urn:account']);
+    expect(screen.queryByTestId(/^concept-match-lang-/)).not.toBeInTheDocument();
+  });
+
+  it('tree view uses the same matcher (other-language label hit)', () => {
+    storeState.conceptListSearch = 'klant';
+    render(<ConceptsTab {...props} viewMode="tree" />);
+    expect(screen.getByTestId('concept-row-urn:customer')).toBeInTheDocument();
+    expect(screen.queryByTestId('concept-row-urn:account')).not.toBeInTheDocument();
   });
 });

@@ -107,6 +107,51 @@ function isInactiveStatus(status?: string | null): boolean {
   return !!status && INACTIVE_STATUSES.has(status);
 }
 
+// Result of matching a concept against the search box. `rank` orders list hits
+// (lower = better): 0 exact / 1 prefix / 2 substring on the label in the
+// selected display language, 3 anything else (other-language labels, synonyms,
+// definitions, IRI). `viaLang` is set when the selected-language label did NOT
+// match but another language's label did, so the UI can say "matched: nl".
+export interface ConceptSearchMatch {
+  rank: number;
+  viaLang?: string;
+}
+
+// Shared search matcher for BOTH the list and the tree view. Language-agnostic:
+// matches every entry of `labels` (all languages), the legacy `label`, synonyms
+// (skos:altLabel), every entry of `comments` plus `comment`, and the IRI.
+// Returns null when the concept does not match. An empty query matches all.
+export function matchConceptSearch(
+  concept: OntologyConcept,
+  query: string,
+  selectedLanguage: string,
+): ConceptSearchMatch | null {
+  const q = query.trim().toLowerCase();
+  if (!q) return { rank: 0 };
+
+  const current = resolveLabel(concept, selectedLanguage).toLowerCase();
+  if (current === q) return { rank: 0 };
+  if (current.startsWith(q)) return { rank: 1 };
+  if (current.includes(q)) return { rank: 2 };
+
+  const includes = (v?: string | null) => !!v && v.toLowerCase().includes(q);
+
+  // Another language's label. Untagged ('') labels have no language to report.
+  for (const [lang, value] of Object.entries(concept.labels || {})) {
+    if (includes(value)) return lang ? { rank: 3, viaLang: lang } : { rank: 3 };
+  }
+  if (
+    includes(concept.label) ||
+    (concept.synonyms || []).some(includes) ||
+    includes(concept.comment) ||
+    Object.values(concept.comments || {}).some(includes) ||
+    includes(concept.iri)
+  ) {
+    return { rank: 3 };
+  }
+  return null;
+}
+
 const STATUS_VARIANTS: Record<string, string> = {
   draft: 'bg-muted text-muted-foreground border-muted-foreground/20',
   pending: 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30',
@@ -466,18 +511,28 @@ export const ConceptsTab: React.FC<ConceptsTabProps> = ({
   // selection the tree is built from, sorted alphabetically by label. No
   // broader/narrower nesting. groupByDomain still hides domain-owned properties
   // (mirrors the tree's rootConcepts logic) so the two modes cover the same set.
-  const flatConcepts = useMemo(() => {
-    return Array.from(treeData.conceptMap.values())
+  //
+  // The search box filters this list with the same matcher the tree uses
+  // (matchConceptSearch). While searching, exact/prefix hits on the label in
+  // the selected language sort first, then alphabetical within each rank.
+  const { flatConcepts, searchMatches } = useMemo(() => {
+    const matches = new Map<string, ConceptSearchMatch>();
+    const rows = Array.from(treeData.conceptMap.values())
       .filter(concept => {
         if (groupByDomain && concept.concept_type === 'property' && concept.domain) {
           return false;
         }
+        const m = matchConceptSearch(concept, searchQuery, selectedLanguage);
+        if (!m) return false;
+        matches.set(concept.iri, m);
         return true;
       })
       .sort((a, b) =>
+        (matches.get(a.iri)!.rank - matches.get(b.iri)!.rank) ||
         conceptLabel(a).localeCompare(conceptLabel(b), undefined, { sensitivity: 'base' }),
       );
-  }, [treeData, groupByDomain, conceptLabel]);
+    return { flatConcepts: rows, searchMatches: matches };
+  }, [treeData, groupByDomain, conceptLabel, searchQuery, selectedLanguage]);
 
   // Distinct statuses present in the flat set, for the Status filter dropdown.
   // Only statuses that actually occur are offered, so the control doesn't list
@@ -637,23 +692,20 @@ export const ConceptsTab: React.FC<ConceptsTabProps> = ({
     const children = flat ? [] : getChildren(itemId);
     const isSelected = selectedConcept?.iri === itemId;
 
+    // Same language-agnostic matcher as the list view.
+    const matches = (c: OntologyConcept) =>
+      matchConceptSearch(c, searchQuery, selectedLanguage) !== null;
+
     if (isSourceGroup && searchQuery) {
       const hasMatchingChildren = children.some(childId => {
         const child = treeData.conceptMap.get(childId);
-        if (!child) return false;
-        const query = searchQuery.toLowerCase();
-        return child.label?.toLowerCase().includes(query) ||
-               child.comment?.toLowerCase().includes(query) ||
-               child.iri.toLowerCase().includes(query);
+        return !!child && matches(child);
       });
       if (!hasMatchingChildren) return null;
     }
 
     if (!isSourceGroup && searchQuery && concept) {
-      const query = searchQuery.toLowerCase();
-      const matchesSelf = concept.label?.toLowerCase().includes(query) ||
-                          concept.comment?.toLowerCase().includes(query) ||
-                          concept.iri.toLowerCase().includes(query);
+      const matchesSelf = matches(concept);
 
       const hasMatchingDescendants = (): boolean => {
         const stack = [...children];
@@ -661,9 +713,7 @@ export const ConceptsTab: React.FC<ConceptsTabProps> = ({
           const childId = stack.pop()!;
           const child = treeData.conceptMap.get(childId);
           if (child) {
-            if (child.label?.toLowerCase().includes(query) ||
-                child.comment?.toLowerCase().includes(query) ||
-                child.iri.toLowerCase().includes(query)) {
+            if (matches(child)) {
               return true;
             }
             stack.push(...getChildren(childId));
@@ -869,6 +919,7 @@ export const ConceptsTab: React.FC<ConceptsTabProps> = ({
   // tree engine stays untouched; only the list gets the columnar layout.
   const renderListRow = (concept: OntologyConcept): React.ReactNode => {
     const label = conceptLabel(concept);
+    const viaLang = searchQuery ? searchMatches.get(concept.iri)?.viaLang : undefined;
     const definition = concept.comment || '';
     const collection = concept.source_context ? getCollection(concept.source_context) : null;
     const collectionLabel = collection?.label
@@ -900,7 +951,17 @@ export const ConceptsTab: React.FC<ConceptsTabProps> = ({
         <div className="flex items-center gap-2 min-w-0">
           {typeIcons[concept.concept_type] || typeIcons.concept}
           <div className="min-w-0">
-            <div className="truncate text-sm font-medium" title={label}>{label}</div>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="truncate text-sm font-medium" title={label}>{label}</span>
+              {viaLang && (
+                <span
+                  className="shrink-0 text-[10px] text-muted-foreground"
+                  data-testid={`concept-match-lang-${concept.iri}`}
+                >
+                  {t('semantic-models:search.matchedLanguage', 'matched: {{lang}}', { lang: viaLang })}
+                </span>
+              )}
+            </div>
             {definition && (
               <div className="truncate text-xs text-muted-foreground" title={definition}>
                 {definition}

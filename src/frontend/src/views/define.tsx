@@ -12,6 +12,7 @@ import {
   ListTree,
   Share2,
   Layers,
+  Info,
 } from 'lucide-react';
 import { usePagination, PaginationControls } from '@/components/common/paginated-list';
 import { Button } from '@/components/ui/button';
@@ -23,6 +24,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ImportConceptsDialog, CollectionEditorDialog } from '@/components/knowledge';
 import type {
   KnowledgeCollection,
@@ -78,6 +80,68 @@ const RUNGS = [
   { key: 'taxonomy', label: 'Taxonomy', Icon: ListTree, blurb: 'terms in a broader/narrower hierarchy' },
   { key: 'ontology', label: 'Ontology', Icon: Share2,   blurb: 'typed relationships a machine can reason over' },
 ] as const;
+
+// What each kind of entry is written as in RDF. Mirrors the backend's
+// _resolve_concept_rdf_types (concept/term/class/property/individual) and
+// create_collection (scheme). Shown once in the legend's info popover.
+const RDF_MAPPING = [
+  { kind: 'Concept / term', type: 'skos:Concept', relations: 'skos:broader / skos:narrower' },
+  { kind: 'Class', type: 'owl:Class', relations: 'rdfs:subClassOf' },
+  {
+    kind: 'Property',
+    type: 'owl:ObjectProperty / owl:DatatypeProperty / owl:AnnotationProperty',
+    relations: 'rdfs:domain / rdfs:range',
+  },
+  { kind: 'Individual', type: 'owl:NamedIndividual', relations: '' },
+  { kind: 'Concept scheme', type: 'skos:ConceptScheme + ontos:KnowledgeCollection', relations: '' },
+] as const;
+
+function WhatGetsWrittenPopover() {
+  const { t } = useTranslation(['semantic-models']);
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="ml-auto inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+          aria-label={t('semantic-models:define.whatGetsWritten.title', 'What gets written')}
+        >
+          <Info className="h-3.5 w-3.5" />
+          <span>{t('semantic-models:define.whatGetsWritten.title', 'What gets written')}</span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-[460px] text-xs">
+        <p className="font-medium text-foreground mb-2">
+          {t('semantic-models:define.whatGetsWritten.title', 'What gets written')}
+        </p>
+        <table className="w-full border-collapse">
+          <thead>
+            <tr className="text-left text-muted-foreground">
+              <th className="font-medium pb-1 pr-2">{t('semantic-models:define.whatGetsWritten.entry', 'Entry')}</th>
+              <th className="font-medium pb-1 pr-2">{t('semantic-models:define.whatGetsWritten.type', 'rdf:type')}</th>
+              <th className="font-medium pb-1">{t('semantic-models:define.whatGetsWritten.relations', 'Hierarchy / links')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {RDF_MAPPING.map((row) => (
+              <tr key={row.kind} className="border-t align-top">
+                <td className="py-1 pr-2 whitespace-nowrap">{row.kind}</td>
+                <td className="py-1 pr-2 font-mono text-[11px]">{row.type}</td>
+                <td className="py-1 font-mono text-[11px]">{row.relations || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="mt-2 text-muted-foreground leading-relaxed">
+          {t(
+            'semantic-models:define.whatGetsWritten.note',
+            'Maturity runs glossary → taxonomy → ontology: flat terms, then a skos:broader/narrower hierarchy, then formal owl:Class and OWL properties linked by rdfs:subClassOf and rdfs:domain/range. Start light, harden where you need it. (Parents picked in the concept editor are written as skos:broader for every entry type; rdfs:subClassOf comes from generated or imported ontologies.)',
+          )}
+        </p>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 type RungKey = (typeof RUNGS)[number]['key'];
 // Per-path production: 'yes' = this path builds that rung, 'file' = depends on the
@@ -269,6 +333,7 @@ export default function DefineView() {
             </span>
           </div>
         ))}
+        <WhatGetsWrittenPopover />
       </div>
 
       {/* Path cards */}
@@ -291,13 +356,13 @@ export default function DefineView() {
                 <TooltipContent className="max-w-[240px]">
                   {t(
                     'semantic-models:define.author.tip',
-                    'Creates skos:Concept entries inside a concept scheme. Terms can later be promoted to owl:Class or rdf:Property as the scheme matures.'
+                    'Creates skos:Concept entries in a new concept scheme (skos:ConceptScheme). Entries can later be typed as owl:Class or an OWL property as the scheme matures.'
                   )}
                 </TooltipContent>
               </Tooltip>
             </CardTitle>
             <CardDescription>
-              {t('semantic-models:define.author.desc', 'Write terms yourself. Best when you own the definitions.')}
+              {t('semantic-models:define.author.desc', 'Write terms yourself.')}
             </CardDescription>
           </CardHeader>
           <CardContent className="mt-auto">
@@ -306,14 +371,8 @@ export default function DefineView() {
             </Button>
             <BuildsRow
               builds={{ glossary: 'yes', taxonomy: 'yes', ontology: 'yes' }}
-              note="You choose the depth — start as a glossary, harden into an ontology over time."
+              note="Start as a glossary, harden over time."
             />
-            <p className="adv-only mt-3 pt-2 border-t border-dashed text-xs text-muted-foreground leading-relaxed">
-              {t(
-                'semantic-models:define.author.adv',
-                'Creates skos:Concept entries in a skos:ConceptScheme. Terms can harden into owl:Class or rdf:Property as the scheme matures.',
-              )}
-            </p>
           </CardContent>
         </Card>
 
@@ -332,13 +391,13 @@ export default function DefineView() {
                 <TooltipContent className="max-w-[240px]">
                   {t(
                     'semantic-models:define.generate.tip',
-                    'A guided interview constrained to a fixed predicate palette (skos:Concept, rdfs:Class, rdf:Property) so the draft stays valid SKOS/OWL. Every candidate carries its source.'
+                    'A guided interview drafts an OWL ontology from your tables: classes (owl:Class, hierarchy via rdfs:subClassOf) and properties (owl:ObjectProperty / owl:DatatypeProperty). Every candidate carries its source and is saved as Draft for review.'
                   )}
                 </TooltipContent>
               </Tooltip>
             </CardTitle>
             <CardDescription>
-              {t('semantic-models:define.generate.desc', 'Answer a few questions. Ontos drafts the scheme as you talk.')}
+              {t('semantic-models:define.generate.desc', 'Answer a few questions; Ontos drafts the scheme.')}
             </CardDescription>
           </CardHeader>
           <CardContent className="mt-auto">
@@ -347,14 +406,8 @@ export default function DefineView() {
             </Button>
             <BuildsRow
               builds={{ ontology: 'yes' }}
-              note="Drafts a formal ontology (classes + properties) from your tables. Saved as Draft for review."
+              note="Saved as Draft for review."
             />
-            <p className="adv-only mt-3 pt-2 border-t border-dashed text-xs text-muted-foreground leading-relaxed">
-              {t(
-                'semantic-models:define.generate.adv',
-                'The interview keeps the model on a fixed predicate palette (skos:Concept, rdfs:Class, rdf:Property) so the draft stays valid SKOS/OWL.',
-              )}
-            </p>
           </CardContent>
         </Card>
 
@@ -373,13 +426,13 @@ export default function DefineView() {
                 <TooltipContent className="max-w-[240px]">
                   {t(
                     'semantic-models:define.import.tip',
-                    'Parses .ttl / .rdf / .owl / .n3 / .jsonld via RDF. Several files can merge into one scheme, or land one scheme per file.'
+                    'Parses .ttl / .rdf / .owl / .n3 / .jsonld. Several files can merge into one scheme or land one scheme per file. The source graph is preserved for round-trip export.'
                   )}
                 </TooltipContent>
               </Tooltip>
             </CardTitle>
             <CardDescription>
-              {t('semantic-models:define.import.desc', 'Drop several files, land them in one scheme. Imported terms stay read-only.')}
+              {t('semantic-models:define.import.desc', 'Upload RDF files into a scheme.')}
             </CardDescription>
           </CardHeader>
           <CardContent className="mt-auto">
@@ -389,25 +442,10 @@ export default function DefineView() {
             </Button>
             <BuildsRow
               builds={{ glossary: 'file', taxonomy: 'file', ontology: 'file' }}
-              note="* Whatever the uploaded file contains. Imported terms stay read-only."
+              note="* Whatever the file contains. Imported terms stay read-only."
             />
-            <p className="adv-only mt-3 pt-2 border-t border-dashed text-xs text-muted-foreground leading-relaxed">
-              {t(
-                'semantic-models:define.import.adv',
-                'owl:Class / skos:Concept from each file map into a skos:ConceptScheme per your choice. The source graph is preserved for round-trip export.',
-              )}
-            </p>
           </CardContent>
         </Card>
-      </div>
-
-      {/* Advanced-only: what a "concept scheme" maps to under the hood. */}
-      <div className="adv-only -mt-5 mb-9 rounded-lg border border-dashed bg-muted/30 p-3 text-xs text-muted-foreground leading-relaxed">
-        <span className="font-semibold text-foreground">Under the hood: </span>
-        {t(
-          'semantic-models:define.underTheHood',
-          'a concept scheme is a skos:ConceptScheme. Maturity runs glossary → taxonomy → ontology (flat terms → broader/narrower hierarchy → formal owl:Class / rdf:Property a reasoner can use). Start light, harden where you need it.',
-        )}
       </div>
 
       {/* In progress */}

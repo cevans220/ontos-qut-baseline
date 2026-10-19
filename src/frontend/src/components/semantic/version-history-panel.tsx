@@ -49,7 +49,20 @@ interface VersionHistoryPanelProps {
   conceptIri: string;
   /** Bumped by the parent after a publish, to force a refetch. */
   refreshNonce?: number;
+  /**
+   * When set, the panel is read-only (e.g. the concept lives in a non-editable
+   * scheme) and this short note explains why no new versions can be saved.
+   */
+  readOnlyNote?: string;
 }
+
+const EMPTY_INFO = (iri: string): VersionInfo => ({
+  iri,
+  label: iri,
+  current_version: null,
+  versions: [],
+  replaced_by_iris: [],
+});
 
 function formatDate(iso?: string | null): string {
   if (!iso) return '';
@@ -60,6 +73,7 @@ function formatDate(iso?: string | null): string {
 export function VersionHistoryPanel({
   conceptIri,
   refreshNonce = 0,
+  readOnlyNote,
 }: VersionHistoryPanelProps) {
   const { t } = useTranslation(['semantic-models', 'common']);
   const { get } = useApi();
@@ -82,12 +96,19 @@ export function VersionHistoryPanel({
       const res = await get<VersionInfo>(
         `/api/semantic-models/concepts/version?iri=${encodeURIComponent(conceptIri)}`,
       );
+      // A concept with no version rows (or one the version engine doesn't
+      // track, e.g. some imported properties -> 404) simply has no history:
+      // show the empty "no previous versions" state, not "unavailable".
+      if (res.error && /not found/i.test(res.error)) {
+        setInfo(EMPTY_INFO(conceptIri));
+        return;
+      }
       if (res.error || !res.data) {
         setError(res.error || 'Failed to load version history');
         setInfo(null);
         return;
       }
-      setInfo(res.data);
+      setInfo({ ...res.data, versions: res.data.versions ?? [] });
     } catch (err: any) {
       setError(err?.message || 'Failed to load version history');
       setInfo(null);
@@ -197,6 +218,12 @@ export function VersionHistoryPanel({
         <History className="h-4 w-4 text-muted-foreground" />
         <h3 className="text-sm font-medium">{title}</h3>
       </div>
+
+      {readOnlyNote && (
+        <p className="mb-2 text-xs text-muted-foreground italic" data-testid="version-history-readonly-note">
+          {readOnlyNote}
+        </p>
+      )}
 
       {onlyOne ? (
         <p className="text-xs text-muted-foreground">

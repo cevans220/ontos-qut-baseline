@@ -39,6 +39,7 @@ import RunConfigDialog from '@/components/term-mapping/run-config-dialog';
 import GenerateReviewDialog from '@/components/term-mapping/generate-review-dialog';
 import RunResultDialog from '@/components/enrich/run-result-dialog';
 import { useUserStore } from '@/stores/user-store';
+import useBreadcrumbStore from '@/stores/breadcrumb-store';
 import type { Run } from '@/types/term-mapping';
 
 // ---------------------------------------------------------------------------
@@ -180,6 +181,15 @@ function readableName(s: string): string {
 export default function EnrichView() {
   const { t } = useTranslation(['concepts', 'term-mapping', 'common']);
   const navigate = useNavigate();
+
+  const setStaticSegments = useBreadcrumbStore((state) => state.setStaticSegments);
+
+  useEffect(() => {
+    setStaticSegments([
+      { label: t('concepts:title', 'Concepts'), path: '/concepts' },
+      { label: t('concepts:sections.enrich', 'Enrich'), path: '/concepts/enrich' },
+    ]);
+  }, [setStaticSegments, t]);
 
   // Navigate to the physical asset a pending tag will land on. Mirrors the
   // linked-objects-panel routing: registered Ontos asset -> Asset Explorer;

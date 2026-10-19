@@ -223,6 +223,7 @@ def _resolve_role_to_users(
     Handles:
     - 'requester' → original user email
     - 'owner' → entity owner
+    - 'reviewer' → entity reviewer_email (falls back to the Admin role)
     - 'business:<uuid>' → business role → look up entity owners from business_owners table
     - '<uuid>' → app role UUID
     - 'user@email.com' → direct email
@@ -269,6 +270,15 @@ def _resolve_role_to_users(
     if role_spec == 'owner':
         owner = context.entity.get('owner') if context.entity else None
         return [(owner, None)] if owner else []
+
+    if role_spec == 'reviewer':
+        # Reviewer chosen by the requester (e.g. concept submit-for-review puts
+        # it on entity_data.reviewer_email). Without one, fall back to the
+        # Admin role so the approval is never left without an approver.
+        reviewer = context.entity.get('reviewer_email') if context.entity else None
+        if reviewer:
+            return [(reviewer, None)]
+        return _resolve_role_to_users(db, 'admins', context)
 
     if role_spec in role_aliases:
         role_name = role_aliases[role_spec]

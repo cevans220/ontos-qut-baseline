@@ -28,6 +28,7 @@ import {
   ConceptCreate,
   ConceptUpdate,
   ConceptStatus,
+  CollectionType,
   KnowledgeCollection,
 } from '@/types/ontology';
 import {
@@ -53,6 +54,23 @@ interface ConceptEditorDialogProps {
   onPromote?: (concept: OntologyConcept) => void;
   onViewHistory?: (concept: OntologyConcept) => void;
   readOnly?: boolean;
+}
+
+type EditorConceptType = 'class' | 'concept' | 'property' | 'individual' | 'term';
+
+// Concept types a collection of each kind may hold. Glossaries carry terms and
+// SKOS concepts, taxonomies only SKOS concepts, ontologies the OWL-ish kinds.
+const ALLOWED_TYPES_BY_COLLECTION: Record<CollectionType, EditorConceptType[]> = {
+  glossary: ['concept', 'term'],
+  taxonomy: ['concept'],
+  ontology: ['concept', 'class', 'property', 'individual'],
+};
+
+const ALL_CONCEPT_TYPES: EditorConceptType[] = ['concept', 'class', 'property', 'individual', 'term'];
+
+// Types offered for a target collection type. Unknown / missing type -> all.
+export function allowedConceptTypes(collectionType?: string | null): EditorConceptType[] {
+  return (collectionType && ALLOWED_TYPES_BY_COLLECTION[collectionType as CollectionType]) || ALL_CONCEPT_TYPES;
 }
 
 const statusColors: Record<ConceptStatus, string> = {
@@ -114,6 +132,32 @@ export const ConceptEditorDialog: React.FC<ConceptEditorDialogProps> = ({
   const isNew = !concept;
   const canEdit = !readOnly && (!concept?.status || concept.status === 'draft');
   const editableCollections = collections.filter((c) => c.is_editable);
+
+  // The collection the concept will live in: the picked collection_iri (create)
+  // or the concept's source_context (edit). source_context may be a short
+  // `prefix:name` form, so also accept a suffix match like the concepts list.
+  const targetCollection = (() => {
+    const iri = formData.collection_iri;
+    if (!iri) return collection;
+    const pool = collection ? [collection, ...collections] : collections;
+    return pool.find((c) => c.iri === iri || c.iri.endsWith(`:${iri}`));
+  })();
+  const allowedTypes = allowedConceptTypes(targetCollection?.collection_type);
+  // Never hide an existing concept's own type (the selector is read-only then).
+  const visibleConceptTypes = conceptTypes.filter(
+    (type) =>
+      allowedTypes.includes(type.value as EditorConceptType) ||
+      (!isNew && type.value === formData.concept_type),
+  );
+
+  // Changing the target collection (create mode) can invalidate the chosen
+  // type — fall back to a plain concept, which every collection kind allows.
+  useEffect(() => {
+    if (isNew && !allowedTypes.includes(formData.concept_type)) {
+      setFormData((prev) => ({ ...prev, concept_type: 'concept' }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNew, allowedTypes.join('|'), formData.concept_type]);
 
   useEffect(() => {
     if (concept) {
@@ -300,7 +344,7 @@ export const ConceptEditorDialog: React.FC<ConceptEditorDialogProps> = ({
                       <SelectValue placeholder={t('Select type...')} />
                     </SelectTrigger>
                     <SelectContent>
-                      {conceptTypes.map((type) => (
+                      {visibleConceptTypes.map((type) => (
                         <SelectItem
                           key={type.value}
                           value={type.value}
