@@ -86,6 +86,7 @@ from src.models.data_products import (
     SubscriberInfo,
     SubscribersListResponse,
     OnBehalfOf,
+    ONTOS_PORT_STATUS_PROPERTY,
 )
 from src.models.import_results import BatchImportResult, ImportItemResult
 from src.common.entity_kind import classify_import_entity, describe_import_entity
@@ -3593,7 +3594,11 @@ class DataProductsManager(DeliveryMixin, SearchableAsset):
                 {k: v for k, v in {
                     "name": p.name, "version": p.version,
                     "contractId": p.contractId,
-                    "status": p.status,
+                    # ODPS has no port status: carried as a custom property.
+                    "customProperties": (
+                        [{"property": ONTOS_PORT_STATUS_PROPERTY, "value": p.status}]
+                        if p.status else None
+                    ),
                 }.items() if v}
                 for p in product.outputPorts
             ]
