@@ -177,6 +177,7 @@ class TestRoutePartialDumpSemantics:
             "name": "minimal",
             "version": "1.0.0",
             "productType": "sourceAligned",
+            "status": "draft",
             "outputPorts": [
                 {"name": "p", "version": "1.0.0"}
             ],
