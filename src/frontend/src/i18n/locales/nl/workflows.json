@@ -479,7 +479,8 @@
     "workflowSteps": "Workflowstappen",
     "loadDefinitionFailed": "Kon workflowdefinitie niet laden",
     "stepErrors": {
-      "rule_entity_load_failed": "{{entityType}} {{entityId}} kon niet worden geladen om de regel te evalueren"
+      "rule_entity_load_failed": "{{entityType}} {{entityId}} kon niet worden geladen om de regel te evalueren",
+      "rule_entity_not_found": "{{entityType}} {{entityId}} is niet gevonden, dus de regel kan niet worden geëvalueerd"
     },
     "states": {
       "pending": "In Afwachting",

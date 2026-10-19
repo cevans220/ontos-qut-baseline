@@ -479,7 +479,8 @@
     "workflowSteps": "Pasos del flujo de trabajo",
     "loadDefinitionFailed": "No se pudo cargar la definición del flujo de trabajo",
     "stepErrors": {
-      "rule_entity_load_failed": "No se pudo cargar {{entityType}} {{entityId}} para evaluar la regla"
+      "rule_entity_load_failed": "No se pudo cargar {{entityType}} {{entityId}} para evaluar la regla",
+      "rule_entity_not_found": "No se encontró {{entityType}} {{entityId}}, por lo que no se puede evaluar la regla"
     },
     "states": {
       "pending": "Pendiente",

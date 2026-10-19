@@ -3,6 +3,7 @@
   "reasons": {
     "waitingForApproval": "waiting for approval ({{step}})",
     "entityLoadFailed": "could not load {{entityType}} {{entityId}} to evaluate the rule",
+    "entityNotFound": "{{entityType}} {{entityId}} was not found, so the rule can't be evaluated",
     "validationFailed": "the workflow validation failed",
     "status": {
       "failed": "failed",

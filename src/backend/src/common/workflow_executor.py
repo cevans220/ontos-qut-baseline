@@ -218,6 +218,20 @@ class RuleEntityLoadError(RuntimeError):
         super().__init__(f"Could not load {entity_type} {entity_id} to evaluate the rule")
 
 
+class RuleEntityNotFoundError(RuntimeError):
+    """The entity a rule is about no longer exists (or never did).
+
+    Same shape as ``RuleEntityLoadError``: a stable code and parameters next
+    to the English message.
+    """
+
+    code = 'rule_entity_not_found'
+
+    def __init__(self, entity_type: Optional[str], entity_id: Optional[str]):
+        self.params = {'entityType': entity_type, 'entityId': entity_id}
+        super().__init__(f"{entity_type} {entity_id} was not found, so the rule can't be evaluated")
+
+
 def _rule_step_error(error: Exception, data: Optional[Dict[str, Any]] = None) -> 'StepResult':
     """Failed result of a rule step (validation, conditional, policy check).
 
@@ -245,9 +259,11 @@ def _rule_object(db: Session, context: 'StepContext') -> Dict[str, Any]:
     derived from the stored row (``has_owner``, counts) would describe the
     entity before it.
 
-    Raises when the stored entity can't be loaded: evaluating the rule on the
-    payload alone could let it pass on fields the payload doesn't carry, so the
-    step fails instead (its handler turns the error into a failed result).
+    Raises when the stored entity can't be loaded, or doesn't exist (deleted
+    while a workflow waited, or a wrong id): evaluating the rule on the payload
+    alone could let it pass on fields the payload doesn't carry, so the step
+    fails instead (its handler turns the error into a failed result).
+    ``before_create`` gates keep the payload: their entity isn't stored yet.
     """
     from src.controller.entity_dict_builder import (
         build_data_contract_dict,
@@ -256,7 +272,7 @@ def _rule_object(db: Session, context: 'StepContext') -> Dict[str, Any]:
 
     payload = context.entity if isinstance(context.entity, dict) else {}
     trigger_type = getattr(getattr(context, 'trigger_context', None), 'trigger_type', None)
-    if getattr(trigger_type, 'value', trigger_type) == 'before_update':
+    if getattr(trigger_type, 'value', trigger_type) in ('before_update', 'before_create'):
         return payload
     builder = {
         'data_product': build_data_product_dict,
@@ -273,7 +289,9 @@ def _rule_object(db: Session, context: 'StepContext') -> Dict[str, Any]:
         # The database error stays in the server log; the step result shows
         # only what failed.
         raise RuleEntityLoadError(context.entity_type, context.entity_id) from e
-    return {**stored, **payload} if stored else payload
+    if not stored:
+        raise RuleEntityNotFoundError(context.entity_type, context.entity_id)
+    return {**stored, **payload}
 
 
 class ValidationStepHandler(StepHandler):

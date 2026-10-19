@@ -479,7 +479,8 @@
     "workflowSteps": "ワークフローステップ",
     "loadDefinitionFailed": "ワークフロー定義の読み込みに失敗しました",
     "stepErrors": {
-      "rule_entity_load_failed": "ルールを評価するために {{entityType}} {{entityId}} を読み込めませんでした"
+      "rule_entity_load_failed": "ルールを評価するために {{entityType}} {{entityId}} を読み込めませんでした",
+      "rule_entity_not_found": "{{entityType}} {{entityId}} が見つからないため、ルールを評価できません"
     },
     "states": {
       "pending": "保留中",

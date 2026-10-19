@@ -479,7 +479,8 @@
     "workflowSteps": "Workflow Steps",
     "loadDefinitionFailed": "Failed to load workflow definition",
     "stepErrors": {
-      "rule_entity_load_failed": "Could not load {{entityType}} {{entityId}} to evaluate the rule"
+      "rule_entity_load_failed": "Could not load {{entityType}} {{entityId}} to evaluate the rule",
+      "rule_entity_not_found": "{{entityType}} {{entityId}} was not found, so the rule can't be evaluated"
     },
     "states": {
       "pending": "Pending",

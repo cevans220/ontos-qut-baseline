@@ -148,6 +148,21 @@ describe('step errors', () => {
     }
   });
 
+  it('translates the error of an entity that no longer exists', async () => {
+    await i18n.changeLanguage('pt');
+    try {
+      expect(getStepErrorText({
+        error_message: "data_product p-1 was not found, so the rule can't be evaluated",
+        result_data: {
+          error_code: 'rule_entity_not_found',
+          error_params: { entityType: 'data_product', entityId: 'p-1' },
+        },
+      }, i18n.t)).toBe('data_product p-1 não foi encontrado, então a regra não pode ser avaliada');
+    } finally {
+      await i18n.changeLanguage('en');
+    }
+  });
+
   it('shows an error without a code as stored', () => {
     expect(getStepErrorText({ error_message: 'Policy not found: x' }, i18n.t)).toBe(
       'Policy not found: x',

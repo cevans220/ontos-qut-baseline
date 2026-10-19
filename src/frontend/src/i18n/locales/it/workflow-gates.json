@@ -3,6 +3,7 @@
   "reasons": {
     "waitingForApproval": "in attesa di approvazione ({{step}})",
     "entityLoadFailed": "impossibile caricare {{entityType}} {{entityId}} per valutare la regola",
+    "entityNotFound": "{{entityType}} {{entityId}} non è stato trovato, quindi la regola non può essere valutata",
     "validationFailed": "la convalida del workflow non è riuscita",
     "status": {
       "failed": "non riuscito",
