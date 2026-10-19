@@ -199,6 +199,14 @@ class StepHandler(ABC):
         pass
 
 
+class _ReviewStepRefused(Exception):
+    """A lifecycle step of a product review outcome was refused."""
+
+    def __init__(self, reached_status: Optional[str]):
+        super().__init__(reached_status)
+        self.reached_status = reached_status
+
+
 class RuleEntityLoadError(RuntimeError):
     """The stored entity a rule needs could not be loaded.
 
@@ -3287,12 +3295,17 @@ class WorkflowExecutor:
 
         The outcome is the run's, as before: a succeeded review activates the
         product, any other ending returns it to draft. Each status step goes
-        through ``transition_status``, so the lifecycle rules, the
-        before_status_change gates and the on_status_change trigger apply as
-        for a change from the product page. A product that is no longer in
-        review (changed meanwhile) is left alone. If a step is refused (e.g.
-        a gate blocks), the product stays where it got to and the requester
-        is told, since the workflow has already ended.
+        through ``transition_status``, so the lifecycle rules and the
+        before_status_change gates apply to each step as for a change from the
+        product page. on_status_change fires once for the whole change (e.g.
+        under_review -> active), not once per step, so a workflow on an
+        intermediate step (approved -> active, like the default Data Product
+        Publish Approval) doesn't start a second approval for a product its
+        review just activated. A product that is no longer in review (changed
+        meanwhile) is left alone. If a step is refused (e.g. a gate blocks),
+        the product stays where it got to (the trigger fires for the part that
+        was applied) and the requester is told, since the workflow has
+        already ended.
         """
         from src.common.app_state import get_app_state_manager
         from src.controller.data_products_manager import DataProductsManager
@@ -3323,9 +3336,46 @@ class WorkflowExecutor:
         search_manager = get_app_state_manager('search_manager')
         if search_manager:
             manager.set_search_manager(search_manager)
+        reached_status = current_status
+        try:
+            self._run_product_review_steps(
+                manager, trigger_context, product_id, steps, target_status, responded_by,
+            )
+            reached_status = target_status
+        except _ReviewStepRefused as refused:
+            reached_status = refused.reached_status or current_status
+        finally:
+            if reached_status != current_status:
+                manager.fire_status_change_trigger(
+                    product_id, product.name, current_status, reached_status, responded_by,
+                )
+        if reached_status == target_status:
+            logger.info(
+                "Data product %s moved to '%s' after its review",
+                product_id, target_status,
+            )
+
+    def _run_product_review_steps(
+        self,
+        manager,
+        trigger_context: TriggerContext,
+        product_id: str,
+        steps: List[str],
+        target_status: str,
+        responded_by: Optional[str],
+    ) -> None:
+        """Apply the review's lifecycle steps without per-step triggers.
+
+        Raises ``_ReviewStepRefused`` with the status reached when a step is
+        refused, after telling the requester and the approver.
+        """
+        reached_status = None
         for step in steps:
             try:
-                manager.transition_status(product_id, step, responded_by)
+                manager.transition_status(
+                    product_id, step, responded_by, fire_status_change_trigger=False,
+                )
+                reached_status = step
             except ValueError as e:
                 logger.warning(
                     "Review outcome of data product %s: the change to '%s' was refused: %s",
@@ -3340,11 +3390,7 @@ class WorkflowExecutor:
                     params={'toStatus': target_status, 'reason': str(e)},
                     error=e,
                 )
-                return
-        logger.info(
-            "Data product %s moved to '%s' after its review",
-            product_id, target_status,
-        )
+                raise _ReviewStepRefused(reached_status) from e
 
     def _apply_requested_status_change(
         self,

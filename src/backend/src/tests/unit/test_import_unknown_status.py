@@ -3,8 +3,9 @@
 ODCS v3.x and ODPS v1.0.0 define ``status`` as free text, so a valid document
 from another tool may say ``production``. Refusing it made the whole entity
 fail; it is now imported as ``draft`` and its item in the import result says
-so (code ``imported_status_mapped``). ``certified`` is still refused:
-certification is ``certification_level``.
+so (code ``imported_status_mapped``). Older Ontos status names are mapped as
+migration b5 maps them: ``archived`` to ``retired``, ``certified`` to
+``active`` (certification, ``certification_level``, isn't imported).
 """
 import json
 import uuid
@@ -17,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from src.common.lifecycle_status import (
     CONTRACT_STATUSES,
-    CertifiedIsNotAStatusError,
+    PRODUCT_STATUSES,
     import_status,
 )
 from src.controller.data_contracts_manager import DataContractsManager
@@ -64,8 +65,20 @@ def test_import_status_keeps_lifecycle_statuses_and_maps_the_others():
     assert note['code'] == 'imported_status_mapped'
     assert note['params'] == {'status': 'Production', 'mappedTo': 'draft'}
     assert "'Production' is not a lifecycle status" in note['message']
-    with pytest.raises(CertifiedIsNotAStatusError):
-        import_status('certified', CONTRACT_STATUSES)
+
+
+@pytest.mark.parametrize('statuses', [CONTRACT_STATUSES, PRODUCT_STATUSES])
+def test_older_status_names_map_like_migration_b5(statuses):
+    status, note = import_status('Archived', statuses)
+    assert status == 'retired'
+    assert note['code'] == 'imported_legacy_status'
+    assert note['params'] == {'status': 'Archived', 'mappedTo': 'retired'}
+
+    status, note = import_status('certified', statuses)
+    assert status == 'active'
+    assert note['code'] == 'imported_certified_as_active'
+    assert note['params'] == {'status': 'certified', 'mappedTo': 'active'}
+    assert "Certification isn't imported" in note['message']
 
 
 def test_an_odps_product_with_an_unknown_status_imports_as_draft(product_manager, db_session):
@@ -107,20 +120,29 @@ def test_a_lifecycle_status_imports_without_a_note(contract_manager, db_session)
 
 
 @pytest.mark.parametrize('kind', ['product', 'contract'])
-def test_certified_is_still_refused_on_import(kind, product_manager, contract_manager, db_session):
+@pytest.mark.parametrize('file_status, stored, code', [
+    ('certified', 'active', 'imported_certified_as_active'),
+    ('archived', 'retired', 'imported_legacy_status'),
+])
+def test_older_status_names_import_like_migration_b5(
+    kind, file_status, stored, code, product_manager, contract_manager, db_session,
+):
     if kind == 'product':
         result = product_manager.create_products_from_files(
-            files=[('p.json', json.dumps(_odps('Cert Product', 'certified')).encode())],
+            files=[('p.json', json.dumps(_odps(f'Legacy {file_status}', file_status)).encode())],
         )
+        model = DataProductDb
     else:
         result = contract_manager.create_contracts_from_files(
             db=db_session,
-            files=[('c.yaml', yaml.safe_dump(_odcs('Cert Contract', 'certified')), 'application/x-yaml')],
+            files=[('c.yaml', yaml.safe_dump(_odcs(f'Legacy {file_status}', file_status)), 'application/x-yaml')],
         )
+        model = DataContractDb
 
-    assert (result.created, result.failed) == (0, 1)
-    # The refusal says why, with a code the UI translates (not "See server logs")
+    assert (result.created, result.failed) == (1, 0)
     item = result.items[0]
-    assert item.code == 'certified_is_not_a_status'
-    assert "'certified' is not a status" in item.message
-    assert 'server logs' not in item.message
+    assert item.code == code
+    entity = db_session.get(model, result.created_ids[0])
+    assert entity.status == stored
+    # An import never certifies
+    assert getattr(entity, 'certification_level', None) is None

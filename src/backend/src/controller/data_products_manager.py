@@ -927,7 +927,8 @@ class DataProductsManager(DeliveryMixin, SearchableAsset):
         self,
         product_id: str,
         new_status: str,
-        current_user: Optional[str] = None
+        current_user: Optional[str] = None,
+        fire_status_change_trigger: bool = True,
     ) -> DataProductApi:
         """
         Transition product status with validation.
@@ -941,6 +942,10 @@ class DataProductsManager(DeliveryMixin, SearchableAsset):
             product_id: ID of the product
             new_status: Target status
             current_user: Username for audit trail
+            fire_status_change_trigger: Fire on_status_change for this step.
+                A caller that makes one change in several lifecycle steps (a
+                product review going under_review -> approved -> active)
+                passes False and fires the trigger once for the whole change.
             
         Returns:
             Updated product
@@ -1024,18 +1029,10 @@ class DataProductsManager(DeliveryMixin, SearchableAsset):
             )
             
             # Fire on_status_change workflow trigger
-            from src.common.workflow_triggers import fire_trigger_safe
-            from src.models.process_workflows import EntityType
-            fire_trigger_safe(
-                self._db, "on_status_change",
-                entity_type=EntityType.DATA_PRODUCT,
-                entity_id=product_id,
-                from_status=current_status,
-                to_status=new_status_lower,
-                entity_name=product_db.name,
-                entity_data={"name": product_db.name, "status": new_status_lower},
-                user_email=current_user,
-            )
+            if fire_status_change_trigger:
+                self.fire_status_change_trigger(
+                    product_id, product_db.name, current_status, new_status_lower, current_user,
+                )
 
             result = self._load_product_with_tags(product_db)
             self._update_search_index(result)
@@ -1047,6 +1044,28 @@ class DataProductsManager(DeliveryMixin, SearchableAsset):
         except ValueError as e:
             logger.error(f"Validation error transitioning product {product_id}: {e}")
             raise
+
+    def fire_status_change_trigger(
+        self,
+        product_id: str,
+        product_name: Optional[str],
+        from_status: str,
+        to_status: str,
+        current_user: Optional[str] = None,
+    ) -> None:
+        """Fire the on_status_change workflow trigger for a product."""
+        from src.common.workflow_triggers import fire_trigger_safe
+        from src.models.process_workflows import EntityType
+        fire_trigger_safe(
+            self._db, "on_status_change",
+            entity_type=EntityType.DATA_PRODUCT,
+            entity_id=product_id,
+            from_status=from_status,
+            to_status=to_status,
+            entity_name=product_name,
+            entity_data={"name": product_name, "status": to_status},
+            user_email=current_user,
+        )
 
     def move_to_sandbox(self, product_id: str, current_user: Optional[str] = None) -> DataProductApi:
         """

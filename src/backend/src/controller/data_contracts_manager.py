@@ -4142,7 +4142,8 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
         db,
         contract_id: str,
         new_status: str,
-        current_user: Optional[str] = None
+        current_user: Optional[str] = None,
+        also_set: Optional[Dict[str, Any]] = None,
     ) -> DataContractDb:
         """
         Transition contract status. Validates contract exists and transition is valid.
@@ -4153,6 +4154,9 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
             contract_id: Contract UUID
             new_status: New status value
             current_user: Username of current user
+            also_set: Other fields written in the same commit as the status,
+                only once the gates passed (e.g. a review request clears
+                ``draft_owner_id`` with its draft -> proposed change)
             
         Returns:
             Updated DataContractDb instance
@@ -4193,7 +4197,7 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
             updated = data_contract_repo.update(
                 db=db,
                 db_obj=contract,
-                obj_in={"status": new_status, "updated_by": current_user}
+                obj_in={**(also_set or {}), "status": new_status, "updated_by": current_user}
             )
             db.commit()
             db.refresh(updated)
@@ -5391,17 +5395,15 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
 
         # Transition to PROPOSED through transition_status, so the lifecycle
         # check and the before_status_change gates run (a gate refusal raises
-        # its coded error here). Then clear the personal-draft owner so the
-        # contract is promoted from tier-1 (creator-only) to organisation
-        # visibility; a contract under steward review must be discoverable by
-        # stewards and other team members, not just its author (PRD #442).
+        # its coded error here). The same commit clears the personal-draft
+        # owner, so the contract is promoted from tier-1 (creator-only) to
+        # organisation visibility together with its new status; a contract
+        # under steward review must be discoverable by stewards and other team
+        # members, not just its author (PRD #442).
         contract = self.transition_status(
             db=db, contract_id=contract_id, new_status='proposed',
-            current_user=current_user,
+            current_user=current_user, also_set={'draft_owner_id': None},
         )
-        contract.draft_owner_id = None
-        db.add(contract)
-        db.flush()
         self._update_search_index(contract, db)
         
         now = datetime.utcnow()

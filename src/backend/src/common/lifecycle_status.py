@@ -91,6 +91,12 @@ def normalize_new_status(status: Optional[str], allowed: Iterable[str], default:
 
 
 IMPORTED_STATUS_MAPPED = 'imported_status_mapped'
+IMPORTED_LEGACY_STATUS = 'imported_legacy_status'
+IMPORTED_CERTIFIED_AS_ACTIVE = 'imported_certified_as_active'
+
+# Older status names an export can carry, mapped as migration
+# b5_lifecycle_status_cleanup maps them in the database.
+_LEGACY_IMPORT_STATUSES = {'archived': 'retired'}
 
 
 def import_status(
@@ -102,17 +108,38 @@ def import_status(
     another tool can carry a status Ontos doesn't have (``production``,
     ``in development``). Such a status is imported as ``default`` and the
     returned note (``code``, ``params``, English ``message``) says so.
-    ``certified`` is still refused: certification is ``certification_level``.
+
+    Older Ontos status names are mapped as migration
+    ``b5_lifecycle_status_cleanup`` maps them in the database: ``archived``
+    becomes ``retired``, and ``certified`` becomes ``active``. Certification
+    is ``certification_level``, which an import never sets, so the note on a
+    ``certified`` entity says the certification wasn't imported.
     """
     allowed = tuple(allowed)
     normalized = _normalized(status)
     if normalized is None:
         return default, None
-    if normalized == 'certified':
-        raise CertifiedIsNotAStatusError()
     if normalized in allowed:
         return normalized, None
     original = str(getattr(status, 'value', status)).strip()
+    if normalized == 'certified' and 'active' in allowed:
+        return 'active', {
+            'code': IMPORTED_CERTIFIED_AS_ACTIVE,
+            'params': {'status': original, 'mappedTo': 'active'},
+            'message': (
+                f"'{original}' is not a status any more, so it was imported as 'active'. "
+                "Certification isn't imported: certify the entity in Ontos."
+            ),
+        }
+    legacy = _LEGACY_IMPORT_STATUSES.get(normalized)
+    if legacy and legacy in allowed:
+        return legacy, {
+            'code': IMPORTED_LEGACY_STATUS,
+            'params': {'status': original, 'mappedTo': legacy},
+            'message': (
+                f"'{original}' is an older status name, so it was imported as '{legacy}'."
+            ),
+        }
     return default, {
         'code': IMPORTED_STATUS_MAPPED,
         'params': {'status': original, 'mappedTo': default},

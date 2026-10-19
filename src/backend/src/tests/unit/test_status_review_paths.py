@@ -124,6 +124,46 @@ def test_a_contract_review_request_passes_an_open_gate(db_session, contract_mana
     assert db_session.get(DataContractDb, cid).draft_owner_id is None
 
 
+def _personal_draft(db_session) -> str:
+    cid = _contract(db_session)
+    db_session.get(DataContractDb, cid).draft_owner_id = 'producer@example.com'
+    db_session.commit()
+    return cid
+
+
+def test_a_refused_review_request_keeps_the_personal_draft(db_session, contract_manager):
+    _gate(db_session)
+    cid = _personal_draft(db_session)
+
+    with pytest.raises(StatusChangeBlockedError):
+        contract_manager.request_steward_review(
+            db=db_session, notifications_manager=MagicMock(), contract_id=cid,
+            requester_email='producer@example.com', current_user='producer@example.com',
+        )
+    # The gate runs commit their executions; the draft owner must not go with them
+    db_session.expire_all()
+    contract = db_session.get(DataContractDb, cid)
+    assert (contract.status, contract.draft_owner_id) == ('draft', 'producer@example.com')
+
+
+def test_a_review_request_writes_the_status_and_the_promotion_together(db_session, contract_manager):
+    cid = _personal_draft(db_session)
+
+    def fail_after_the_transition(*args, **kwargs):
+        raise RuntimeError('search index down')
+
+    contract_manager._update_search_index = fail_after_the_transition
+    with pytest.raises(RuntimeError):
+        contract_manager.request_steward_review(
+            db=db_session, notifications_manager=MagicMock(), contract_id=cid,
+            requester_email='producer@example.com', current_user='producer@example.com',
+        )
+    db_session.expire_all()
+    contract = db_session.get(DataContractDb, cid)
+    # Committed together: a proposed contract is never left as a personal draft
+    assert (contract.status, contract.draft_owner_id) == ('proposed', None)
+
+
 # --- Contract review decided on the contract page --------------------------
 
 
@@ -207,6 +247,94 @@ def test_an_approved_product_review_goes_active_through_the_lifecycle(db_session
     assert _complete_product_review(db_session, product, True) == 'active'
     # under_review -> approved -> active: one gate run per step
     assert _gate_runs(db_session, gate) == 2
+
+
+def _status_change_workflow(db_session, name, from_status=None, to_status=None):
+    """An active on_status_change workflow (one pass step) for data products."""
+    wf_id = str(uuid.uuid4())
+    now = datetime.utcnow()
+    trigger = {'type': 'on_status_change', 'entity_types': ['data_product']}
+    if from_status:
+        trigger['from_status'] = from_status
+    if to_status:
+        trigger['to_status'] = to_status
+    db_session.add(ProcessWorkflowDb(
+        id=wf_id, name=name, description=name,
+        trigger_config=json.dumps(trigger),
+        scope_config=json.dumps({'type': 'all'}), is_active=True, is_default=False,
+        workflow_type='process', created_at=now, updated_at=now,
+    ))
+    db_session.flush()
+    db_session.add(WorkflowStepDb(
+        id=str(uuid.uuid4()), workflow_id=wf_id, step_id='ok', name='Ok',
+        step_type='pass', config=json.dumps({}), order=0, created_at=now, updated_at=now,
+    ))
+    db_session.commit()
+    return wf_id
+
+
+def _runs(db_session, wf_id):
+    from src.db_models.process_workflows import WorkflowExecutionDb
+
+    db_session.expire_all()
+    return db_session.query(WorkflowExecutionDb).filter(WorkflowExecutionDb.workflow_id == wf_id).all()
+
+
+def test_a_product_review_fires_on_status_change_once_for_the_whole_change(db_session):
+    # Like the default Data Product Publish Approval: approved -> active
+    publish = _status_change_workflow(db_session, 'Publish', 'approved', 'active')
+    any_change = _status_change_workflow(db_session, 'Any change')
+    product = _product(db_session)
+
+    assert _complete_product_review(db_session, product, True) == 'active'
+    # The intermediate approved -> active step doesn't start the publish approval
+    assert _runs(db_session, publish) == []
+    # A workflow on any change runs once, for under_review -> active
+    runs = _runs(db_session, any_change)
+    assert len(runs) == 1
+    context = json.loads(runs[0].trigger_context)
+    assert (context['from_status'], context['to_status']) == ('under_review', 'active')
+
+
+def test_a_refused_review_step_fires_on_status_change_for_the_applied_part(db_session):
+    # The gate refuses only approved -> active
+    wf_id = str(uuid.uuid4())
+    now = datetime.utcnow()
+    db_session.add(ProcessWorkflowDb(
+        id=wf_id, name='Activation Gate', description='gate',
+        trigger_config=json.dumps({
+            'type': 'before_status_change', 'entity_types': ['data_product'],
+            'from_status': 'approved', 'to_status': 'active',
+        }),
+        scope_config=json.dumps({'type': 'all'}), is_active=True, is_default=False,
+        workflow_type='process', created_at=now, updated_at=now,
+    ))
+    db_session.flush()
+    db_session.add(WorkflowStepDb(
+        id=str(uuid.uuid4()), workflow_id=wf_id, step_id='gate', name='Gate', step_type='fail',
+        config=json.dumps({'message': 'No activation'}), order=0, created_at=now, updated_at=now,
+    ))
+    db_session.commit()
+    any_change = _status_change_workflow(db_session, 'Any change')
+    product = _product(db_session)
+
+    assert _complete_product_review(db_session, product, True) == 'approved'
+    runs = _runs(db_session, any_change)
+    assert len(runs) == 1
+    context = json.loads(runs[0].trigger_context)
+    assert (context['from_status'], context['to_status']) == ('under_review', 'approved')
+
+
+def test_a_direct_status_change_still_fires_on_status_change(db_session):
+    from src.controller.data_products_manager import DataProductsManager
+
+    any_change = _status_change_workflow(db_session, 'Any change')
+    product = _product(db_session, status='approved')
+    manager = DataProductsManager(db=db_session)
+    manager._update_search_index = lambda *a, **k: None
+
+    manager.transition_status(product.id, 'active', 'owner@example.com')
+    assert len(_runs(db_session, any_change)) == 1
 
 
 def test_a_rejected_product_review_returns_to_draft(db_session):
