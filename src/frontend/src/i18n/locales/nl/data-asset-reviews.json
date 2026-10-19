@@ -60,7 +60,11 @@
     "in_review": "In Beoordeling",
     "approved": "Goedgekeurd",
     "rejected": "Afgewezen",
-    "cancelled": "Geannuleerd"
+    "cancelled": "Geannuleerd",
+    "queued": "In wachtrij",
+    "needs_review": "Beoordeling nodig",
+    "denied": "Geweigerd",
+    "needs_clarification": "Verduidelijking nodig"
   },
   "details": {
     "backToList": "Terug naar Beoordelingen",

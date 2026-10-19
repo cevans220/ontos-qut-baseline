@@ -60,7 +60,11 @@
     "in_review": "In Review",
     "approved": "Approved",
     "rejected": "Rejected",
-    "cancelled": "Cancelled"
+    "cancelled": "Cancelled",
+    "queued": "Queued",
+    "needs_review": "Needs Review",
+    "denied": "Denied",
+    "needs_clarification": "Needs Clarification"
   },
   "details": {
     "backToList": "Back to Reviews",

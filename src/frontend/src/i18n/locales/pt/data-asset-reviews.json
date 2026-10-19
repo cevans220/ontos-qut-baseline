@@ -60,7 +60,11 @@
     "in_review": "Em Revisão",
     "approved": "Aprovado",
     "rejected": "Rejeitado",
-    "cancelled": "Cancelado"
+    "cancelled": "Cancelado",
+    "queued": "Na fila",
+    "needs_review": "Precisa de revisão",
+    "denied": "Negada",
+    "needs_clarification": "Precisa de esclarecimento"
   },
   "details": {
     "backToList": "Voltar para Revisões",

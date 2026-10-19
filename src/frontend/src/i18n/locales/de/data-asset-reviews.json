@@ -60,7 +60,11 @@
     "in_review": "In Überprüfung",
     "approved": "Genehmigt",
     "rejected": "Abgelehnt",
-    "cancelled": "Abgebrochen"
+    "cancelled": "Abgebrochen",
+    "queued": "In der Warteschlange",
+    "needs_review": "Prüfung nötig",
+    "denied": "Abgelehnt",
+    "needs_clarification": "Klärung nötig"
   },
   "details": {
     "backToList": "Zurück zu Überprüfungen",

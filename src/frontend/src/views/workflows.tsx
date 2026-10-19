@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
+import { executionStatusLabel } from '@/lib/status-labels';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -84,7 +86,7 @@ const getStepTypeIcon = (stepType: string) => {
 };
 
 // Helper to get execution status badge
-const getStatusBadge = (status: ExecutionStatus) => {
+const getStatusBadge = (status: ExecutionStatus, t: TFunction) => {
   const variants: Record<ExecutionStatus, { variant: 'default' | 'secondary' | 'destructive' | 'outline'; icon: React.ReactNode }> = {
     pending: { variant: 'secondary', icon: <Clock className="h-3 w-3 mr-1" /> },
     running: { variant: 'default', icon: <Play className="h-3 w-3 mr-1 animate-pulse" /> },
@@ -97,7 +99,7 @@ const getStatusBadge = (status: ExecutionStatus) => {
   return (
     <Badge variant={config.variant} className="flex items-center">
       {config.icon}
-      {status}
+      {executionStatusLabel(status, t)}
     </Badge>
   );
 };
@@ -946,7 +948,7 @@ export default function Workflows() {
           <ChevronDown className="ml-2 h-4 w-4" />
         </Button>
       ),
-      cell: ({ row }) => getStatusBadge(row.original.status),
+      cell: ({ row }) => getStatusBadge(row.original.status, t),
     },
     {
       accessorKey: 'current_step_name',
@@ -1560,7 +1562,7 @@ export default function Workflows() {
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium">{t('workflows:view.detail.status')}</span>
-                {getStatusBadge(executionToDelete.status)}
+                {getStatusBadge(executionToDelete.status, t)}
               </div>
               {executionToDelete.entity_name && (
                 <div className="flex items-center gap-2">

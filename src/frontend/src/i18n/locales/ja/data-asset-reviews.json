@@ -60,7 +60,11 @@
     "in_review": "レビュー中",
     "approved": "承認済み",
     "rejected": "却下",
-    "cancelled": "キャンセル"
+    "cancelled": "キャンセル",
+    "queued": "待機中",
+    "needs_review": "要レビュー",
+    "denied": "却下",
+    "needs_clarification": "要確認"
   },
   "details": {
     "backToList": "レビュー一覧に戻る",
