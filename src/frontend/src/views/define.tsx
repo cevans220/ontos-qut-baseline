@@ -278,32 +278,42 @@ export default function DefineView() {
           card below (the "Builds" row), lit for what that path produces. Teach the
           vocabulary once here, then show it per card. Glossary -> taxonomy ->
           ontology is a maturity progression: start simple, harden where needed. */}
-      <div className="mb-6 flex flex-nowrap items-center gap-x-5 overflow-x-auto rounded-lg border bg-muted/30 px-3.5 py-2.5 text-xs">
-        <span className="font-medium text-foreground whitespace-nowrap">What you can build:</span>
-        {RUNGS.map((r, i) => (
-          <div key={r.key} className="flex items-center gap-2 whitespace-nowrap">
-            {i > 0 && <span className="text-muted-foreground/40 -ml-3 mr-1">→</span>}
-            <r.Icon className="h-4 w-4 text-foreground shrink-0" />
-            <span className="font-medium text-foreground">{r.label}</span>
-            <span className="text-muted-foreground">— {r.blurb}</span>
-            {/* Advanced view only: the RDF vocabulary this rung is written in. */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span
-                  className="adv-only cursor-help text-xs text-muted-foreground border rounded-full h-4 w-4 inline-flex items-center justify-center"
-                  aria-label={`${r.label} vocabulary`}
-                  data-testid={`rung-vocab-${r.key}`}
-                >
-                  i
-                </span>
-              </TooltipTrigger>
-              <TooltipContent className="max-w-[280px] text-xs">
-                <span className="font-mono">{r.vocab}</span>
-                <span className="block mt-1 text-muted-foreground">Every scheme is a skos:ConceptScheme.</span>
-              </TooltipContent>
-            </Tooltip>
-          </div>
-        ))}
+      <div className="mb-6 rounded-lg border bg-muted/30 px-3.5 py-2.5 text-xs">
+        <div className="mb-1.5 font-medium text-foreground">What you can build</div>
+        <div className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-3">
+          {RUNGS.map((r, i) => (
+            <div key={r.key} className="flex min-w-0 items-start gap-2">
+              <r.Icon className="mt-0.5 h-4 w-4 shrink-0 text-foreground" />
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-medium text-foreground">{r.label}</span>
+                  {i < RUNGS.length - 1 && (
+                    <span className="text-muted-foreground/40" aria-hidden>→</span>
+                  )}
+                  {/* Advanced view only: the RDF vocabulary this rung is written in. */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        className="adv-only cursor-help text-xs text-muted-foreground border rounded-full h-4 w-4 inline-flex items-center justify-center"
+                        aria-label={`${r.label} vocabulary`}
+                        data-testid={`rung-vocab-${r.key}`}
+                      >
+                        i
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-[280px] text-xs">
+                      <span className="font-mono">{r.vocab}</span>
+                      <span className="block mt-1 text-muted-foreground">Every scheme is a skos:ConceptScheme.</span>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <div className="truncate text-muted-foreground" title={r.blurb}>
+                  {r.blurb}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Path cards */}
