@@ -274,6 +274,8 @@ export default function RequestContractActionDialog({
         throw new Error(contractActionErrorText(response, t));
       }
 
+      // The request type as a word of the toasts' sentences, in the UI language
+      const requestTypeName = t(`data-contracts:requests.toast.requestTypes.${requestType}`, { defaultValue: requestType });
       // The request was recorded; a failed workflow means nobody was asked to decide
       const outcome = response.data as
         | { workflow_status?: string; workflow_error_params?: { workflow?: string } }
@@ -282,7 +284,7 @@ export default function RequestContractActionDialog({
         // The step's own error stays with the execution (admins open it in Workflows)
         toast({
           title: t('data-contracts:requests.toast.workflowFailedTitle', 'Request sent, but its workflow failed'),
-          description: t('data-contracts:requests.toast.workflowFailedDescription', 'Nobody was asked to decide on your {{type}} request: its workflow "{{workflow}}" could not start. Please contact an administrator.', { type: requestType, workflow: outcome.workflow_error_params?.workflow ?? '' }),
+          description: t('data-contracts:requests.toast.workflowFailedDescription', 'Nobody was asked to decide on your {{type}} request: its workflow "{{workflow}}" could not start. Please contact an administrator.', { type: requestTypeName, workflow: outcome.workflow_error_params?.workflow ?? '' }),
           variant: 'destructive',
         });
       } else if (requestType === 'status_change' && canDirectStatusChange) {
@@ -294,7 +296,7 @@ export default function RequestContractActionDialog({
       } else {
         toast({
           title: t('data-contracts:requests.toast.submittedTitle', 'Request Submitted'),
-          description: t('data-contracts:requests.toast.submittedDescription', 'Your {{type}} request has been submitted and you will be notified of the decision.', { type: requestType })
+          description: t('data-contracts:requests.toast.submittedDescription', 'Your {{type}} request has been submitted and you will be notified of the decision.', { type: requestTypeName })
         });
       }
 

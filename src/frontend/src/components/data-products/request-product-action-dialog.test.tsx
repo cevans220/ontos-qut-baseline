@@ -8,6 +8,7 @@
  */
 import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import i18n from '@/i18n/config';
 import { renderWithProviders } from '@/test/utils';
 import RequestProductActionDialog from './request-product-action-dialog';
 
@@ -484,7 +485,9 @@ describe('RequestProductActionDialog when the request workflow fails', () => {
     );
     const reasonField = document.getElementById('access-message') as HTMLTextAreaElement;
     fireEvent.change(reasonField, { target: { value: 'Need access for the Q3 analytics rollup.' } });
-    fireEvent.click(screen.getByRole('button', { name: /Send Request/i }));
+    fireEvent.click(screen.getByRole('button', {
+      name: i18n.t('data-products:requestAction.buttons.sendRequest'),
+    }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledTimes(1));
     return mockToast.mock.calls[0][0];
   }
@@ -506,6 +509,28 @@ describe('RequestProductActionDialog when the request workflow fails', () => {
         '"Data Product Access Request" could not start. Please contact an administrator.',
     );
     expect(toast.description).not.toMatch(/you will be notified/i);
+  });
+
+  it('names the request type in the UI language', async () => {
+    await i18n.changeLanguage('pt');
+    mockPost.mockResolvedValue({
+      data: {
+        workflow_status: 'failed',
+        workflow_error_code: 'request_workflow_failed',
+        workflow_error_params: { workflow: 'Data Product Access Request' },
+      },
+    });
+
+    try {
+      const toast = await submitAccessRequest();
+
+      expect(toast.description).toBe(
+        'Ninguém foi acionado para decidir sobre sua solicitação de acesso: o workflow '
+          + '"Data Product Access Request" não pôde ser iniciado. Contate um administrador.',
+      );
+    } finally {
+      await i18n.changeLanguage('en');
+    }
   });
 
   it('confirms the request when its workflow is waiting for a decision', async () => {

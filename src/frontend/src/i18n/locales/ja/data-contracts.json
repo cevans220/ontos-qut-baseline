@@ -1174,7 +1174,15 @@
       "submittedTitle": "リクエストを送信しました",
       "submittedDescription": "{{type}} のリクエストを送信しました。判断結果は通知されます。",
       "workflowFailedTitle": "リクエストは送信されましたが、ワークフローが失敗しました",
-      "workflowFailedDescription": "{{type}} のリクエストの判断を依頼された人はいません。ワークフロー「{{workflow}}」を開始できませんでした。管理者に連絡してください。"
+      "workflowFailedDescription": "{{type}} のリクエストの判断を依頼された人はいません。ワークフロー「{{workflow}}」を開始できませんでした。管理者に連絡してください。",
+      "requestTypes": {
+        "access": "アクセス",
+        "review": "レビュー",
+        "deploy": "デプロイ",
+        "publish": "公開",
+        "certify": "認定",
+        "status_change": "ステータス変更"
+      }
     },
     "errors": {
       "submitFailed": "リクエストの送信に失敗しました",

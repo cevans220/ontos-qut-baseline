@@ -686,7 +686,14 @@
       "requestSubmitted": "Richiesta inviata",
       "requestSubmittedDesc": "La tua richiesta di {{type}} è stata inviata e verrai notificato della decisione.",
       "workflowFailed": "Richiesta inviata, ma il suo workflow non è riuscito",
-      "workflowFailedDesc": "Nessuno è stato chiamato a decidere sulla tua richiesta di {{type}}: il workflow \"{{workflow}}\" non è potuto partire. Contatta un amministratore."
+      "workflowFailedDesc": "Nessuno è stato chiamato a decidere sulla tua richiesta di {{type}}: il workflow \"{{workflow}}\" non è potuto partire. Contatta un amministratore.",
+      "requestTypes": {
+        "access": "accesso",
+        "review": "revisione",
+        "publish": "pubblicazione",
+        "certify": "certificazione",
+        "status_change": "cambio di stato"
+      }
     },
     "labels": {
       "requestType": "Tipo di richiesta",

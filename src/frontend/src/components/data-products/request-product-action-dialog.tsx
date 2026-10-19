@@ -346,6 +346,8 @@ export default function RequestProductActionDialog({
       if (response.error) {
         throw new Error(statusChangeErrorText(response, t, 'data-products'));
       }
+      // The request type as a word of the toasts' sentences, in the UI language
+      const typeName = t(`data-products:requestAction.toast.requestTypes.${type}`, { defaultValue: type });
       // The request was recorded; a failed workflow means nobody was asked to decide
       const outcome = response.data as
         | { workflow_status?: string; workflow_error_params?: { workflow?: string } }
@@ -354,7 +356,7 @@ export default function RequestProductActionDialog({
         // The step's own error stays with the execution (admins open it in Workflows)
         toast({
           title: t('data-products:requestAction.toast.workflowFailed'),
-          description: t('data-products:requestAction.toast.workflowFailedDesc', { type, workflow: outcome.workflow_error_params?.workflow ?? '' }),
+          description: t('data-products:requestAction.toast.workflowFailedDesc', { type: typeName, workflow: outcome.workflow_error_params?.workflow ?? '' }),
           variant: 'destructive',
         });
       } else if (type === 'status_change' && canDirectStatusChange) {
@@ -366,7 +368,7 @@ export default function RequestProductActionDialog({
       } else {
         toast({
           title: t('data-products:requestAction.toast.requestSubmitted'),
-          description: t('data-products:requestAction.toast.requestSubmittedDesc', { type }),
+          description: t('data-products:requestAction.toast.requestSubmittedDesc', { type: typeName }),
         });
       }
       refreshNotifications();
