@@ -97,3 +97,15 @@ def test_prepare_creates_lakebase_extensions_only_when_they_may_be_used(monkeypa
     created = {s.split()[5] for s in ddl}
     assert "pg_trgm" in created
     assert ({"lakebase_text", "lakebase_vector"} <= created) == creates_lakebase
+
+
+def test_ann_operator_class_comes_from_its_own_extension_schema():
+    """pgvector preinstalled in public, lakebase_vector created in the app schema."""
+    from src.repositories.search_engine import choose_engine
+    installed = {"pg_trgm", "vector", "lakebase_text", "lakebase_vector"}
+    schemas = {"vector": "public", "lakebase_vector": "app", "lakebase_text": "app", "pg_trgm": "public"}
+    lakebase = choose_engine("auto", installed, schemas)
+    assert lakebase.vector_index_method == "lakebase_ann"
+    assert lakebase.vector_opclass() == '"app".vector_cosine_ops'
+    pg = choose_engine("pg", installed, schemas)
+    assert pg.vector_index_method == "hnsw" and pg.vector_opclass() == '"public".vector_cosine_ops'

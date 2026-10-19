@@ -93,6 +93,14 @@ class SearchEngine:
         schema = self.ext_schemas.get("vector")
         return f"OPERATOR({_qident(schema)}.{op})" if schema else op
 
+    def vector_opclass(self) -> str:
+        """Cosine operator class of the ANN index method. lakebase_ann's comes
+        from lakebase_vector, which may live in another schema than pgvector
+        (e.g. pgvector preinstalled in public, lakebase_vector created later)."""
+        ext = "lakebase_vector" if self.vector_index_method == "lakebase_ann" else "vector"
+        schema = self.ext_schemas.get(ext)
+        return f"{_qident(schema)}.vector_cosine_ops" if schema else "vector_cosine_ops"
+
     @property
     def has_bm25(self) -> bool:
         """BM25 ranking (lakebase_text) is used only on the lakebase engine."""
@@ -252,7 +260,7 @@ def ensure_search_indexes(session_factory: Callable, engine: SearchEngine) -> No
         _create_index_concurrently(
             session_factory, name,
             f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name} ON search_documents "
-            f"USING {method} (embedding {engine.vec('vector_cosine_ops')})",
+            f"USING {method} (embedding {engine.vector_opclass()})",
         )
         for other_method, other in EMBEDDING_INDEXES.items():
             if other_method != method:

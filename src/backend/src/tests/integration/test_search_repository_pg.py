@@ -18,6 +18,7 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
+from src.tests.integration.search_pg_support import preinstall_search_extensions
 from src.common.search_interfaces import SearchIndexItem
 from src.db_models.search_documents import SearchDocumentDb
 from src.repositories import search_repository as repo
@@ -50,6 +51,7 @@ def pg_session():
     schema = f"search_it_{uuid.uuid4().hex[:8]}"
     admin = create_engine(_PG_URL, future=True)
     with admin.begin() as conn:
+        preinstall_search_extensions(conn)
         conn.execute(text(f'CREATE SCHEMA "{schema}"'))
     # Every connection from this engine uses the temp schema as its search_path.
     engine = create_engine(_PG_URL, future=True, connect_args={"options": f"-csearch_path={schema}"})

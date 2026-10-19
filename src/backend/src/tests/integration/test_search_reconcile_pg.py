@@ -16,6 +16,7 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
+from src.tests.integration.search_pg_support import preinstall_search_extensions
 from src.common.search_config_loader import SearchConfigLoader
 from src.common.search_interfaces import SearchableAsset, SearchIndexItem
 from src.controller import search_manager as search_manager_module
@@ -38,6 +39,7 @@ def pg():
     admin = create_engine(_PG_URL, future=True)
     try:
         with admin.begin() as conn:
+            preinstall_search_extensions(conn)
             conn.execute(text(f'CREATE SCHEMA "{schema}"'))
     except Exception as e:  # pragma: no cover - environment dependent
         pytest.skip(f"Postgres not reachable: {e}")
