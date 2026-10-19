@@ -69,6 +69,14 @@ describe('contractActionErrorText', () => {
     )).toBe('Invalid transition from approved to APPROVED');
   });
 
+  it('keeps the English message when the contract had no status', async () => {
+    await i18n.changeLanguage('pt');
+
+    expect(contractActionErrorText(
+      { ...INVALID, errorParams: { fromStatus: null, toStatus: 'approved' } }, i18n.t,
+    )).toBe('Invalid transition from approved to APPROVED');
+  });
+
   it('translates the schema a review request needs', async () => {
     const response = {
       error: 'A schema is required before a contract can be proposed for review.',

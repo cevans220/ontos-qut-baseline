@@ -10,6 +10,7 @@ import { statusChangeErrorText } from '@/lib/status-change-error';
  *   by `statusChangeErrorText`.
  * - `invalid_status_transition`: the contract's status no longer allows the
  *   decision (approved or rejected elsewhere meanwhile); names that status.
+ *   Without a status to name, the API's message is shown.
  * - `review_schema_required`: a draft without a schema can't be proposed for
  *   review.
  *
@@ -22,8 +23,9 @@ export function contractActionErrorText(
   fallback = '',
 ): string {
   const defaultValue = response.error || fallback;
-  if (response.errorCode === 'invalid_status_transition' && response.errorParams) {
-    const status = String(response.errorParams.fromStatus ?? '');
+  const fromStatus = String(response.errorParams?.fromStatus ?? '');
+  if (response.errorCode === 'invalid_status_transition' && fromStatus) {
+    const status = fromStatus;
     return t('data-contracts:detailsView.errors.invalidTransition', {
       fromStatus: t(`data-contracts:status.${status}`, { defaultValue: status }),
       defaultValue,
