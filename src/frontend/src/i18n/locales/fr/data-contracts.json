@@ -515,9 +515,9 @@
       "deleteSchemaAuthDefFailed": "Échec de la suppression de la définition de référence de schéma",
       "createPropertyAuthDefFailed": "Échec de la création de la définition de référence de propriété",
       "updatePropertyAuthDefFailed": "Échec de la mise à jour de la définition de référence de propriété",
+      "invalidTransition": "Le contrat est maintenant {{fromStatus}} et ne peut plus être approuvé ni rejeté. Rechargez la page pour voir son statut actuel.",
       "approveFailed": "Échec de l'approbation",
       "rejectFailed": "Échec du rejet",
-      "invalidTransition": "Le contrat est maintenant {{fromStatus}} et ne peut plus être approuvé ni rejeté. Rechargez la page pour voir son statut actuel.",
       "startProfilingFailed": "Échec du démarrage du profilage"
     }
   },

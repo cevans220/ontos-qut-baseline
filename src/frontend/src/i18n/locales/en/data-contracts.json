@@ -515,9 +515,9 @@
       "deleteSchemaAuthDefFailed": "Failed to delete schema authoritative definition",
       "createPropertyAuthDefFailed": "Failed to create property authoritative definition",
       "updatePropertyAuthDefFailed": "Failed to update property authoritative definition",
+      "invalidTransition": "The contract is now {{fromStatus}} and can no longer be approved or rejected. Reload the page to see its current status.",
       "approveFailed": "Approve failed",
       "rejectFailed": "Reject failed",
-      "invalidTransition": "The contract is now {{fromStatus}} and can no longer be approved or rejected. Reload the page to see its current status.",
       "startProfilingFailed": "Failed to start profiling"
     }
   },

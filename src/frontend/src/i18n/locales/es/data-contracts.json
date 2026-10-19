@@ -515,9 +515,9 @@
       "deleteSchemaAuthDefFailed": "Error al eliminar la definición autorizada del esquema",
       "createPropertyAuthDefFailed": "Error al crear la definición autorizada de la propiedad",
       "updatePropertyAuthDefFailed": "Error al actualizar la definición autorizada de la propiedad",
+      "invalidTransition": "El contrato ahora está en {{fromStatus}} y ya no se puede aprobar ni rechazar. Recargue la página para ver su estado actual.",
       "approveFailed": "Error al aprobar",
       "rejectFailed": "Error al rechazar",
-      "invalidTransition": "El contrato ahora está en {{fromStatus}} y ya no se puede aprobar ni rechazar. Recargue la página para ver su estado actual.",
       "startProfilingFailed": "Error al iniciar el perfilado"
     }
   },

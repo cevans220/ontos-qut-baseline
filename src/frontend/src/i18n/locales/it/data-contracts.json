@@ -515,9 +515,9 @@
       "deleteSchemaAuthDefFailed": "Impossibile eliminare la definizione autoritativa dello schema",
       "createPropertyAuthDefFailed": "Impossibile creare la definizione autoritativa della proprietà",
       "updatePropertyAuthDefFailed": "Impossibile aggiornare la definizione autoritativa della proprietà",
+      "invalidTransition": "Il contratto ora è {{fromStatus}} e non può più essere approvato né rifiutato. Ricarica la pagina per vedere lo stato attuale.",
       "approveFailed": "Approvazione non riuscita",
       "rejectFailed": "Rifiuto non riuscito",
-      "invalidTransition": "Il contratto ora è {{fromStatus}} e non può più essere approvato né rifiutato. Ricarica la pagina per vedere lo stato attuale.",
       "startProfilingFailed": "Impossibile avviare la profilazione"
     }
   },

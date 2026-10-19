@@ -515,9 +515,9 @@
       "deleteSchemaAuthDefFailed": "Verwijderen van gezaghebbende schemadefinitie mislukt",
       "createPropertyAuthDefFailed": "Aanmaken van gezaghebbende eigenschapsdefinitie mislukt",
       "updatePropertyAuthDefFailed": "Bijwerken van gezaghebbende eigenschapsdefinitie mislukt",
+      "invalidTransition": "Het contract is nu {{fromStatus}} en kan niet meer worden goedgekeurd of afgewezen. Laad de pagina opnieuw om de huidige status te zien.",
       "approveFailed": "Goedkeuren mislukt",
       "rejectFailed": "Afwijzen mislukt",
-      "invalidTransition": "Het contract is nu {{fromStatus}} en kan niet meer worden goedgekeurd of afgewezen. Laad de pagina opnieuw om de huidige status te zien.",
       "startProfilingFailed": "Starten van profilering mislukt"
     }
   },
