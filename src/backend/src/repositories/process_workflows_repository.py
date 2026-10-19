@@ -5,7 +5,7 @@ Provides CRUD operations for workflow definitions, steps, and executions.
 """
 
 import json
-from typing import List, Optional
+from typing import Dict, List, Optional
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_
 
@@ -231,29 +231,48 @@ class ProcessWorkflowRepository:
         
         # Update steps if provided
         if workflow.steps is not None:
-            # Delete existing steps
-            db.query(WorkflowStepDb).filter(
-                WorkflowStepDb.workflow_id == workflow_id
-            ).delete()
-            
-            # Create new steps
-            for i, step in enumerate(workflow.steps):
-                db_step = WorkflowStepDb(
-                    workflow_id=workflow_id,
-                    step_id=step.step_id,
-                    name=step.name,
-                    step_type=step.step_type.value,
-                    config=json.dumps(step.config) if step.config else None,
-                    on_pass=step.on_pass,
-                    on_fail=step.on_fail,
-                    order=step.order if step.order else i,
-                    position=step.position.model_dump_json() if step.position else None,
-                )
-                db.add(db_step)
-        
+            self._replace_steps(db, db_workflow, workflow.steps)
+
         db.commit()
         db.refresh(db_workflow)
         return db_workflow
+
+    def _replace_steps(
+        self, db: Session, db_workflow: ProcessWorkflowDb, steps: List[WorkflowStepCreate],
+    ) -> None:
+        """Make the workflow's steps match ``steps``, keeping the rows of the steps that stay.
+
+        Step results (``workflow_step_executions``) reference the step's row id
+        and are deleted with it, so recreating every step on save erased the
+        results of all past executions. A step whose ``step_id`` is still in
+        the workflow keeps its row and is updated in place; only the steps that
+        are no longer in it are deleted, with their results.
+        """
+        existing: Dict[str, WorkflowStepDb] = {}
+        for db_step in db_workflow.steps:
+            if db_step.step_id in existing:
+                db.delete(db_step)  # A duplicate step_id: keep one row
+            else:
+                existing[db_step.step_id] = db_step
+
+        kept = set()
+        for i, step in enumerate(steps):
+            db_step = existing.get(step.step_id)
+            if db_step is None or step.step_id in kept:
+                db_step = WorkflowStepDb(workflow_id=db_workflow.id, step_id=step.step_id)
+                db.add(db_step)
+            kept.add(step.step_id)
+            db_step.name = step.name
+            db_step.step_type = step.step_type.value
+            db_step.config = json.dumps(step.config) if step.config else None
+            db_step.on_pass = step.on_pass
+            db_step.on_fail = step.on_fail
+            db_step.order = step.order if step.order else i
+            db_step.position = step.position.model_dump_json() if step.position else None
+
+        for step_id, db_step in existing.items():
+            if step_id not in kept:
+                db.delete(db_step)
 
     def delete(self, db: Session, workflow_id: str) -> bool:
         """Delete a workflow (cascades to steps and executions)."""
