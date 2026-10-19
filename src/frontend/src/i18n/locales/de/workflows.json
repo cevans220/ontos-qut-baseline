@@ -483,6 +483,7 @@
     "removedSteps": "Entfernte Schritte",
     "removedStepsHint": "Diese Schritte liefen in dieser Ausführung und wurden später aus dem Workflow entfernt.",
     "stepErrors": {
+      "approval_rejected": "Anfrage abgelehnt",
       "rule_entity_load_failed": "{{entityType}} {{entityId}} konnte nicht geladen werden, um die Regel auszuwerten",
       "rule_entity_not_found": "{{entityType}} {{entityId}} wurde nicht gefunden, die Regel kann nicht ausgewertet werden"
     },

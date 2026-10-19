@@ -483,6 +483,7 @@
     "removedSteps": "Removed steps",
     "removedStepsHint": "These steps ran in this execution and were removed from the workflow later.",
     "stepErrors": {
+      "approval_rejected": "Request denied",
       "rule_entity_load_failed": "Could not load {{entityType}} {{entityId}} to evaluate the rule",
       "rule_entity_not_found": "{{entityType}} {{entityId}} was not found, so the rule can't be evaluated"
     },

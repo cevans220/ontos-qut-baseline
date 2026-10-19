@@ -429,6 +429,9 @@ export interface WorkflowExecution {
   success_count: number;
   failure_count: number;
   error_message?: string;
+  // Code of error_message when it is a failed step's coded error
+  error_code?: string | null;
+  error_params?: Record<string, unknown> | null;
   started_at?: string;
   finished_at?: string;
   triggered_by?: string;

@@ -288,6 +288,31 @@ async def get_template_vars(
     return manager.get_template_vars(trigger, entity_type)
 
 
+def _execution_error_code(error_message: Optional[str], step_runs) -> Dict[str, Any]:
+    """The code of an execution's error, when it is a failed step's coded error.
+
+    The execution keeps only the English text; the failed step run with the
+    same text that carries ``error_code`` / ``error_params`` in its result data
+    gives the code, so the UI can show the error in the user's language.
+    """
+    if not error_message:
+        return {}
+    for run in reversed(list(step_runs or [])):
+        if run.passed or run.error_message != error_message or not run.result_data:
+            continue
+        try:
+            data = run.result_data
+            if isinstance(data, str):
+                data = json.loads(data)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        code = data.get('error_code') if isinstance(data, dict) else None
+        if isinstance(code, str):
+            params = data.get('error_params')
+            return {'error_code': code, 'error_params': params if isinstance(params, dict) else {}}
+    return {}
+
+
 @router.get("/executions", response_model=WorkflowExecutionListResponse)
 async def list_executions(
     request: Request,
@@ -349,6 +374,8 @@ async def list_executions(
             success_count=exe.success_count,
             failure_count=exe.failure_count,
             error_message=exe.error_message,
+            # step_executions are loaded with the executions
+            **_execution_error_code(exe.error_message, exe.step_executions),
             started_at=exe.started_at,
             finished_at=exe.finished_at,
             triggered_by=exe.triggered_by,
@@ -1769,6 +1796,7 @@ async def get_execution(
         'success_count': execution.success_count,
         'failure_count': execution.failure_count,
         'error_message': execution.error_message,
+        **_execution_error_code(execution.error_message, execution.step_executions),
         'triggered_by': execution.triggered_by,
         'started_at': execution.started_at.isoformat() if execution.started_at else None,
         'finished_at': execution.finished_at.isoformat() if execution.finished_at else None,

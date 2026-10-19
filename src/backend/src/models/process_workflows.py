@@ -717,6 +717,11 @@ class WorkflowExecution(WorkflowExecutionBase):
     success_count: int = Field(default=0)
     failure_count: int = Field(default=0)
     error_message: Optional[str] = None
+    error_code: Optional[str] = Field(
+        None,
+        description="Code of error_message when it is a failed step's coded error",
+    )
+    error_params: Optional[Dict[str, Any]] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     triggered_by: Optional[str] = None

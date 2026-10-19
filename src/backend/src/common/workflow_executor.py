@@ -200,6 +200,10 @@ class StepHandler(ABC):
         pass
 
 
+# Step error code of an approval rejected without a reason
+APPROVAL_REJECTED = 'approval_rejected'
+
+
 class _ReviewStepRefused(Exception):
     """A lifecycle step of a product review outcome was refused."""
 
@@ -2854,6 +2858,7 @@ class WorkflowExecutor:
         current_step = steps_by_id[current_step_id]
         
         # Record the approval result for the paused step
+        denied_without_reason = not step_result and not (result_data or {}).get('reason')
         workflow_execution_repo.add_step_execution(
             self._db,
             execution_id=execution_id,
@@ -2866,6 +2871,12 @@ class WorkflowExecutor:
                 'approval_result': 'approved' if step_result else 'rejected',
                 'responded_by': user_email,
                 **(result_data or {}),
+                # A rejection without a reason: the UI translates the code,
+                # the English text stays in error_message
+                **(
+                    {'error_code': APPROVAL_REJECTED, 'error_params': {}}
+                    if denied_without_reason else {}
+                ),
             },
             # The approve routes send reason None when the approver wrote none
             error_message=None if step_result else ((result_data or {}).get('reason') or 'Request denied'),

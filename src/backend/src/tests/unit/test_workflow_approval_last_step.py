@@ -134,6 +134,93 @@ def test_a_rejection_without_a_reason_says_request_denied(db_session):
     assert step_errors == ['Request denied']
 
 
+def _approval_run(db, execution):
+    import json
+
+    from src.db_models.process_workflows import WorkflowStepExecutionDb
+
+    row = (
+        db.query(WorkflowStepExecutionDb)
+        .filter(WorkflowStepExecutionDb.execution_id == execution.id)
+        .filter(WorkflowStepExecutionDb.step_key == 'approve')
+        .filter(WorkflowStepExecutionDb.passed.is_(False))
+        .one()
+    )
+    return json.loads(row.result_data)
+
+
+def test_a_rejection_without_a_reason_carries_a_code_for_the_ui(db_session):
+    workflow = _workflow(db_session, [_approval()])
+    execution = _paused(db_session, workflow)
+
+    WorkflowExecutor(db_session).resume_workflow(
+        execution_id=execution.id,
+        step_result=False,
+        result_data={'decision': 'rejected', 'reason': None},
+        user_email='reviewer@example.com',
+    )
+
+    data = _approval_run(db_session, execution)
+    assert (data['error_code'], data['error_params']) == ('approval_rejected', {})
+
+
+def test_a_rejection_with_a_reason_shows_the_reason_without_a_code(db_session):
+    workflow = _workflow(db_session, [_approval()])
+    execution = _paused(db_session, workflow)
+
+    _decide(db_session, execution, approved=False, reason='Not ready')
+
+    assert 'error_code' not in _approval_run(db_session, execution)
+
+
+def test_the_execution_routes_send_the_code_of_the_rejection(db_session):
+    """The list and the detail carry the failed step's code for the execution's error."""
+    import asyncio
+    from unittest.mock import MagicMock
+
+    from src.routes import workflows_routes
+
+    workflow = _workflow(db_session, [_approval()])
+    execution = _paused(db_session, workflow)
+    WorkflowExecutor(db_session).resume_workflow(
+        execution_id=execution.id,
+        step_result=False,
+        result_data={'decision': 'rejected', 'reason': None},
+        user_email='reviewer@example.com',
+    )
+    db_session.expire_all()
+
+    listed = asyncio.run(workflows_routes.list_executions(
+        request=MagicMock(), db=db_session, workflow_id=workflow.id,
+        status=None, limit=50, offset=0, _=True,
+    )).executions
+    assert [(e.error_message, e.error_code) for e in listed] == [
+        ('Request denied', 'approval_rejected'),
+    ]
+    detail = asyncio.run(workflows_routes.get_execution(
+        execution_id=execution.id, db=db_session, _=True,
+    ))
+    assert (detail['error_code'], detail['error_params']) == ('approval_rejected', {})
+
+
+def test_an_execution_error_with_a_reason_has_no_code(db_session):
+    import asyncio
+    from unittest.mock import MagicMock
+
+    from src.routes import workflows_routes
+
+    workflow = _workflow(db_session, [_approval()])
+    execution = _paused(db_session, workflow)
+    _decide(db_session, execution, approved=False, reason='Not ready')
+    db_session.expire_all()
+
+    listed = asyncio.run(workflows_routes.list_executions(
+        request=MagicMock(), db=db_session, workflow_id=workflow.id,
+        status=None, limit=50, offset=0, _=True,
+    )).executions
+    assert [(e.error_message, e.error_code) for e in listed] == [('Not ready', None)]
+
+
 def test_an_approval_followed_by_a_step_still_runs_it(db_session):
     workflow = _workflow(db_session, [
         _approval(on_pass='ok'),

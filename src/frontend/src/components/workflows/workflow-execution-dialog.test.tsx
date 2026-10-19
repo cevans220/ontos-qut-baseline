@@ -163,6 +163,18 @@ describe('step errors', () => {
     }
   });
 
+  it('translates an approval rejected without a reason', async () => {
+    await i18n.changeLanguage('pt');
+    try {
+      expect(getStepErrorText({
+        error_message: 'Request denied',
+        result_data: { error_code: 'approval_rejected', error_params: {} },
+      }, i18n.t)).toBe('Solicitação negada');
+    } finally {
+      await i18n.changeLanguage('en');
+    }
+  });
+
   it('shows an error without a code as stored', () => {
     expect(getStepErrorText({ error_message: 'Policy not found: x' }, i18n.t)).toBe(
       'Policy not found: x',
