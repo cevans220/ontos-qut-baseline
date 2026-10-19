@@ -1004,7 +1004,8 @@
     "tabs": {
       "defaultFields": "Campi predefiniti",
       "assetTypes": "Tipi di asset",
-      "ranking": "Classificazione"
+      "ranking": "Classificazione",
+      "hybrid": "Ibrida"
     },
     "defaults": {
       "description": "Queste impostazioni si applicano per impostazione predefinita a tutti i tipi di asset. I singoli tipi di asset possono sovrascriverle."
@@ -1061,6 +1062,33 @@
       "dataAssetReview": "Revisioni degli asset",
       "tag": "Tag",
       "dataDomain": "Domini dati"
+    },
+    "hybrid": {
+      "description": "Combina la ricerca per parole chiave e quella semantica (embedding) con Reciprocal Rank Fusion. Si applica dalla ricerca successiva; richiede il backend di ricerca Postgres e, per la ricerca semantica, un endpoint di embedding.",
+      "mode": "Modalità di ricerca",
+      "modeHelp": "Auto usa la ricerca ibrida quando quella semantica è disponibile, altrimenti la ricerca per parole chiave.",
+      "modes": {
+        "auto": "Auto",
+        "hybrid": "Ibrida (parole chiave + semantica)",
+        "lexical": "Solo parole chiave",
+        "semantic": "Solo semantica"
+      },
+      "fields": {
+        "lexical_weight": "Peso parole chiave",
+        "bm25_weight": "Peso BM25",
+        "vector_weight": "Peso semantico",
+        "rrf_k": "RRF k",
+        "candidate_limit": "Candidati per lista",
+        "min_vector_similarity": "Similarità semantica minima"
+      },
+      "help": {
+        "lexical_weight": "Peso del ranking per parole chiave configurato nelle altre schede.",
+        "bm25_weight": "Peso del ranking BM25 (solo Lakebase Search).",
+        "vector_weight": "Peso del ranking semantico. 0 lo disattiva.",
+        "rrf_k": "Valori più alti riducono il vantaggio dei primi risultati.",
+        "candidate_limit": "Risultati presi da ciascuno dei ranking BM25 e semantico.",
+        "min_vector_similarity": "Similarità del coseno necessaria perché un risultato entri tramite la sola ricerca semantica. Dipende dal modello di embedding."
+      }
     }
   },
   "ontologyLibrary": {

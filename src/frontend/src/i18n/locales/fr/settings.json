@@ -1004,7 +1004,8 @@
     "tabs": {
       "defaultFields": "Champs par défaut",
       "assetTypes": "Types d'actifs",
-      "ranking": "Classement"
+      "ranking": "Classement",
+      "hybrid": "Hybride"
     },
     "defaults": {
       "description": "Ces paramètres s'appliquent par défaut à tous les types d'actifs. Chaque type d'actif peut remplacer ces paramètres."
@@ -1061,6 +1062,33 @@
       "dataAssetReview": "Révisions d'actifs",
       "tag": "Étiquettes",
       "dataDomain": "Domaines de données"
+    },
+    "hybrid": {
+      "description": "Combine la recherche par mots-clés et la recherche sémantique (embeddings) par Reciprocal Rank Fusion. S'applique à la recherche suivante ; nécessite le backend de recherche Postgres, et la recherche sémantique un endpoint d'embeddings.",
+      "mode": "Mode de recherche",
+      "modeHelp": "Auto utilise la recherche hybride lorsque la recherche sémantique est disponible, sinon la recherche par mots-clés.",
+      "modes": {
+        "auto": "Auto",
+        "hybrid": "Hybride (mots-clés + sémantique)",
+        "lexical": "Mots-clés uniquement",
+        "semantic": "Sémantique uniquement"
+      },
+      "fields": {
+        "lexical_weight": "Poids des mots-clés",
+        "bm25_weight": "Poids BM25",
+        "vector_weight": "Poids sémantique",
+        "rrf_k": "RRF k",
+        "candidate_limit": "Candidats par liste",
+        "min_vector_similarity": "Similarité sémantique minimale"
+      },
+      "help": {
+        "lexical_weight": "Poids du classement par mots-clés configuré dans les autres onglets.",
+        "bm25_weight": "Poids du classement BM25 (Lakebase Search uniquement).",
+        "vector_weight": "Poids du classement sémantique. 0 le désactive.",
+        "rrf_k": "Des valeurs plus grandes réduisent l'avantage des premiers résultats.",
+        "candidate_limit": "Résultats repris de chacun des classements BM25 et sémantique.",
+        "min_vector_similarity": "Similarité cosinus qu'un résultat doit atteindre pour entrer par la seule recherche sémantique. Dépend du modèle d'embeddings."
+      }
     }
   },
   "ontologyLibrary": {

@@ -1004,7 +1004,8 @@
     "tabs": {
       "defaultFields": "Standardfelder",
       "assetTypes": "Asset-Typen",
-      "ranking": "Ranking"
+      "ranking": "Ranking",
+      "hybrid": "Hybrid"
     },
     "defaults": {
       "description": "Diese Einstellungen gelten standardmäßig für alle Asset-Typen. Einzelne Asset-Typen können diese Einstellungen überschreiben."
@@ -1061,6 +1062,33 @@
       "dataAssetReview": "Asset-Überprüfungen",
       "tag": "Tags",
       "dataDomain": "Datendomänen"
+    },
+    "hybrid": {
+      "description": "Kombiniert Stichwort- und semantische (Embedding-)Suche mit Reciprocal Rank Fusion. Gilt ab der nächsten Suche; erfordert das Postgres-Such-Backend, die semantische Suche zusätzlich einen Embedding-Endpunkt.",
+      "mode": "Suchmodus",
+      "modeHelp": "Auto nutzt die hybride Suche, wenn die semantische Suche verfügbar ist, sonst die Stichwortsuche.",
+      "modes": {
+        "auto": "Auto",
+        "hybrid": "Hybrid (Stichwort + semantisch)",
+        "lexical": "Nur Stichwort",
+        "semantic": "Nur semantisch"
+      },
+      "fields": {
+        "lexical_weight": "Gewicht Stichwortsuche",
+        "bm25_weight": "BM25-Gewicht",
+        "vector_weight": "Gewicht semantische Suche",
+        "rrf_k": "RRF k",
+        "candidate_limit": "Kandidaten pro Liste",
+        "min_vector_similarity": "Minimale semantische Ähnlichkeit"
+      },
+      "help": {
+        "lexical_weight": "Gewicht des in den anderen Tabs konfigurierten Stichwort-Rankings.",
+        "bm25_weight": "Gewicht des BM25-Rankings (nur Lakebase Search).",
+        "vector_weight": "Gewicht des semantischen Rankings. 0 schaltet es ab.",
+        "rrf_k": "Größere Werte verringern den Vorsprung der bestplatzierten Ergebnisse.",
+        "candidate_limit": "Ergebnisse, die aus dem BM25- und dem semantischen Ranking übernommen werden.",
+        "min_vector_similarity": "Kosinus-Ähnlichkeit, die ein Ergebnis braucht, um allein über die semantische Suche aufgenommen zu werden. Hängt vom Embedding-Modell ab."
+      }
     }
   },
   "ontologyLibrary": {

@@ -224,3 +224,13 @@ ranking:
   secondary_sort: boost_score    # Then by accumulated boost score
   tertiary_sort: title_asc       # Finally alphabetical by title
 
+# Keyword + semantic fusion (Postgres backend; semantic needs SEARCH_EMBEDDING_ENDPOINT).
+# Each document scores sum(weight / (rrf_k + rank)) over the ranked lists it is in.
+hybrid:
+  mode: auto                   # auto = hybrid when semantic search is on, else lexical
+  lexical_weight: 0.7          # Settings-driven keyword ranking above
+  bm25_weight: 0.0             # BM25 (Lakebase Search only); off: it lowered recall on the evaluation
+  vector_weight: 1.0           # semantic similarity
+  rrf_k: 20                    # defaults tuned on the labeled evaluation (tests/eval)
+  candidate_limit: 50          # documents taken from the BM25 and semantic lists
+  min_vector_similarity: 0.55  # model-specific; calibrated for databricks-gte-large-en

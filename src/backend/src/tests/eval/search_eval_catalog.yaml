@@ -1,0 +1,1421 @@
+source: src/backend/src/data/demo_data_retail.sql (extracted)
+items:
+- id: product::pos-transaction-stream
+  type: data-product
+  feature_id: data-products
+  title: POS Transaction Stream
+  description: Provide real-time point-of-sale transaction data from store systems for downstream analytics and operational
+    use cases. Consume this stream for real-time fraud detection, inventory tracking, or as a foundation for prepared analytics
+    datasets.
+  extra_data:
+    status: active
+    owner: Data Engineering Team
+- id: product::prepared-sales-transactions
+  type: data-product
+  feature_id: data-products
+  title: Prepared Sales Transactions
+  description: Provide cleaned, validated, and standardized sales transaction data ready for analytics consumption. Use for
+    BI reporting, demand forecasting, customer analytics, and other downstream analytical use cases.
+  extra_data:
+    status: active
+    owner: Data Engineering Team
+- id: product::demand-forecast-model-output
+  type: data-product
+  feature_id: data-products
+  title: Demand Forecast Model Output
+  description: Provide predicted demand for products at various locations based on historical sales and external factors.
+    Use for inventory planning, supply chain optimization, and promotional planning.
+  extra_data:
+    status: active
+    owner: Analytics Team
+- id: product::inventory-optimization-recommendations
+  type: data-product
+  feature_id: data-products
+  title: Inventory Optimization Recommendations
+  description: Provide automated inventory reordering recommendations based on demand forecasts and current stock levels.
+    API consumed by inventory management system to trigger automated reorders.
+  extra_data:
+    status: active
+    owner: Data Engineering Team
+- id: product::price-optimization-model-output
+  type: data-product
+  feature_id: data-products
+  title: Price Optimization Model Output
+  description: Provide data-driven pricing recommendations based on demand elasticity and competitive positioning. Review
+    recommendations weekly and apply to pricing systems via bulk import.
+  extra_data:
+    status: active
+    owner: Analytics Team
+- id: product::customer-marketing-recommendations
+  type: data-product
+  feature_id: data-products
+  title: Customer Marketing Recommendations
+  description: Provide targeted customer segments and personalized product recommendations for marketing campaigns. Export
+    customer lists weekly for email campaigns. Use real-time API for website personalization.
+  extra_data:
+    status: active
+    owner: Data Governance Team
+- id: product::retail-performance-dashboard-data
+  type: data-product
+  feature_id: data-products
+  title: Retail Performance Dashboard Data
+  description: Provide aggregated, denormalized data optimized for executive-level retail performance dashboards. Connect
+    BI tools directly via provided connection string. Data refreshes nightly at 2 AM EST.
+  extra_data:
+    status: active
+    owner: Analytics Team
+- id: contract::customer-data-contract
+  type: data-contract
+  feature_id: data-contracts
+  title: Customer Data Contract
+  description: Core customer data contract defining customer profile, preferences, and transaction history Customer master
+    data to power user-facing apps, analytics, and marketing campaigns
+  extra_data:
+    status: active
+    owner: Data Engineering Team
+- id: contract::product-catalog-contract
+  type: data-contract
+  feature_id: data-contracts
+  title: Product Catalog Contract
+  description: Complete product catalog with categories, inventory, pricing, and vendor information Power e-commerce platform,
+    merchandising experiences, and inventory management
+  extra_data:
+    status: deprecated
+    owner: Analytics Team
+- id: contract::data-sharing-agreement
+  type: data-contract
+  feature_id: data-contracts
+  title: Data Sharing Agreement
+  description: Legal agreement for data sharing between Analytics and Marketing Enables sharing of aggregated analytics for
+    campaign optimization
+  extra_data:
+    status: active
+    owner: Data Governance Team
+- id: contract::iot-device-data-contract
+  type: data-contract
+  feature_id: data-contracts
+  title: IoT Device Data Contract
+  description: Comprehensive IoT device management and telemetry data for smart building systems Monitor device health, performance,
+    and environmental data in near real-time for predictive maintenance and energy optimization
+  extra_data:
+    status: active
+    owner: Data Science Team
+- id: contract::iot-sensor-data-contract
+  type: data-contract
+  feature_id: data-contracts
+  title: IoT Sensor Data Contract
+  description: Real-time IoT sensor data from manufacturing floor Stream analytics and anomaly detection
+  extra_data:
+    status: retired
+    owner: Data Science Team
+- id: contract::financial-transactions-contract
+  type: data-contract
+  feature_id: data-contracts
+  title: Financial Transactions Contract
+  description: Daily financial transaction data Reconciliation, accounting, and reporting
+  extra_data:
+    status: draft
+    owner: Data Governance Team
+- id: contract::inventory-management-contract
+  type: data-contract
+  feature_id: data-contracts
+  title: Inventory Management Contract
+  description: Real-time inventory levels and movements Track stock levels across warehouses
+  extra_data:
+    status: deprecated
+    owner: Analytics Team
+- id: domain::core
+  type: data-domain
+  feature_id: data-domains
+  title: Core
+  description: General, cross-company business concepts.
+- id: domain::finance
+  type: data-domain
+  feature_id: data-domains
+  title: Finance
+  description: Financial accounting, reporting, and metrics.
+- id: domain::sales
+  type: data-domain
+  feature_id: data-domains
+  title: Sales
+  description: Sales processes, opportunities, leads, and performance.
+- id: domain::marketing
+  type: data-domain
+  feature_id: data-domains
+  title: Marketing
+  description: Customer acquisition, campaigns, engagement, and branding.
+- id: domain::retail
+  type: data-domain
+  feature_id: data-domains
+  title: Retail
+  description: All data related to retail business line, including operations and analytics.
+- id: domain::supply-chain
+  type: data-domain
+  feature_id: data-domains
+  title: Supply Chain
+  description: Logistics, inventory management, reordering, and supplier relations.
+- id: domain::customer
+  type: data-domain
+  feature_id: data-domains
+  title: Customer
+  description: Direct customer information, profiles, segmentation, and interactions.
+- id: domain::product
+  type: data-domain
+  feature_id: data-domains
+  title: Product
+  description: Product catalog, features, lifecycle, and development.
+- id: domain::human-resources
+  type: data-domain
+  feature_id: data-domains
+  title: Human Resources
+  description: Human resources, employee data, payroll, and recruitment.
+- id: domain::iot
+  type: data-domain
+  feature_id: data-domains
+  title: IoT
+  description: Data from Internet of Things devices, sensors, and telemetry.
+- id: domain::compliance
+  type: data-domain
+  feature_id: data-domains
+  title: Compliance
+  description: Data related to legal, regulatory, and internal compliance requirements.
+- id: domain::retail-operations
+  type: data-domain
+  feature_id: data-domains
+  title: Retail Operations
+  description: Store operations, point-of-sale (POS), inventory, and logistics.
+- id: domain::retail-analytics
+  type: data-domain
+  feature_id: data-domains
+  title: Retail Analytics
+  description: Analytics derived from retail operations data, including sales, demand, pricing.
+- id: team::data-engineering
+  type: team
+  feature_id: teams
+  title: Data Engineering Team
+  description: Responsible for data pipeline development and infrastructure
+- id: team::analytics-team
+  type: team
+  feature_id: teams
+  title: Analytics Team
+  description: Business analytics and reporting team
+- id: team::data-science
+  type: team
+  feature_id: teams
+  title: Data Science Team
+  description: Machine learning and advanced analytics
+- id: team::governance-team
+  type: team
+  feature_id: teams
+  title: Data Governance Team
+  description: Data quality, compliance, and governance oversight
+- id: project::customer-360
+  type: project
+  feature_id: projects
+  title: Customer 360 Initiative
+  description: Comprehensive customer data platform and analytics
+- id: project::financial-reporting
+  type: project
+  feature_id: projects
+  title: Financial Reporting Modernization
+  description: Modernize financial reporting infrastructure and processes
+- id: project::ml-platform
+  type: project
+  feature_id: projects
+  title: Machine Learning Platform
+  description: Build and deploy ML infrastructure and services
+- id: project::data-governance-pilot
+  type: project
+  feature_id: projects
+  title: Data Governance Pilot Program
+  description: Pilot program for implementing data governance best practices
+- id: project::real-time-analytics
+  type: project
+  feature_id: projects
+  title: Real-time Analytics Platform
+  description: Build real-time streaming analytics capabilities
+- id: asset::dataset-customer-master-data
+  type: asset-dataset
+  feature_id: assets
+  title: Customer Master Data
+  description: Customer master data including profiles, preferences, and segmentation
+  tags:
+  - customer
+  - master-data
+  - pii
+- id: asset::dataset-customer-engagement-analytics
+  type: asset-dataset
+  feature_id: assets
+  title: Customer Engagement Analytics
+  description: Customer engagement metrics and preferences aggregation
+  tags:
+  - customer
+  - analytics
+- id: asset::dataset-customer-preferences
+  type: asset-dataset
+  feature_id: assets
+  title: Customer Preferences
+  description: Aggregated customer preferences across channels
+  tags:
+  - customer
+  - preferences
+- id: asset::dataset-iot-device-management
+  type: asset-dataset
+  feature_id: assets
+  title: IoT Device Management
+  description: Registry and management of all IoT devices and configurations
+  tags:
+  - iot
+  - devices
+- id: asset::dataset-iot-telemetry
+  type: asset-dataset
+  feature_id: assets
+  title: IoT Telemetry
+  description: Real-time and historical telemetry data from IoT devices
+  tags:
+  - iot
+  - telemetry
+  - streaming
+- id: asset::dataset-financial-transactions
+  type: asset-dataset
+  feature_id: assets
+  title: Financial Transactions
+  description: Daily financial transactions for analytics and reporting
+  tags:
+  - finance
+  - transactions
+- id: asset::dataset-sales-analytics
+  type: asset-dataset
+  feature_id: assets
+  title: Sales Analytics
+  description: Aggregated sales analytics for BI dashboards and reporting
+  tags:
+  - sales
+  - analytics
+  - retail
+- id: asset::dataset-inventory-levels
+  type: asset-dataset
+  feature_id: assets
+  title: Inventory Levels
+  description: Current inventory levels across warehouses and regions
+  tags:
+  - inventory
+  - supply-chain
+- id: asset::table-customers-master-table
+  type: asset-table
+  feature_id: assets
+  title: Customers Master Table
+  description: Primary production instance in Unity Catalog
+  tags:
+  - production
+  - crm
+- id: asset::table-snowflake-customers-replica
+  type: asset-table
+  feature_id: assets
+  title: Snowflake Customers Replica
+  description: Snowflake replica for analytics workloads
+  tags:
+  - production
+  - snowflake
+- id: asset::table-customer-addresses
+  type: asset-table
+  feature_id: assets
+  title: Customer Addresses
+  description: Customer address dimension table
+  tags:
+  - dimension
+  - crm
+- id: asset::table-countries-lookup
+  type: asset-table
+  feature_id: assets
+  title: Countries Lookup
+  description: Country reference/lookup table
+  tags:
+  - lookup
+  - reference
+- id: asset::table-dev-customers-table
+  type: asset-table
+  feature_id: assets
+  title: Dev Customers Table
+  description: Development instance for testing new features
+  tags:
+  - development
+  - crm
+- id: asset::view-customer-preferences-view
+  type: asset-view
+  feature_id: assets
+  title: Customer Preferences View
+  description: Production view aggregating customer preferences
+  tags:
+  - production
+  - view
+  - crm
+- id: asset::table-device-registry
+  type: asset-table
+  feature_id: assets
+  title: Device Registry
+  description: Production IoT device registry
+  tags:
+  - production
+  - iot
+- id: asset::table-dev-device-registry
+  type: asset-table
+  feature_id: assets
+  title: Dev Device Registry
+  description: Development IoT device registry for testing
+  tags:
+  - development
+  - iot
+- id: asset::table-device-types
+  type: asset-table
+  feature_id: assets
+  title: Device Types
+  description: Device type dimension table
+  tags:
+  - dimension
+  - iot
+- id: asset::table-raw-device-data
+  type: asset-table
+  feature_id: assets
+  title: Raw Device Data
+  description: Staging streaming table for incoming device data
+  tags:
+  - staging
+  - iot
+  - streaming
+- id: asset::table-device-readings
+  type: asset-table
+  feature_id: assets
+  title: Device Readings
+  description: Production streaming telemetry data
+  tags:
+  - production
+  - telemetry
+  - streaming
+- id: asset::table-daily-transactions
+  type: asset-table
+  feature_id: assets
+  title: Daily Transactions
+  description: Development instance for financial testing
+  tags:
+  - development
+  - finance
+- id: asset::table-current-inventory
+  type: asset-table
+  feature_id: assets
+  title: Current Inventory
+  description: Legacy inventory table - migrating to new schema
+  tags:
+  - legacy
+  - supply-chain
+- id: asset::table-retail-events-stream
+  type: asset-table
+  feature_id: assets
+  title: Retail Events Stream
+  description: Kafka topic for real-time retail events
+  tags:
+  - streaming
+  - retail
+- id: asset::view-sales-metrics-mv
+  type: asset-view
+  feature_id: assets
+  title: Sales Metrics MV
+  description: Materialized view for sales KPIs
+  tags:
+  - materialized-view
+  - analytics
+- id: asset::view-customer-360-dashboard
+  type: asset-view
+  feature_id: assets
+  title: Customer 360 Dashboard
+  description: Lakeview dashboard for customer insights
+  tags:
+  - dashboard
+  - customer
+- id: asset::view-powerbi-customer-dataset
+  type: asset-view
+  feature_id: assets
+  title: PowerBI Customer Dataset
+  description: Power BI semantic model for customer analytics
+  tags:
+  - powerbi
+  - analytics
+- id: asset::column-customer-id
+  type: asset-column
+  feature_id: assets
+  title: customer_id
+  description: Unique customer identifier (UUID)
+  tags:
+  - pii
+  - key
+- id: asset::column-email
+  type: asset-column
+  feature_id: assets
+  title: email
+  description: Customer email address
+  tags:
+  - pii
+- id: asset::column-first-name
+  type: asset-column
+  feature_id: assets
+  title: first_name
+  description: Customer first name
+  tags:
+  - pii
+- id: asset::column-last-name
+  type: asset-column
+  feature_id: assets
+  title: last_name
+  description: Customer last name
+  tags:
+  - pii
+- id: asset::column-registration-date
+  type: asset-column
+  feature_id: assets
+  title: registration_date
+  description: Account registration timestamp (UTC)
+- id: asset::column-customer-id-2
+  type: asset-column
+  feature_id: assets
+  title: CUSTOMER_ID
+  description: Unique customer identifier (UUID, Snowflake replica)
+  tags:
+  - pii
+  - key
+  - snowflake
+- id: asset::column-email-2
+  type: asset-column
+  feature_id: assets
+  title: EMAIL
+  description: Customer email (Snowflake replica)
+  tags:
+  - pii
+  - snowflake
+- id: asset::column-first-name-2
+  type: asset-column
+  feature_id: assets
+  title: FIRST_NAME
+  description: Customer first name (Snowflake replica)
+  tags:
+  - pii
+  - snowflake
+- id: asset::column-registration-date-2
+  type: asset-column
+  feature_id: assets
+  title: REGISTRATION_DATE
+  description: Registration date (Snowflake replica)
+  tags:
+  - snowflake
+- id: asset::column-customer-id-3
+  type: asset-column
+  feature_id: assets
+  title: customer_id
+  description: Unique customer identifier (dev)
+  tags:
+  - dev
+  - key
+- id: asset::column-email-3
+  type: asset-column
+  feature_id: assets
+  title: email
+  description: Customer email (dev)
+  tags:
+  - dev
+- id: asset::column-first-name-3
+  type: asset-column
+  feature_id: assets
+  title: first_name
+  description: Customer first name (dev)
+  tags:
+  - dev
+- id: asset::column-last-name-2
+  type: asset-column
+  feature_id: assets
+  title: last_name
+  description: Customer last name (dev)
+  tags:
+  - dev
+- id: asset::column-customer-id-4
+  type: asset-column
+  feature_id: assets
+  title: customer_id
+  description: FK to customers.customer_id
+  tags:
+  - fk
+- id: asset::column-preference-key
+  type: asset-column
+  feature_id: assets
+  title: preference_key
+  description: Preference name (channel, language, marketing_optin)
+- id: asset::column-preference-value
+  type: asset-column
+  feature_id: assets
+  title: preference_value
+  description: Preference value (string)
+- id: asset::column-updated-at
+  type: asset-column
+  feature_id: assets
+  title: updated_at
+  description: Last update timestamp (UTC)
+- id: asset::column-device-id
+  type: asset-column
+  feature_id: assets
+  title: device_id
+  description: Unique device identifier
+  tags:
+  - iot
+  - key
+- id: asset::column-device-serial
+  type: asset-column
+  feature_id: assets
+  title: device_serial
+  description: Manufacturer serial number
+  tags:
+  - iot
+- id: asset::column-device-type
+  type: asset-column
+  feature_id: assets
+  title: device_type
+  description: sensor | actuator | gateway | controller
+  tags:
+  - iot
+- id: asset::column-status
+  type: asset-column
+  feature_id: assets
+  title: status
+  description: Operational state
+  tags:
+  - iot
+- id: asset::column-device-id-2
+  type: asset-column
+  feature_id: assets
+  title: device_id
+  description: Unique device identifier (dev)
+  tags:
+  - iot
+  - dev
+- id: asset::column-device-serial-2
+  type: asset-column
+  feature_id: assets
+  title: device_serial
+  description: Manufacturer serial number (dev)
+  tags:
+  - iot
+  - dev
+- id: asset::column-device-type-2
+  type: asset-column
+  feature_id: assets
+  title: device_type
+  description: Device type (dev)
+  tags:
+  - iot
+  - dev
+- id: asset::column-reading-id
+  type: asset-column
+  feature_id: assets
+  title: reading_id
+  description: Unique reading identifier
+  tags:
+  - iot
+  - telemetry
+  - key
+- id: asset::column-device-id-3
+  type: asset-column
+  feature_id: assets
+  title: device_id
+  description: FK to devices.device_id
+  tags:
+  - iot
+  - telemetry
+  - fk
+- id: asset::column-metric-value
+  type: asset-column
+  feature_id: assets
+  title: metric_value
+  description: Numeric measurement value
+  tags:
+  - iot
+  - telemetry
+- id: asset::column-reading-timestamp
+  type: asset-column
+  feature_id: assets
+  title: reading_timestamp
+  description: Reading timestamp (UTC)
+  tags:
+  - iot
+  - telemetry
+  - partition
+- id: asset::column-transaction-id
+  type: asset-column
+  feature_id: assets
+  title: transaction_id
+  description: Unique transaction identifier
+  tags:
+  - finance
+  - key
+- id: asset::column-account-id
+  type: asset-column
+  feature_id: assets
+  title: account_id
+  description: Internal account identifier
+  tags:
+  - finance
+  - fk
+- id: asset::column-amount
+  type: asset-column
+  feature_id: assets
+  title: amount
+  description: Transaction amount (>= 0)
+  tags:
+  - finance
+  - amount
+- id: asset::column-currency
+  type: asset-column
+  feature_id: assets
+  title: currency
+  description: ISO-4217 currency code
+  tags:
+  - finance
+- id: asset::column-transaction-date
+  type: asset-column
+  feature_id: assets
+  title: transaction_date
+  description: Transaction date (partition key)
+  tags:
+  - finance
+  - partition
+- id: asset::column-product-id
+  type: asset-column
+  feature_id: assets
+  title: product_id
+  description: FK to products.sku
+  tags:
+  - supply-chain
+  - deprecated
+  - key
+- id: asset::column-warehouse-id
+  type: asset-column
+  feature_id: assets
+  title: warehouse_id
+  description: Warehouse identifier
+  tags:
+  - supply-chain
+  - deprecated
+- id: asset::column-quantity-on-hand
+  type: asset-column
+  feature_id: assets
+  title: quantity_on_hand
+  description: Current quantity on hand (>= 0)
+  tags:
+  - supply-chain
+  - deprecated
+- id: asset::column-last-updated
+  type: asset-column
+  feature_id: assets
+  title: last_updated
+  description: Last stock update timestamp (UTC)
+  tags:
+  - supply-chain
+  - deprecated
+- id: asset::column-address-id
+  type: asset-column
+  feature_id: assets
+  title: address_id
+  description: Unique address identifier (UUID)
+  tags:
+  - pii
+  - key
+- id: asset::column-customer-id-5
+  type: asset-column
+  feature_id: assets
+  title: customer_id
+  description: FK to customers.customer_id
+  tags:
+  - pii
+  - fk
+- id: asset::column-street
+  type: asset-column
+  feature_id: assets
+  title: street
+  description: Street address line 1
+  tags:
+  - pii
+- id: asset::column-city
+  type: asset-column
+  feature_id: assets
+  title: city
+  description: City
+  tags:
+  - pii
+- id: asset::column-country-code
+  type: asset-column
+  feature_id: assets
+  title: country_code
+  description: ISO 3166-1 alpha-2
+- id: asset::column-country-code-2
+  type: asset-column
+  feature_id: assets
+  title: country_code
+  description: ISO 3166-1 alpha-2 (PK)
+  tags:
+  - reference
+  - key
+- id: asset::column-country-name
+  type: asset-column
+  feature_id: assets
+  title: country_name
+  description: Official country name
+  tags:
+  - reference
+- id: asset::column-continent
+  type: asset-column
+  feature_id: assets
+  title: continent
+  description: Continent (Europe, Asia, ...)
+  tags:
+  - reference
+- id: asset::column-type-id
+  type: asset-column
+  feature_id: assets
+  title: type_id
+  description: Type identifier (PK)
+  tags:
+  - iot
+  - reference
+  - key
+- id: asset::column-type-name
+  type: asset-column
+  feature_id: assets
+  title: type_name
+  description: Display name
+  tags:
+  - iot
+  - reference
+- id: asset::column-manufacturer
+  type: asset-column
+  feature_id: assets
+  title: manufacturer
+  description: Hardware manufacturer
+  tags:
+  - iot
+  - reference
+- id: asset::column-capabilities
+  type: asset-column
+  feature_id: assets
+  title: capabilities
+  description: JSON-encoded device capabilities map
+  tags:
+  - iot
+  - reference
+- id: asset::column-event-id
+  type: asset-column
+  feature_id: assets
+  title: event_id
+  description: Raw event ID (UUID)
+  tags:
+  - iot
+  - staging
+  - key
+- id: asset::column-device-id-4
+  type: asset-column
+  feature_id: assets
+  title: device_id
+  description: Originating device
+  tags:
+  - iot
+  - staging
+  - fk
+- id: asset::column-payload
+  type: asset-column
+  feature_id: assets
+  title: payload
+  description: Raw event payload (JSON)
+  tags:
+  - iot
+  - staging
+- id: asset::column-ingest-timestamp
+  type: asset-column
+  feature_id: assets
+  title: ingest_timestamp
+  description: Bronze ingest timestamp (UTC)
+  tags:
+  - iot
+  - staging
+- id: asset::column-customer-id-6
+  type: asset-column
+  feature_id: assets
+  title: customer_id
+  description: FK to customers.customer_id
+  tags:
+  - customer-360
+- id: asset::column-ltv
+  type: asset-column
+  feature_id: assets
+  title: ltv
+  description: Lifetime value (USD)
+  tags:
+  - customer-360
+  - kpi
+- id: asset::column-total-orders
+  type: asset-column
+  feature_id: assets
+  title: total_orders
+  description: Cumulative order count
+  tags:
+  - customer-360
+  - kpi
+- id: asset::column-last-purchase-date
+  type: asset-column
+  feature_id: assets
+  title: last_purchase_date
+  description: Most recent purchase date
+  tags:
+  - customer-360
+- id: asset::column-customerkey
+  type: asset-column
+  feature_id: assets
+  title: CustomerKey
+  description: Surrogate key into the customer dimension
+  tags:
+  - powerbi
+  - key
+- id: asset::column-email-4
+  type: asset-column
+  feature_id: assets
+  title: Email
+  description: Email (PowerBI semantic model)
+  tags:
+  - powerbi
+  - pii
+- id: asset::column-segment
+  type: asset-column
+  feature_id: assets
+  title: Segment
+  description: Marketing segment label
+  tags:
+  - powerbi
+- id: asset::column-lifetimevalue
+  type: asset-column
+  feature_id: assets
+  title: LifetimeValue
+  description: Computed CLV measure (USD)
+  tags:
+  - powerbi
+  - kpi
+- id: asset::column-invoice-id
+  type: asset-column
+  feature_id: assets
+  title: invoice_id
+  description: Unique invoice identifier
+  tags:
+  - finance
+  - key
+- id: asset::column-customer-id-7
+  type: asset-column
+  feature_id: assets
+  title: customer_id
+  description: FK to customers.customer_id
+  tags:
+  - finance
+  - fk
+- id: asset::column-total-amount
+  type: asset-column
+  feature_id: assets
+  title: total_amount
+  description: Invoice total in invoice currency (>= 0)
+  tags:
+  - finance
+  - amount
+- id: asset::column-currency-2
+  type: asset-column
+  feature_id: assets
+  title: currency
+  description: ISO-4217 currency code
+  tags:
+  - finance
+- id: asset::column-invoice-date
+  type: asset-column
+  feature_id: assets
+  title: invoice_date
+  description: Invoice issue date (partition key)
+  tags:
+  - finance
+  - partition
+- id: asset::column-device-id-5
+  type: asset-column
+  feature_id: assets
+  title: device_id
+  description: FK to devices.device_id
+  tags:
+  - iot
+  - streaming
+  - fk
+- id: asset::column-metric-name
+  type: asset-column
+  feature_id: assets
+  title: metric_name
+  description: Metric name (temperature, humidity, ...)
+  tags:
+  - iot
+  - streaming
+- id: asset::column-metric-value-2
+  type: asset-column
+  feature_id: assets
+  title: metric_value
+  description: Numeric measurement value
+  tags:
+  - iot
+  - streaming
+- id: asset::column-unit
+  type: asset-column
+  feature_id: assets
+  title: unit
+  description: Unit of measurement (C, %, kPa, ...)
+  tags:
+  - iot
+  - streaming
+- id: asset::column-reading-timestamp-2
+  type: asset-column
+  feature_id: assets
+  title: reading_timestamp
+  description: Reading timestamp (UTC)
+  tags:
+  - iot
+  - streaming
+- id: asset::system-databricks-lakehouse
+  type: asset-system
+  feature_id: assets
+  title: Databricks Lakehouse
+  description: Primary Databricks workspace for all lakehouse tables and pipelines.
+  tags:
+  - production
+  - primary
+- id: asset::system-power-bi-service
+  type: asset-system
+  feature_id: assets
+  title: Power BI Service
+  description: Enterprise Power BI tenant for dashboards and reports.
+  tags:
+  - analytics
+  - reporting
+- id: asset::table-lakehouse-retail-curated-pos-transactions
+  type: asset-table
+  feature_id: assets
+  title: lakehouse.retail.curated.pos_transactions
+  description: Curated POS transaction table with validated, deduplicated retail transactions.
+  tags:
+  - curated
+  - retail
+  - pii-free
+- id: asset::table-lakehouse-retail-curated-inventory-levels
+  type: asset-table
+  feature_id: assets
+  title: lakehouse.retail.curated.inventory_levels
+  description: Current and historical inventory levels by store, SKU, and date.
+  tags:
+  - curated
+  - supply-chain
+- id: asset::table-lakehouse-finance-curated-invoices
+  type: asset-table
+  feature_id: assets
+  title: lakehouse.finance.curated.invoices
+  description: Validated invoice records for financial reporting and compliance.
+  tags:
+  - curated
+  - finance
+  - sox-compliant
+- id: asset::dashboard-retail-performance-overview
+  type: asset-dashboard
+  feature_id: assets
+  title: Retail Performance Overview
+  description: 'Executive dashboard showing daily KPIs: revenue, transactions, basket size, conversion.'
+  tags:
+  - executive
+  - kpi
+  - retail
+- id: asset::dashboard-customer-lifetime-value-overview
+  type: asset-dashboard
+  feature_id: assets
+  title: Customer Lifetime Value Overview
+  description: Dashboard showing CLV metrics, segmentation, and churn prediction outputs.
+  tags:
+  - analytics
+  - customer
+  - ml-driven
+- id: asset::api-endpoint-post-v1-customers-search
+  type: asset-api-endpoint
+  feature_id: assets
+  title: POST /v1/customers/search
+  description: Customer search API endpoint for internal applications.
+  tags:
+  - api
+  - customer
+  - internal
+- id: asset::dataset-marketing-raw-clickstream-events
+  type: asset-dataset
+  feature_id: assets
+  title: Marketing Raw Clickstream Events
+  description: Raw clickstream parquet files from web analytics, partitioned by date.
+  tags:
+  - raw
+  - marketing
+  - clickstream
+- id: asset::stream-iot-device-telemetry
+  type: asset-stream
+  feature_id: assets
+  title: iot-device-telemetry
+  description: Kafka topic receiving real-time IoT device sensor readings.
+  tags:
+  - streaming
+  - iot
+  - real-time
+- id: asset::ml-model-demand-forecast-v3
+  type: asset-ml-model
+  feature_id: assets
+  title: demand-forecast-v3
+  description: XGBoost demand forecasting model registered in Unity Catalog.
+  tags:
+  - ml
+  - forecasting
+  - production
+- id: asset::column-transaction-id-2
+  type: asset-column
+  feature_id: assets
+  title: transaction_id
+  description: Unique transaction identifier
+  tags:
+  - retail
+- id: asset::column-store-id
+  type: asset-column
+  feature_id: assets
+  title: store_id
+  description: Store where the transaction occurred
+  tags:
+  - retail
+- id: asset::column-transaction-amount
+  type: asset-column
+  feature_id: assets
+  title: transaction_amount
+  description: Total transaction amount in local currency
+  tags:
+  - retail
+  - financial
+- id: asset::column-transaction-timestamp
+  type: asset-column
+  feature_id: assets
+  title: transaction_timestamp
+  description: When the transaction was recorded
+  tags:
+  - retail
+- id: asset::column-product-id-2
+  type: asset-column
+  feature_id: assets
+  title: product_id
+  description: SKU identifier for the product
+  tags:
+  - supply-chain
+- id: asset::column-warehouse-id-2
+  type: asset-column
+  feature_id: assets
+  title: warehouse_id
+  description: Warehouse or distribution center identifier
+  tags:
+  - supply-chain
+- id: asset::column-quantity
+  type: asset-column
+  feature_id: assets
+  title: quantity
+  description: Current inventory quantity on hand
+  tags:
+  - supply-chain
+- id: asset::column-last-updated-2
+  type: asset-column
+  feature_id: assets
+  title: last_updated
+  description: Timestamp of last inventory update
+  tags:
+  - supply-chain
+- id: asset::column-event-id-2
+  type: asset-column
+  feature_id: assets
+  title: event_id
+  description: Unique event identifier
+  tags:
+  - retail
+  - streaming
+- id: asset::column-store-id-2
+  type: asset-column
+  feature_id: assets
+  title: store_id
+  description: Originating store for the retail event
+  tags:
+  - retail
+  - streaming
+- id: asset::column-transaction-amount-2
+  type: asset-column
+  feature_id: assets
+  title: transaction_amount
+  description: Event transaction amount
+  tags:
+  - retail
+  - streaming
+  - financial
+- id: asset::column-event-timestamp
+  type: asset-column
+  feature_id: assets
+  title: event_timestamp
+  description: When the retail event occurred
+  tags:
+  - retail
+  - streaming
+- id: asset::column-total-revenue
+  type: asset-column
+  feature_id: assets
+  title: total_revenue
+  description: Aggregated total revenue
+  tags:
+  - retail
+  - analytics
+  - kpi
+- id: asset::column-avg-order-value
+  type: asset-column
+  feature_id: assets
+  title: avg_order_value
+  description: Average order value metric
+  tags:
+  - retail
+  - analytics
+  - kpi
+- id: asset::column-transaction-count
+  type: asset-column
+  feature_id: assets
+  title: transaction_count
+  description: Total number of transactions
+  tags:
+  - retail
+  - analytics
+- id: asset::column-period-start
+  type: asset-column
+  feature_id: assets
+  title: period_start
+  description: Start of the aggregation period
+  tags:
+  - retail
+  - analytics
+- id: asset::business-term-customer
+  type: asset-business-term
+  feature_id: assets
+  title: Customer
+  description: A party who has purchased or is eligible to purchase goods or services from the company.
+  tags:
+  - customer
+  - core-entity
+  - pii
+- id: asset::business-term-customer-lifetime-value
+  type: asset-business-term
+  feature_id: assets
+  title: Customer Lifetime Value
+  description: Predicted total net profit attributed to the entire future relationship with a customer.
+  tags:
+  - customer
+  - analytics
+  - kpi
+- id: asset::business-term-active-customer
+  type: asset-business-term
+  feature_id: assets
+  title: Active Customer
+  description: A customer who has completed at least one transaction within the last 12 months.
+  tags:
+  - customer
+  - segmentation
+- id: asset::business-term-transaction
+  type: asset-business-term
+  feature_id: assets
+  title: Transaction
+  description: A financial exchange event recording the purchase of goods or services.
+  tags:
+  - retail
+  - financial
+  - core-entity
+- id: asset::logical-entity-customer
+  type: asset-logical-entity
+  feature_id: assets
+  title: Customer
+  description: Logical entity representing a customer in the conceptual data model.
+  tags:
+  - customer
+  - cdm
+  - logical-model
+- id: asset::logical-entity-transaction
+  type: asset-logical-entity
+  feature_id: assets
+  title: Transaction
+  description: Logical entity representing a sales/purchase transaction.
+  tags:
+  - retail
+  - cdm
+  - logical-model
+- id: asset::logical-attribute-customer-id
+  type: asset-logical-attribute
+  feature_id: assets
+  title: Customer.Id
+  description: Unique business identifier for a customer.
+  tags:
+  - customer
+  - identifier
+- id: asset::logical-attribute-customer-name
+  type: asset-logical-attribute
+  feature_id: assets
+  title: Customer.Name
+  description: Full legal name of the customer.
+  tags:
+  - customer
+  - pii
+- id: asset::logical-attribute-customer-email
+  type: asset-logical-attribute
+  feature_id: assets
+  title: Customer.Email
+  description: Primary email address of the customer.
+  tags:
+  - customer
+  - pii
+  - contact
+- id: asset::logical-attribute-customer-phone
+  type: asset-logical-attribute
+  feature_id: assets
+  title: Customer.Phone
+  description: Primary phone number of the customer.
+  tags:
+  - customer
+  - pii
+  - contact
+- id: asset::logical-attribute-transaction-id
+  type: asset-logical-attribute
+  feature_id: assets
+  title: Transaction.Id
+  description: Unique business identifier for a transaction.
+  tags:
+  - retail
+  - identifier
+- id: asset::logical-attribute-transaction-amount
+  type: asset-logical-attribute
+  feature_id: assets
+  title: Transaction.Amount
+  description: Monetary value of the transaction.
+  tags:
+  - retail
+  - financial
+- id: asset::delivery-channel-customer-360-api
+  type: asset-delivery-channel
+  feature_id: assets
+  title: Customer 360 API
+  description: REST API serving unified customer profile data to downstream applications.
+  tags:
+  - customer
+  - api
+  - real-time
+- id: asset::delivery-channel-clv-dashboard
+  type: asset-delivery-channel
+  feature_id: assets
+  title: CLV Dashboard
+  description: Interactive dashboard showing customer lifetime value trends and segmentation.
+  tags:
+  - customer
+  - analytics
+  - dashboard
+- id: asset::delivery-channel-daily-revenue-report
+  type: asset-delivery-channel
+  feature_id: assets
+  title: Daily Revenue Report
+  description: Automated daily revenue summary report delivered to finance stakeholders.
+  tags:
+  - retail
+  - finance
+  - report
+- id: asset::delivery-channel-partner-data-feed
+  type: asset-delivery-channel
+  feature_id: assets
+  title: Partner Data Feed
+  description: Nightly Parquet export of anonymized sales data for partner analytics.
+  tags:
+  - retail
+  - partner
+  - export
+- id: asset::policy-customer-pii-protection-policy
+  type: asset-policy
+  feature_id: assets
+  title: Customer PII Protection Policy
+  description: Customer personally identifiable information must not be visible in any external-facing output. Only users
+    with the Customer Analytics role may view unmasked email and phone fields.
+  tags:
+  - access-privacy
+  - mandatory
+  - pii
+  - gdpr
+- id: asset::policy-employee-data-access-policy
+  type: asset-policy
+  feature_id: assets
+  title: Employee Data Access Policy
+  description: Employee HR data is restricted to HR department members and authorized managers.
+  tags:
+  - access-privacy
+  - mandatory
+  - hr
+- id: asset::policy-finance-zero-null-key-fields-policy
+  type: asset-policy
+  feature_id: assets
+  title: Finance Zero-Null Key Fields Policy
+  description: For all Finance domain products, key fields (Invoice.Id, Booking.Amount) must have 0% nulls in production outputs,
+    and data must be refreshed at least once per day.
+  tags:
+  - data-quality
+  - automated
+  - finance
+- id: asset::policy-retail-transactions-completeness-policy
+  type: asset-policy
+  feature_id: assets
+  title: Retail Transactions Completeness Policy
+  description: POS transaction data must be complete — no missing store_id, transaction_id, or amount fields in curated layers.
+  tags:
+  - data-quality
+  - automated
+  - retail
+- id: asset::policy-marketing-raw-events-90-day-retention
+  type: asset-policy
+  feature_id: assets
+  title: Marketing Raw Events 90-Day Retention
+  description: Raw event data in the Marketing domain must be retained for 90 days, then aggregated and anonymized.
+  tags:
+  - retention
+  - automated
+  - marketing
+- id: asset::policy-iot-telemetry-data-lifecycle
+  type: asset-policy
+  feature_id: assets
+  title: IoT Telemetry Data Lifecycle
+  description: IoT sensor readings retained at full resolution for 30 days, downsampled to 1-minute averages for 1 year, then
+    purged.
+  tags:
+  - retention
+  - advisory
+  - iot
+  - draft
+- id: asset::policy-eu-customer-data-ml-training-restriction
+  type: asset-policy
+  feature_id: assets
+  title: EU Customer Data ML Training Restriction
+  description: EU customer data may not be used to train models for targeted advertising without explicit consent.
+  tags:
+  - usage-purpose
+  - mandatory
+  - gdpr
+  - ml
+- id: asset::policy-cross-domain-data-sharing-approval
+  type: asset-policy
+  feature_id: assets
+  title: Cross-Domain Data Sharing Approval
+  description: Any data product shared across domain boundaries requires written approval from both domain owners.
+  tags:
+  - custom
+  - mandatory
+  - cross-domain

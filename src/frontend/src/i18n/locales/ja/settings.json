@@ -1004,7 +1004,8 @@
     "tabs": {
       "defaultFields": "デフォルトフィールド",
       "assetTypes": "アセットタイプ",
-      "ranking": "ランク付け"
+      "ranking": "ランク付け",
+      "hybrid": "ハイブリッド"
     },
     "defaults": {
       "description": "これらの設定はデフォルトですべてのアセットタイプに適用されます。個々のアセットタイプはこれらの設定を上書きできます。"
@@ -1061,6 +1062,33 @@
       "dataAssetReview": "アセットレビュー",
       "tag": "タグ",
       "dataDomain": "データドメイン"
+    },
+    "hybrid": {
+      "description": "キーワード検索とセマンティック（埋め込み）検索を Reciprocal Rank Fusion で組み合わせます。次回の検索から適用されます。Postgres 検索バックエンドが必要で、セマンティック検索には埋め込みエンドポイントも必要です。",
+      "mode": "検索モード",
+      "modeHelp": "自動では、セマンティック検索が利用可能な場合はハイブリッド検索、それ以外はキーワード検索を使います。",
+      "modes": {
+        "auto": "自動",
+        "hybrid": "ハイブリッド（キーワード + セマンティック）",
+        "lexical": "キーワードのみ",
+        "semantic": "セマンティックのみ"
+      },
+      "fields": {
+        "lexical_weight": "キーワードの重み",
+        "bm25_weight": "BM25 の重み",
+        "vector_weight": "セマンティックの重み",
+        "rrf_k": "RRF k",
+        "candidate_limit": "リストごとの候補数",
+        "min_vector_similarity": "最小セマンティック類似度"
+      },
+      "help": {
+        "lexical_weight": "他のタブで設定したキーワードランキングの重み。",
+        "bm25_weight": "BM25 ランキングの重み（Lakebase Search のみ）。",
+        "vector_weight": "セマンティックランキングの重み。0 で無効になります。",
+        "rrf_k": "値を大きくすると上位結果の優位性が小さくなります。",
+        "candidate_limit": "BM25 とセマンティックの各ランキングから取り込む結果の数。",
+        "min_vector_similarity": "セマンティック検索のみで結果に含めるために必要なコサイン類似度。埋め込みモデルに依存します。"
+      }
     }
   },
   "ontologyLibrary": {

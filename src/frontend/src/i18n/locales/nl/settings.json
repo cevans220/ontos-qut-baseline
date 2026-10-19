@@ -1004,7 +1004,8 @@
     "tabs": {
       "defaultFields": "Standaardvelden",
       "assetTypes": "Asset-types",
-      "ranking": "Rangschikking"
+      "ranking": "Rangschikking",
+      "hybrid": "Hybride"
     },
     "defaults": {
       "description": "Deze instellingen zijn standaard van toepassing op alle asset-types. Individuele asset-types kunnen deze instellingen overschrijven."
@@ -1061,6 +1062,33 @@
       "dataAssetReview": "Asset-beoordelingen",
       "tag": "Tags",
       "dataDomain": "Datadomeinen"
+    },
+    "hybrid": {
+      "description": "Combineert zoeken op trefwoorden en semantisch zoeken (embeddings) met Reciprocal Rank Fusion. Geldt vanaf de volgende zoekopdracht; vereist de Postgres-zoekbackend, en semantisch zoeken ook een embedding-endpoint.",
+      "mode": "Zoekmodus",
+      "modeHelp": "Auto gebruikt hybride zoeken als semantisch zoeken beschikbaar is, anders zoeken op trefwoorden.",
+      "modes": {
+        "auto": "Auto",
+        "hybrid": "Hybride (trefwoorden + semantisch)",
+        "lexical": "Alleen trefwoorden",
+        "semantic": "Alleen semantisch"
+      },
+      "fields": {
+        "lexical_weight": "Gewicht trefwoorden",
+        "bm25_weight": "BM25-gewicht",
+        "vector_weight": "Semantisch gewicht",
+        "rrf_k": "RRF k",
+        "candidate_limit": "Kandidaten per lijst",
+        "min_vector_similarity": "Minimale semantische overeenkomst"
+      },
+      "help": {
+        "lexical_weight": "Gewicht van de trefwoordrangschikking die in de andere tabbladen is ingesteld.",
+        "bm25_weight": "Gewicht van de BM25-rangschikking (alleen Lakebase Search).",
+        "vector_weight": "Gewicht van de semantische rangschikking. 0 schakelt deze uit.",
+        "rrf_k": "Hogere waarden verkleinen de voorsprong van de best gerangschikte resultaten.",
+        "candidate_limit": "Resultaten die uit elk van de BM25- en semantische rangschikkingen worden overgenomen.",
+        "min_vector_similarity": "Cosinusovereenkomst die een resultaat nodig heeft om alleen via semantisch zoeken mee te komen. Hangt af van het embeddingmodel."
+      }
     }
   },
   "ontologyLibrary": {

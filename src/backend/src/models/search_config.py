@@ -6,6 +6,7 @@ Defines the schema for search_config.yaml which controls:
 - Match types (prefix, substring, exact, fuzzy)
 - Field priorities for ranking
 - Boost values for scoring
+- Hybrid (keyword + semantic) fusion on the Postgres backend
 """
 from enum import Enum
 from typing import Dict, List, Optional
@@ -125,6 +126,45 @@ class RankingConfig(BaseModel):
     )
 
 
+class SearchMode(str, Enum):
+    """Which ranked lists answer a query (Postgres backend)."""
+    AUTO = "auto"           # hybrid when semantic search is on, else lexical
+    LEXICAL = "lexical"     # the Settings-driven keyword ranking only
+    SEMANTIC = "semantic"   # vector similarity only (evaluation)
+    HYBRID = "hybrid"       # keyword + BM25 + vector, fused by Reciprocal Rank Fusion
+
+
+class HybridConfig(BaseModel):
+    """Reciprocal Rank Fusion of the keyword and semantic ranked lists (#1061).
+
+    Each document scores ``sum(weight / (rrf_k + rank))`` over the lists it
+    appears in. Applied at query time, so changes take effect on the next search.
+    The defaults come from the labeled evaluation (tests/eval): recall@5 and MRR
+    are flat for lexical_weight 0.3-0.7 and rrf_k 5-30, so these sit mid-plateau.
+    The keyword list matches on any query word, so it weighs a little less.
+    """
+    mode: SearchMode = Field(default=SearchMode.AUTO, description="Which ranked lists answer a query")
+    lexical_weight: float = Field(default=0.7, ge=0.0, le=10.0,
+                                  description="Weight of the Settings-driven keyword ranking")
+    # Off by default: on the evaluation catalog BM25 alone scores below the
+    # Settings ranking and any weight > 0 lowers hybrid recall. Its corpus
+    # statistics are weak on short texts; larger catalogs may gain from it.
+    bm25_weight: float = Field(default=0.0, ge=0.0, le=10.0,
+                               description="Weight of the BM25 ranking (Lakebase Search only; 0 = off)")
+    vector_weight: float = Field(default=1.0, ge=0.0, le=10.0,
+                                 description="Weight of the semantic (embedding) ranking")
+    rrf_k: int = Field(default=20, ge=1, le=1000,
+                       description="RRF constant: larger values flatten the advantage of top ranks")
+    candidate_limit: int = Field(default=50, ge=1, le=500,
+                                 description="Documents taken from each of the BM25 and semantic lists")
+    min_vector_similarity: float = Field(
+        default=0.55, ge=-1.0, le=1.0,
+        description="Cosine similarity a document needs to enter from the semantic list. "
+                    "Model-specific; 0.55 is calibrated for databricks-gte-large-en, so that "
+                    "nonsense queries return nothing",
+    )
+
+
 class SearchConfig(BaseModel):
     """
     Root configuration model for search indexing and ranking.
@@ -147,6 +187,10 @@ class SearchConfig(BaseModel):
     ranking: RankingConfig = Field(
         default_factory=RankingConfig,
         description="Result ranking configuration"
+    )
+    hybrid: HybridConfig = Field(
+        default_factory=HybridConfig,
+        description="Keyword + semantic fusion (Postgres backend)"
     )
 
     def get_effective_field_config(
@@ -237,6 +281,7 @@ class SearchConfigUpdate(BaseModel):
     defaults: Optional[DefaultsConfig] = None
     asset_types: Optional[Dict[str, AssetTypeConfig]] = None
     ranking: Optional[RankingConfig] = None
+    hybrid: Optional[HybridConfig] = None
 
 
 class SearchConfigResponse(BaseModel):
@@ -245,6 +290,7 @@ class SearchConfigResponse(BaseModel):
     defaults: DefaultsConfig
     asset_types: Dict[str, AssetTypeConfig]
     ranking: RankingConfig
+    hybrid: HybridConfig = Field(default_factory=HybridConfig)
     
     @classmethod
     def from_config(cls, config: SearchConfig) -> "SearchConfigResponse":
@@ -253,6 +299,7 @@ class SearchConfigResponse(BaseModel):
             version=config.version,
             defaults=config.defaults,
             asset_types=config.asset_types,
-            ranking=config.ranking
+            ranking=config.ranking,
+            hybrid=config.hybrid,
         )
 

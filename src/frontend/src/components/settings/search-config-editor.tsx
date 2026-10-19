@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, Save, RefreshCw, Search, Settings2, Layers, ArrowUpDown, Check, AlertCircle } from 'lucide-react';
+import { Loader2, Save, RefreshCw, Search, Settings2, Layers, ArrowUpDown, Check, AlertCircle, Sparkles } from 'lucide-react';
 import {
   CardSkeleton,
   SkeletonLine,
@@ -26,6 +26,8 @@ import {
   SortField,
   // DefaultsConfig - unused
   RankingConfig,
+  HybridConfig,
+  SearchMode,
 } from '@/types/settings';
 
 
@@ -204,6 +206,7 @@ export default function SearchConfigEditor() {
           defaults: config.defaults,
           asset_types: config.asset_types,
           ranking: config.ranking,
+          hybrid: config.hybrid,
         }),
       });
       
@@ -297,6 +300,11 @@ export default function SearchConfigEditor() {
     updateConfig({ ranking });
   }, [updateConfig]);
 
+  const updateHybrid = useCallback((patch: Partial<HybridConfig>) => {
+    if (!config) return;
+    updateConfig({ hybrid: { ...config.hybrid, ...patch } });
+  }, [config, updateConfig]);
+
   if (isLoading) {
     // Tab strip + 2 config sections
     return (
@@ -361,6 +369,10 @@ export default function SearchConfigEditor() {
             <TabsTrigger value="ranking" className="flex items-center gap-2">
               <ArrowUpDown className="h-4 w-4" />
               {t('settings:search.tabs.ranking')}
+            </TabsTrigger>
+            <TabsTrigger value="hybrid" className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4" />
+              {t('settings:search.tabs.hybrid')}
             </TabsTrigger>
           </TabsList>
 
@@ -560,6 +572,65 @@ export default function SearchConfigEditor() {
                 </p>
               </div>
             </div>
+          </TabsContent>
+
+          {/* Hybrid (keyword + semantic) Tab */}
+          <TabsContent value="hybrid" className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              {t('settings:search.hybrid.description')}
+            </p>
+            {config.hybrid && (
+              <div className="grid gap-4">
+                <div className="space-y-2">
+                  <Label>{t('settings:search.hybrid.mode')}</Label>
+                  <Select
+                    value={config.hybrid.mode}
+                    onValueChange={(value) => updateHybrid({ mode: value as SearchMode })}
+                    disabled={!hasWriteAccess}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(['auto', 'hybrid', 'lexical', 'semantic'] as SearchMode[]).map((mode) => (
+                        <SelectItem key={mode} value={mode}>
+                          {t(`settings:search.hybrid.modes.${mode}`)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">{t('settings:search.hybrid.modeHelp')}</p>
+                </div>
+                <div className="grid gap-4 md:grid-cols-3">
+                  {([
+                    ['lexical_weight', 0, 10, 0.1],
+                    ['bm25_weight', 0, 10, 0.1],
+                    ['vector_weight', 0, 10, 0.1],
+                    ['rrf_k', 1, 1000, 1],
+                    ['candidate_limit', 1, 500, 1],
+                    ['min_vector_similarity', -1, 1, 0.01],
+                  ] as [keyof HybridConfig, number, number, number][]).map(([key, min, max, step]) => (
+                    <div key={key} className="space-y-2">
+                      <Label htmlFor={`hybrid-${key}`}>{t(`settings:search.hybrid.fields.${key}`)}</Label>
+                      <Input
+                        id={`hybrid-${key}`}
+                        type="number"
+                        min={min}
+                        max={max}
+                        step={step}
+                        value={config.hybrid[key] as number}
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          if (!Number.isNaN(v)) updateHybrid({ [key]: Math.min(max, Math.max(min, v)) } as Partial<HybridConfig>);
+                        }}
+                        disabled={!hasWriteAccess}
+                      />
+                      <p className="text-xs text-muted-foreground">{t(`settings:search.hybrid.help.${key}`)}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </TabsContent>
         </Tabs>
         <div className="flex justify-between pt-4">

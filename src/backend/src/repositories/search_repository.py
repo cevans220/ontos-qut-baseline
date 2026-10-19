@@ -12,7 +12,8 @@ backends are interchangeable and MCP tools / the REST route need no changes.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Iterable, List, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -724,3 +725,199 @@ def try_reconcile_lock(db: Session) -> bool:
 
 def release_reconcile_lock(db: Session) -> None:
     db.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": RECONCILE_LOCK_KEY})
+
+
+# --- hybrid fusion (#1061) ---------------------------------------------------
+
+@dataclass
+class _Fused:
+    """A fused ranking: ``order`` is a correct prefix of the full result list
+    (at least the ``need`` best), ``total`` counts the whole list, and
+    ``prefix``/``rel``/``params`` describe the result set for facets."""
+    order: List[tuple[str, float]]
+    total: int
+    prefix: str
+    rel: str
+    params: Dict[str, Any]
+
+
+def _rrf(lists: Sequence[tuple[float, Dict[str, int]]], k: int) -> Dict[str, float]:
+    scores: Dict[str, float] = {}
+    for weight, ranks in lists:
+        for doc_id, rank in ranks.items():
+            scores[doc_id] = scores.get(doc_id, 0.0) + weight / (k + rank)
+    return scores
+
+
+def _fuse(
+    db: Session, query: str, query_vector: Optional[List[float]], mode: str, *, need: int,
+    type_filter, filters, allowed_features, config: SearchConfig, engine: Optional[SearchEngine],
+    trgm_threshold: float,
+) -> Optional[_Fused]:
+    """Reciprocal Rank Fusion of the Settings-driven keyword ranking (all its
+    matches), BM25 (lakebase engine) and the semantic list (top
+    ``candidate_limit`` above ``min_vector_similarity``).
+
+    The result set is every keyword match plus the BM25/semantic hits that
+    aren't keyword matches, so ``total`` stays exact. The keyword list is read
+    to ``max(candidate_limit, need)``; any other list's hit beyond that gets its
+    exact keyword rank. Every keyword match not read then scores below at least
+    ``need`` documents that were, so ``order`` is exact for the requested page.
+    Returns None when the query has no terms."""
+    h = config.hybrid
+    tokens = tokenize(query)
+    if not tokens:
+        return None
+    disabled, dparams = search_scoring_sql.disabled_where_only(config)
+    where, params = _where(type_filter, filters, allowed_features, disabled)
+    params.update(dparams)
+
+    lists: List[tuple[float, Dict[str, int]]] = []
+    prefix, rel, lex_total, lex_ranks = "", "", 0, {}
+    order_by = ""
+    if mode == "hybrid":
+        prefix, sparams, order_by = _matches_cte(config, tokens, where)
+        params.update(sparams)
+        n = max(h.candidate_limit, need)
+        rows = list(db.execute(
+            text(f"{prefix}SELECT id, count(*) OVER() AS total_count FROM matches ORDER BY {order_by} LIMIT :hy_n"),
+            {**params, "hy_n": n},
+        ))
+        rel = "matches"
+        if rows:
+            lex_total = int(rows[0]._mapping["total_count"])
+            lex_ranks = {r._mapping["id"]: i for i, r in enumerate(rows, 1)}
+        elif engine is not None and engine.has_trgm:
+            fb = _trgm_fallback(db, query, where, params, trgm_threshold, limit=n, offset=0, engine=engine)
+            if fb is not None:
+                fb_rows, lex_total, rel, params = fb
+                prefix, order_by = "", ""
+                lex_ranks = {r._mapping["id"]: i for i, r in enumerate(fb_rows, 1)}
+        lists.append((h.lexical_weight, lex_ranks))
+        if engine is not None and engine.has_bm25 and h.bm25_weight > 0:
+            bm = bm25_rank(db, query, config=config, engine=engine, type_filter=type_filter, filters=filters,
+                           allowed_features=allowed_features, limit=h.candidate_limit)
+            lists.append((h.bm25_weight, {i: r for r, (i, _) in enumerate(bm, 1)}))
+    if query_vector and h.vector_weight > 0:
+        vec = vector_rank(db, query_vector, config=config, engine=engine, type_filter=type_filter,
+                          filters=filters, allowed_features=allowed_features, limit=h.candidate_limit)
+        lists.append((h.vector_weight, {
+            i: r for r, (i, sim) in enumerate((x for x in vec if x[1] >= h.min_vector_similarity), 1)
+        }))
+
+    non_lexical = lists[1:] if mode == "hybrid" else lists
+    others = {i for _, ranks in non_lexical for i in ranks} - set(lex_ranks)
+    if others and lex_total > len(lex_ranks) and order_by:
+        # Hits from the other lists that are keyword matches past the window: exact rank.
+        beyond = db.execute(text(
+            f"{prefix}SELECT id, rn FROM (SELECT id, row_number() OVER (ORDER BY {order_by}) AS rn "
+            "FROM matches) m WHERE id = ANY(:hy_ids)"
+        ), {**params, "hy_ids": list(others)})
+        for r in beyond:
+            lex_ranks[r._mapping["id"]] = int(r._mapping["rn"])
+    extras = sorted(others - set(lex_ranks))
+
+    scores = _rrf(lists, h.rrf_k)
+    inf = float("inf")
+    order = sorted(
+        scores.items(),
+        key=lambda kv: (-kv[1], lex_ranks.get(kv[0], inf), kv[0]),
+    )
+    if lex_total and rel:
+        facet_rel = (f"(SELECT id, type, extra_data, tags FROM {rel} AS lx "
+                     "UNION SELECT id, type, extra_data, tags FROM search_documents WHERE id = ANY(:hy_extra))")
+    else:
+        facet_rel = "(SELECT id, type, extra_data, tags FROM search_documents WHERE id = ANY(:hy_extra))"
+    return _Fused(order=order, total=lex_total + len(extras), prefix=prefix, rel=facet_rel,
+                  params={**params, "hy_extra": extras})
+
+
+def _rows_by_id(db: Session, ids: List[str]) -> Dict[str, Any]:
+    if not ids:
+        return {}
+    rows = db.execute(text(f"SELECT {_COLS}, 0.0 AS score FROM search_documents WHERE id = ANY(:ids)"),
+                      {"ids": ids})
+    return {r._mapping["id"]: r for r in rows}
+
+
+def hybrid_search(
+    db: Session,
+    query: str,
+    *,
+    query_vector: Optional[List[float]],
+    mode: str = "hybrid",
+    type_filter: Optional[str] = None,
+    filters: Optional[Dict[str, Optional[str]]] = None,
+    allowed_features: Optional[Iterable[str]] = None,
+    limit: int = 25,
+    offset: int = 0,
+    include_facets: bool = True,
+    fields: Optional[List[str]] = None,
+    config: Optional[SearchConfig] = None,
+    engine: Optional[SearchEngine] = None,
+    trgm_threshold: float = 0.45,
+) -> Dict[str, Any]:
+    """``search`` with keyword + semantic fusion (``mode="hybrid"``) or the
+    semantic list alone (``"semantic"``). Same result shape; ``relevance_score``
+    is the fused RRF score. List queries and ``"lexical"`` go to ``search``."""
+    config = config or _default_config()
+    if mode == "lexical" or is_list_query(query) or (mode == "semantic" and not query_vector):
+        return search(db, query, type_filter=type_filter, filters=filters, allowed_features=allowed_features,
+                      limit=limit, offset=offset, include_facets=include_facets, fields=fields,
+                      config=config, engine=engine, trgm_threshold=trgm_threshold)
+    limit = max(1, min(limit, 100))
+    offset = max(0, offset)
+    fused = _fuse(db, query, query_vector, mode, need=offset + limit, type_filter=type_filter,
+                  filters=filters, allowed_features=allowed_features, config=config, engine=engine,
+                  trgm_threshold=trgm_threshold)
+    if fused is None:
+        return _empty(query, limit, offset)
+    page = fused.order[offset:offset + limit]
+    rows = _rows_by_id(db, [i for i, _ in page])
+    results = []
+    for doc_id, score in page:
+        if doc_id in rows:
+            res = _row_to_result(rows[doc_id], with_score=True, fields=None)
+            res["relevance_score"] = round(score, 6)
+            if fields:
+                allowed = set(fields) | {"id"}
+                res = {k: v for k, v in res.items() if k in allowed}
+            results.append(res)
+    return {
+        "results": results,
+        "total_count": fused.total,
+        "returned": len(results),
+        "offset": offset,
+        "limit": limit,
+        "has_more": (offset + len(results)) < fused.total,
+        "facets": _facets(db, fused.prefix, fused.rel, fused.params) if include_facets else {},
+        "query": query,
+    }
+
+
+def hybrid_search_items(
+    db: Session,
+    query: str,
+    *,
+    query_vector: Optional[List[float]],
+    mode: str = "hybrid",
+    allowed_features: Optional[Iterable[str]] = None,
+    limit: int = 200,
+    config: Optional[SearchConfig] = None,
+    engine: Optional[SearchEngine] = None,
+    trgm_threshold: float = 0.45,
+) -> List[SearchIndexItem]:
+    """REST counterpart of ``hybrid_search`` (ranked items; caller applies auth)."""
+    config = config or _default_config()
+    q = (query or "").strip()
+    if mode == "lexical" or q.lower().startswith("tag:") or (mode == "semantic" and not query_vector):
+        return search_index_items(db, q, allowed_features=allowed_features, limit=limit, config=config,
+                                  engine=engine, trgm_threshold=trgm_threshold)
+    limit = max(1, min(limit, 500))
+    fused = _fuse(db, q, query_vector, mode, need=limit, type_filter=None, filters=None,
+                  allowed_features=allowed_features, config=config, engine=engine, trgm_threshold=trgm_threshold)
+    if fused is None:
+        return []
+    ids = [i for i, _ in fused.order[:limit]]
+    rows = _rows_by_id(db, ids)
+    return [_row_to_item(rows[i]) for i in ids if i in rows]

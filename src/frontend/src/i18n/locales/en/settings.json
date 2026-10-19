@@ -1022,7 +1022,8 @@
     "tabs": {
       "defaultFields": "Default Fields",
       "assetTypes": "Asset Types",
-      "ranking": "Ranking"
+      "ranking": "Ranking",
+      "hybrid": "Hybrid"
     },
     "defaults": {
       "description": "These settings apply to all asset types by default. Individual asset types can override these settings."
@@ -1079,6 +1080,33 @@
       "dataAssetReview": "Asset Reviews",
       "tag": "Tags",
       "dataDomain": "Data Domains"
+    },
+    "hybrid": {
+      "description": "Combine keyword and semantic (embedding) search with Reciprocal Rank Fusion. Applies on the next search; needs the Postgres search backend, and semantic search needs an embedding endpoint.",
+      "mode": "Search mode",
+      "modeHelp": "Auto uses hybrid when semantic search is available, keyword search otherwise.",
+      "modes": {
+        "auto": "Auto",
+        "hybrid": "Hybrid (keyword + semantic)",
+        "lexical": "Keyword only",
+        "semantic": "Semantic only"
+      },
+      "fields": {
+        "lexical_weight": "Keyword weight",
+        "bm25_weight": "BM25 weight",
+        "vector_weight": "Semantic weight",
+        "rrf_k": "RRF k",
+        "candidate_limit": "Candidates per list",
+        "min_vector_similarity": "Minimum semantic similarity"
+      },
+      "help": {
+        "lexical_weight": "Weight of the keyword ranking configured in the other tabs.",
+        "bm25_weight": "Weight of the BM25 ranking (Lakebase Search only).",
+        "vector_weight": "Weight of the semantic ranking. 0 turns it off.",
+        "rrf_k": "Larger values flatten the advantage of top-ranked results.",
+        "candidate_limit": "Results taken from each of the BM25 and semantic rankings.",
+        "min_vector_similarity": "Cosine similarity a result needs to come in through semantic search alone. Depends on the embedding model."
+      }
     }
   },
   "ontologyLibrary": {

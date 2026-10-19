@@ -1,0 +1,79 @@
+# Labeled search queries over search_eval_catalog.yaml (#1061).
+# expected: every id that is a correct answer; the first one is the best one.
+# Categories:
+#   exact      - the entity's own name
+#   plain      - multi-word plain language, as an agent would ask
+#   paraphrase - no word shared with the expected entity's title, description
+#                or tags (checked by the eval), so only semantics can find it
+#   typo       - misspelled names
+queries:
+  # --- exact
+  - {q: "POS Transaction Stream", category: exact, expected: [product::pos-transaction-stream]}
+  - {q: "Customer Data Contract", category: exact, expected: [contract::customer-data-contract]}
+  - {q: "Demand Forecast v3", category: exact, expected: [asset::ml-model-demand-forecast-v3]}
+  - {q: "Data Governance Team", category: exact, expected: [team::governance-team]}
+  - {q: "Supply Chain", category: exact, expected: [domain::supply-chain]}
+  - {q: "Device Registry", category: exact, expected: [asset::table-device-registry, asset::table-dev-device-registry]}
+  - {q: "Customer 360 Initiative", category: exact, expected: [project::customer-360]}
+  - {q: "Inventory Management Contract", category: exact, expected: [contract::inventory-management-contract]}
+
+  # --- plain language
+  - {q: "which data product forecasts demand for stores", category: plain,
+     expected: [product::demand-forecast-model-output, asset::ml-model-demand-forecast-v3]}
+  - {q: "pricing recommendations", category: plain, expected: [product::price-optimization-model-output]}
+  - {q: "real-time sensor readings from devices", category: plain,
+     expected: [asset::stream-iot-device-telemetry, contract::iot-sensor-data-contract, asset::table-device-readings,
+                asset::dataset-iot-telemetry]}
+  - {q: "who owns data quality and compliance", category: plain, expected: [team::governance-team]}
+  - {q: "customer personal data protection rules", category: plain,
+     expected: [asset::policy-customer-pii-protection-policy]}
+  - {q: "executive retail dashboard", category: plain,
+     expected: [asset::dashboard-retail-performance-overview, product::retail-performance-dashboard-data]}
+  - {q: "invoice records for financial reporting", category: plain,
+     expected: [asset::table-lakehouse-finance-curated-invoices]}
+  - {q: "how long do we keep raw clickstream events", category: plain,
+     expected: [asset::policy-marketing-raw-events-90-day-retention, asset::dataset-marketing-raw-clickstream-events]}
+  - {q: "inventory stock levels by warehouse", category: plain,
+     expected: [asset::dataset-inventory-levels, asset::table-lakehouse-retail-curated-inventory-levels,
+                contract::inventory-management-contract]}
+  - {q: "machine learning infrastructure project", category: plain, expected: [project::ml-platform]}
+  - {q: "segments for marketing campaigns", category: plain, expected: [product::customer-marketing-recommendations]}
+  - {q: "sharing data between analytics and marketing", category: plain, expected: [contract::data-sharing-agreement]}
+
+  # --- zero-overlap paraphrases
+  - {q: "client attrition", category: paraphrase, expected: [asset::dashboard-customer-lifetime-value-overview]}
+  - {q: "checkout till purchases", category: paraphrase,
+     expected: [product::pos-transaction-stream, asset::table-lakehouse-retail-curated-pos-transactions]}
+  - {q: "staff salaries and hiring", category: paraphrase,
+     expected: [domain::human-resources, asset::policy-employee-data-access-policy]}
+  - {q: "anticipating how much shoppers will buy", category: paraphrase,
+     expected: [product::demand-forecast-model-output, asset::ml-model-demand-forecast-v3]}
+  - {q: "smart gadgets sending measurements", category: paraphrase,
+     expected: [asset::stream-iot-device-telemetry, asset::dataset-iot-telemetry, domain::iot]}
+  - {q: "following laws and regulators", category: paraphrase,
+     expected: [domain::compliance]}
+  - {q: "what a shopper is worth", category: paraphrase,
+     expected: [asset::business-term-customer-lifetime-value, asset::dashboard-customer-lifetime-value-overview,
+                asset::delivery-channel-clv-dashboard]}
+  - {q: "automatic restocking advice", category: paraphrase,
+     expected: [product::inventory-optimization-recommendations]}
+  - {q: "earnings digest for accountants", category: paraphrase,
+     expected: [asset::delivery-channel-daily-revenue-report]}
+  - {q: "machine telemetry from the factory", category: paraphrase, expected: [contract::iot-sensor-data-contract]}
+  - {q: "people who bought something this year", category: paraphrase,
+     expected: [asset::business-term-active-customer]}
+  - {q: "spotting abnormal machine behaviour", category: paraphrase, expected: [contract::iot-sensor-data-contract]}
+
+  # --- typos
+  - {q: "custmer data contract", category: typo, expected: [contract::customer-data-contract]}
+  - {q: "inventroy levels", category: typo,
+     expected: [asset::dataset-inventory-levels, asset::table-lakehouse-retail-curated-inventory-levels]}
+  - {q: "goverance team", category: typo, expected: [team::governance-team]}
+  - {q: "demmand forcast", category: typo,
+     expected: [product::demand-forecast-model-output, asset::ml-model-demand-forecast-v3]}
+  - {q: "finacial transactions", category: typo,
+     expected: [asset::dataset-financial-transactions, contract::financial-transactions-contract]}
+  - {q: "machin learning platform", category: typo, expected: [project::ml-platform]}
+
+# Queries that should find nothing relevant; hybrid must not invent results.
+nonsense: ["zzz qqq xyzzy", "purple elephant trampoline", "asdfgh"]

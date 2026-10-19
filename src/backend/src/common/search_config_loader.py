@@ -13,6 +13,7 @@ import yaml
 from pydantic import ValidationError
 
 from src.models.search_config import (
+    HybridConfig,
     SearchConfig,
     DefaultsConfig,
     DefaultFieldsConfig,
@@ -160,11 +161,15 @@ class SearchConfigLoader:
             tertiary_sort=self._parse_sort_field(ranking_data.get("tertiary_sort", "title_asc")),
         )
         
+        # Parse hybrid fusion (absent in older files: defaults)
+        hybrid = HybridConfig(**(raw_data.get("hybrid") or {}))
+
         return SearchConfig(
             version=raw_data.get("version", "1.0"),
             defaults=defaults,
             asset_types=asset_types,
             ranking=ranking,
+            hybrid=hybrid,
         )
     
     def _parse_field_config(self, data: dict) -> FieldConfig:
@@ -289,6 +294,7 @@ class SearchConfigLoader:
             "defaults": defaults,
             "asset_types": asset_types,
             "ranking": ranking,
+            "hybrid": config.hybrid.model_dump(mode="json"),
         }
     
     def _field_config_to_dict(self, field: FieldConfig) -> dict:
@@ -368,6 +374,10 @@ class SearchConfigLoader:
                 current.ranking.secondary_sort = self._parse_sort_field(ranking_data["secondary_sort"])
             if "tertiary_sort" in ranking_data:
                 current.ranking.tertiary_sort = self._parse_sort_field(ranking_data["tertiary_sort"])
+
+        if "hybrid" in updates:
+            # Validated as a whole, so an out-of-range value is rejected, not saved.
+            current.hybrid = HybridConfig(**{**current.hybrid.model_dump(), **(updates["hybrid"] or {})})
         
         # Save and return
         self.save(current)

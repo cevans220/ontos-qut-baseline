@@ -42,11 +42,13 @@ class SearchBackend(ABC):
         offset: int = 0,
         include_facets: bool = True,
         fields: Optional[List[str]] = None,
+        mode: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Paginated/faceted search (MCP tools)."""
+        """Paginated/faceted search (MCP tools). ``mode`` overrides the Settings
+        search mode (evaluation); backends without fusion ignore it."""
 
     @abstractmethod
-    def search_items(self, query: str, *, limit: int = 200) -> List[SearchIndexItem]:
+    def search_items(self, query: str, *, limit: int = 200, mode: Optional[str] = None) -> List[SearchIndexItem]:
         """Ranked items for the REST path; the caller applies permission filtering."""
 
     # --- index maintenance (no-op-safe) ---
@@ -67,15 +69,15 @@ class InMemoryBackend(SearchBackend):
         self._m = manager  # SearchManager (duck-typed to avoid a circular import)
 
     def search(self, query, *, type_filter=None, filters=None, allowed_features=None,
-               limit=25, offset=0, include_facets=True, fields=None) -> Dict[str, Any]:
-        # allowed_features is unused in-memory (MCP is scope-based; REST uses search_items).
+               limit=25, offset=0, include_facets=True, fields=None, mode=None) -> Dict[str, Any]:
+        # allowed_features and mode are unused in-memory (MCP is scope-based; REST uses search_items).
         return search_scoring.search_index(
             self._m.index, query, self._m.config,
             type_filter=type_filter, filters=filters,
             limit=limit, offset=offset, include_facets=include_facets, fields=fields,
         )
 
-    def search_items(self, query, *, limit=200) -> List[SearchIndexItem]:
+    def search_items(self, query, *, limit=200, mode=None) -> List[SearchIndexItem]:
         scored = search_scoring.score_and_rank(self._m.index, query, self._m.config)
         return [s.item for s in scored[:limit]]
 
@@ -199,22 +201,62 @@ class PostgresBackend(SearchBackend):
     def _config(self):
         return self._config_provider() if self._config_provider else None
 
+    def resolve_mode(self, config: Any, mode: Optional[str] = None) -> str:
+        """``lexical`` | ``semantic`` | ``hybrid`` for this query. ``auto`` (the
+        default) is hybrid when semantic search is on; ``semantic`` without it
+        falls back to lexical. Explicit ``hybrid`` without embeddings still fuses
+        BM25 on the lakebase engine."""
+        requested = (mode or (config.hybrid.mode.value if config is not None else "auto")).lower()
+        if requested == "auto":
+            return "hybrid" if self.semantic_enabled else "lexical"
+        if requested == "semantic" and not self.semantic_enabled:
+            return "lexical"
+        return requested if requested in ("lexical", "semantic", "hybrid") else "lexical"
+
+    def _query_vector(self, query: str) -> Optional[List[float]]:
+        from src.controller.search_scoring import is_list_query, tokenize
+        if self._query_vectors is None or is_list_query(query) or not tokenize(query or ""):
+            return None
+        try:
+            return self._query_vectors.get(query)
+        except Exception as e:  # endpoint down: answer from the keyword lists
+            logger.warning(f"Query embedding failed; searching without the semantic list: {e}")
+            return None
+
     def search(self, query, *, type_filter=None, filters=None, allowed_features=None,
-               limit=25, offset=0, include_facets=True, fields=None) -> Dict[str, Any]:
+               limit=25, offset=0, include_facets=True, fields=None, mode=None) -> Dict[str, Any]:
         from src.repositories import search_repository
+        config = self._config()
+        resolved = self.resolve_mode(config, mode)
+        qvec = self._query_vector(query) if resolved != "lexical" else None
         with self._session_factory() as db:
-            return search_repository.search(
-                db, query, type_filter=type_filter, filters=filters,
+            if resolved == "lexical":
+                return search_repository.search(
+                    db, query, type_filter=type_filter, filters=filters,
+                    allowed_features=allowed_features, limit=limit, offset=offset,
+                    include_facets=include_facets, fields=fields, config=config,
+                    engine=self.engine, trgm_threshold=self._trgm_threshold,
+                )
+            return search_repository.hybrid_search(
+                db, query, query_vector=qvec, mode=resolved, type_filter=type_filter, filters=filters,
                 allowed_features=allowed_features, limit=limit, offset=offset,
-                include_facets=include_facets, fields=fields, config=self._config(),
+                include_facets=include_facets, fields=fields, config=config,
                 engine=self.engine, trgm_threshold=self._trgm_threshold,
             )
 
-    def search_items(self, query, *, limit=200) -> List[SearchIndexItem]:
+    def search_items(self, query, *, limit=200, mode=None) -> List[SearchIndexItem]:
         from src.repositories import search_repository
+        config = self._config()
+        resolved = self.resolve_mode(config, mode)
+        qvec = self._query_vector(query) if resolved != "lexical" else None
         with self._session_factory() as db:
-            return search_repository.search_index_items(
-                db, query, limit=limit, config=self._config(),
+            if resolved == "lexical":
+                return search_repository.search_index_items(
+                    db, query, limit=limit, config=config,
+                    engine=self.engine, trgm_threshold=self._trgm_threshold,
+                )
+            return search_repository.hybrid_search_items(
+                db, query, query_vector=qvec, mode=resolved, limit=limit, config=config,
                 engine=self.engine, trgm_threshold=self._trgm_threshold,
             )
 

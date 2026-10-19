@@ -962,6 +962,9 @@ async def update_search_config(
                 "secondary_sort": config_update.ranking.secondary_sort.value,
                 "tertiary_sort": config_update.ranking.tertiary_sort.value,
             }
+
+        if config_update.hybrid is not None:
+            updates["hybrid"] = config_update.hybrid.model_dump(mode="json")
         
         # Apply updates
         updated_config = loader.update(updates)

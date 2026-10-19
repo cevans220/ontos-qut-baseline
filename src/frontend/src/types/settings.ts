@@ -141,15 +141,30 @@ export interface RankingConfig {
     tertiary_sort: SortField;
 }
 
+export type SearchMode = 'auto' | 'lexical' | 'semantic' | 'hybrid';
+
+/** Keyword + semantic fusion (Reciprocal Rank Fusion) on the Postgres backend. */
+export interface HybridConfig {
+    mode: SearchMode;
+    lexical_weight: number;
+    bm25_weight: number;
+    vector_weight: number;
+    rrf_k: number;
+    candidate_limit: number;
+    min_vector_similarity: number;
+}
+
 export interface SearchConfig {
     version: string;
     defaults: DefaultsConfig;
     asset_types: Record<string, AssetTypeConfig>;
     ranking: RankingConfig;
+    hybrid: HybridConfig;
 }
 
 export interface SearchConfigUpdate {
     defaults?: DefaultsConfig;
     asset_types?: Record<string, AssetTypeConfig>;
     ranking?: RankingConfig;
+    hybrid?: HybridConfig;
 }

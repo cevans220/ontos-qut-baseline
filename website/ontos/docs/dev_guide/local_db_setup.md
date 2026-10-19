@@ -113,7 +113,23 @@ To roll back, set `SEARCH_BACKEND=memory` and restart: the in-memory index is re
   - **Background embedding:** documents are embedded off the request path. Writes only mark a row as changed, and a background worker embeds rows whose text changed. A row whose text hash is unchanged is just marked current, with no endpoint call. Backfill of an existing catalog is the same loop, so it resumes after a restart. Replicas share the work.
   - **Failures:** endpoint errors leave rows pending and back off. Search keeps answering lexically meanwhile.
   - **Changing the embedding size:** a database whose vector column has a different size turns semantic search off, with a warning, instead of mixing sizes.
-  - **Ranking:** like BM25, the semantic ranking is an extra ranked list for hybrid fusion. It doesn't change keyword results yet.
+  - **Ranking:** the semantic ranking is one of the lists hybrid search fuses (below).
+
+**Hybrid search** fuses the ranked lists with Reciprocal Rank Fusion: each document scores `sum(weight / (rrf_k + rank))` over the lists it appears in.
+  - **Lists:** the Settings-driven keyword ranking (every match), the semantic list (the `candidate_limit` nearest documents with at least `min_vector_similarity`), and BM25 on the `lakebase` engine.
+  - **Defaults** come from the evaluation below. Keyword weight 0.7 and `rrf_k` 20 sit in the middle of a flat optimum (keyword weight 0.3–0.7, `rrf_k` 5–30).
+  - **BM25 is off** (`bm25_weight: 0`). On the evaluation catalog, BM25 alone scored below the Settings ranking, and any weight above 0 lowered hybrid recall. Its corpus statistics are weak on short texts, so try it on large catalogs with long descriptions and check with the evaluation.
+  - **Settings:** Settings → Search → Hybrid, or the `hybrid` block of `search_config.yaml`. They apply on the next search.
+  - **Mode:** `auto` (default) is hybrid when semantic search is on, keyword-only otherwise. `lexical`, `semantic` and `hybrid` force one.
+  - **Results:** `total_count` and facets cover every keyword match plus the documents only the other lists found. Pagination is exact. `relevance_score` is the fused score. List queries (`*`, empty) and `tag:` queries are unchanged.
+  - **Similarity floor:** `min_vector_similarity` depends on the embedding model. 0.55 is calibrated for `databricks-gte-large-en`, so that nonsense queries return nothing. Re-check it with the evaluation below when changing models.
+
+**Search evaluation** (`backend/src/tests/eval`): 38 labeled queries over the retail demo catalog, in four kinds: exact names, plain language, zero-overlap paraphrases and typos. `test_search_hybrid_eval_pg.py` reports recall@5 and MRR per mode and category. The embeddings are real `databricks-gte-large-en` vectors recorded in `search_eval_embeddings.json`, so CI needs no endpoint. After changing the catalog, the queries or the embedding text, re-record them:
+
+```bash
+cd src/backend
+hatch -e dev run python -m src.tests.eval.search_eval record --profile <databricks-profile>
+```
 
 To run the Postgres search tests against your local server:
 

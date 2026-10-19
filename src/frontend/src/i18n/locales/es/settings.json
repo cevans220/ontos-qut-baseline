@@ -1004,7 +1004,8 @@
     "tabs": {
       "defaultFields": "Campos predeterminados",
       "assetTypes": "Tipos de activo",
-      "ranking": "Clasificación"
+      "ranking": "Clasificación",
+      "hybrid": "Híbrida"
     },
     "defaults": {
       "description": "Esta configuración se aplica a todos los tipos de activo de forma predeterminada. Cada tipo de activo puede anular esta configuración."
@@ -1061,6 +1062,33 @@
       "dataAssetReview": "Revisiones de activos",
       "tag": "Etiquetas",
       "dataDomain": "Dominios de datos"
+    },
+    "hybrid": {
+      "description": "Combina la búsqueda por palabras clave y la semántica (embeddings) con Reciprocal Rank Fusion. Se aplica en la siguiente búsqueda; requiere el backend de búsqueda Postgres, y la búsqueda semántica, un endpoint de embeddings.",
+      "mode": "Modo de búsqueda",
+      "modeHelp": "Auto usa la búsqueda híbrida cuando la semántica está disponible y, si no, la de palabras clave.",
+      "modes": {
+        "auto": "Auto",
+        "hybrid": "Híbrida (palabras clave + semántica)",
+        "lexical": "Solo palabras clave",
+        "semantic": "Solo semántica"
+      },
+      "fields": {
+        "lexical_weight": "Peso de palabras clave",
+        "bm25_weight": "Peso de BM25",
+        "vector_weight": "Peso semántico",
+        "rrf_k": "RRF k",
+        "candidate_limit": "Candidatos por lista",
+        "min_vector_similarity": "Similitud semántica mínima"
+      },
+      "help": {
+        "lexical_weight": "Peso del ranking por palabras clave configurado en las otras pestañas.",
+        "bm25_weight": "Peso del ranking BM25 (solo Lakebase Search).",
+        "vector_weight": "Peso del ranking semántico. 0 lo desactiva.",
+        "rrf_k": "Valores mayores reducen la ventaja de los primeros resultados.",
+        "candidate_limit": "Resultados tomados de cada uno de los rankings BM25 y semántico.",
+        "min_vector_similarity": "Similitud coseno que necesita un resultado para entrar solo por la búsqueda semántica. Depende del modelo de embeddings."
+      }
     }
   },
   "ontologyLibrary": {
