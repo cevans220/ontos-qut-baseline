@@ -62,6 +62,7 @@ from src.common.entity_kind import classify_import_entity, describe_import_entit
 from src.common.lifecycle_status import (
     CONTRACT_STATUSES,
     check_status_unchanged,
+    import_status,
     normalize_new_status,
 )
 from src.models.data_contracts import (
@@ -3362,6 +3363,11 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
                     index += 1
                     continue
                 try:
+                    # A status Ontos doesn't have is imported as draft, with a note
+                    status_value, status_note = import_status(
+                        entity.get('status'), CONTRACT_STATUSES
+                    )
+                    entity = {**entity, 'status': status_value}
                     created = self.create_from_upload(
                         db=db, parsed_odcs=entity, current_user=current_user,
                         create_missing_domains=create_missing_domains,

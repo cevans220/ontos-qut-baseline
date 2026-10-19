@@ -92,6 +92,7 @@ from src.common.entity_kind import classify_import_entity, describe_import_entit
 from src.common.lifecycle_status import (
     PRODUCT_STATUSES,
     check_status_unchanged,
+    import_status,
     normalize_new_status,
 )
 from src.models.users import UserInfo
@@ -1888,6 +1889,11 @@ class DataProductsManager(DeliveryMixin, SearchableAsset):
                 # old→new map keyed on canon_source and rewrite port.contractId before
                 # calling create_product (#853 review item 4).
                 try:
+                    # A status Ontos doesn't have is imported as draft, with a note
+                    status_value, status_note = import_status(
+                        product_data.get('status'), PRODUCT_STATUSES
+                    )
+                    product_data = {**product_data, 'status': status_value}
                     created = self.create_product(
                         product_data, user=user, preserve_source_id=True,
                         create_missing_domains=create_missing_domains,
@@ -1896,6 +1902,7 @@ class DataProductsManager(DeliveryMixin, SearchableAsset):
                     result.add(ImportItemResult(
                         index=index, source_file=filename, source_id=source_id,
                         entity_id=created.id, name=created.name, status="created",
+                        **(status_note or {}),
                     ))
                 except Exception as e:
                     # Log full detail (may carry SQL/internal text); keep the

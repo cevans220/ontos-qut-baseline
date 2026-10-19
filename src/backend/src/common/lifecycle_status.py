@@ -7,7 +7,7 @@ status, and a new entity starts in one of the lifecycle statuses.
 ``certified`` is not a status: certification is ``certification_level``, set
 by the certify action.
 """
-from typing import Iterable, Optional
+from typing import Any, Dict, Iterable, Optional, Tuple
 
 from src.common.api_errors import CodedValueError
 from src.models.lifecycle import DATA_CONTRACT_TRANSITIONS, DATA_PRODUCT_TRANSITIONS
@@ -88,3 +88,35 @@ def normalize_new_status(status: Optional[str], allowed: Iterable[str], default:
     if normalized not in allowed:
         raise InvalidStatusError(normalized, allowed)
     return normalized
+
+
+IMPORTED_STATUS_MAPPED = 'imported_status_mapped'
+
+
+def import_status(
+    status: Optional[str], allowed: Iterable[str], default: str = 'draft',
+) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """The status an imported entity starts in, and a note when it isn't the file's.
+
+    ODCS and ODPS define ``status`` as free text, so a valid document from
+    another tool can carry a status Ontos doesn't have (``production``,
+    ``in development``). Such a status is imported as ``default`` and the
+    returned note (``code``, ``params``, English ``message``) says so.
+    ``certified`` is still refused: certification is ``certification_level``.
+    """
+    allowed = tuple(allowed)
+    normalized = _normalized(status)
+    if normalized is None:
+        return default, None
+    if normalized == 'certified':
+        raise CertifiedIsNotAStatusError()
+    if normalized in allowed:
+        return normalized, None
+    original = str(getattr(status, 'value', status)).strip()
+    return default, {
+        'code': IMPORTED_STATUS_MAPPED,
+        'params': {'status': original, 'mappedTo': default},
+        'message': (
+            f"'{original}' is not a lifecycle status, so it was imported as '{default}'."
+        ),
+    }
