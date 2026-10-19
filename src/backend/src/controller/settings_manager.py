@@ -1303,8 +1303,18 @@ class SettingsManager:
             'ui_favicon_url': self._settings.UI_FAVICON_URL,
         }
 
+    # Settings the Git service reads: its remote and its export location.
+    _GIT_SETTING_ATTRS = (
+        'GIT_REPO_URL', 'GIT_BRANCH', 'GIT_USERNAME', 'GIT_PASSWORD',
+        'DATABRICKS_CATALOG', 'DATABRICKS_SCHEMA', 'DATABRICKS_VOLUME',
+    )
+
+    def _git_setting_values(self) -> tuple:
+        return tuple(getattr(self._settings, attr, None) for attr in self._GIT_SETTING_ATTRS)
+
     def update_settings(self, settings: dict) -> Settings:
         """Update settings"""
+        git_values_before = self._git_setting_values()
         # Persist configured cluster ID string; do not scan clusters
         desired_cluster_id: Optional[str] = settings.get('job_cluster_id')
         desired_enabled: List[str] = settings.get('enabled_jobs', []) or []
@@ -1670,12 +1680,10 @@ class SettingsManager:
             self._settings.UI_FAVICON_URL = value
             logger.info(f"Updated UI_FAVICON_URL")
 
-        # Reinitialize Git service if any Git settings were changed
-        # The export location comes from the volume settings, so they count too
-        git_settings_changed = any(key in settings for key in [
-            'git_repo_url', 'git_branch', 'git_username', 'git_password',
-            'databricks_catalog', 'databricks_schema', 'databricks_volume',
-        ])
+        # Reinitialize the Git service only when a value it reads changed. The
+        # export location comes from the volume settings, so they count too; the
+        # General settings form always sends them, so presence alone isn't a change.
+        git_settings_changed = self._git_setting_values() != git_values_before
         if git_settings_changed:
             try:
                 from src.common.git import reinitialize_git_service

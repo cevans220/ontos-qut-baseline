@@ -57,8 +57,8 @@ def remote(tmp_path: Path) -> str:
     (seed / 'README.md').write_text('# gov\n')
     run('git', 'add', 'README.md', cwd=seed)
     run('git', '-c', 'user.email=t@example.com', '-c', 'user.name=t',
-        '-c', 'core.hooksPath=/dev/null', 'commit', '-m', 'init', cwd=seed)
-    run('git', '-c', 'core.hooksPath=/dev/null', 'push', str(bare), 'main', cwd=seed)
+        'commit', '-m', 'init', cwd=seed)
+    run('git', 'push', str(bare), 'main', cwd=seed)
     return f'file://{bare}'
 
 
@@ -172,8 +172,127 @@ def test_a_failed_volume_write_keeps_the_export_and_shows_a_warning(tmp_path, no
     status = service.get_status().to_dict()
     assert status['volume_sync_error_code'] == GIT_VOLUME_SYNC_FAILED
     assert status['volume_sync_error_params'] == {
-        'path': '/Volumes/main/gov/exports/git-export/orders.yaml'
+        'path': '/Volumes/main/gov/exports/git-export/orders.yaml',
+        'paths': ['/Volumes/main/gov/exports/git-export/orders.yaml'],
+        'count': 1,
     }
+
+
+def _failing_for(name):
+    """A workspace client whose volume writes fail only for one file name."""
+    client = MagicMock()
+
+    def upload(path, contents, overwrite=False):
+        if path.endswith('/' + name):
+            raise PermissionError('WRITE VOLUME missing')
+
+    client.files.upload.side_effect = upload
+    return client
+
+
+def test_a_later_successful_write_keeps_the_warning_of_a_file_still_missing(
+    tmp_path, not_mounted, remote,
+):
+    # Review of #75: a success for another file used to clear the warning while
+    # roles.yaml was never written to the volume.
+    service = GitService(_settings(tmp_path, 'exports', remote))
+    service.clone()
+    client = _failing_for('roles.yaml')
+
+    with patch('src.common.workspace_client.get_workspace_client', return_value=client):
+        assert service.save_yaml('roles.yaml', {'name': 'admins'}, subdir='config')
+        assert service.save_yaml('tags.yaml', {'name': 'pii'}, subdir='config')
+
+    params = service.get_status().to_dict()['volume_sync_error_params']
+    assert params['paths'] == ['/Volumes/main/gov/exports/git-export/config/roles.yaml']
+    assert params['count'] == 1
+
+
+def test_the_warning_clears_once_the_missing_file_is_written(tmp_path, not_mounted, remote):
+    service = GitService(_settings(tmp_path, 'exports', remote))
+    service.clone()
+
+    with patch('src.common.workspace_client.get_workspace_client', return_value=_failing_for('roles.yaml')):
+        service.save_yaml('roles.yaml', {'name': 'admins'}, subdir='config')
+    with patch('src.common.workspace_client.get_workspace_client', return_value=MagicMock()):
+        service.save_yaml('roles.yaml', {'name': 'admins'}, subdir='config')
+
+    assert service.get_status().volume_sync_error_code is None
+
+
+def test_deleting_a_file_whose_write_failed_clears_its_warning(tmp_path, not_mounted, remote):
+    service = GitService(_settings(tmp_path, 'exports', remote))
+    service.clone()
+
+    with patch('src.common.workspace_client.get_workspace_client', return_value=_failing_for('roles.yaml')):
+        service.save_yaml('roles.yaml', {'name': 'admins'}, subdir='config')
+        assert service.delete_file('roles.yaml', subdir='config')
+
+    assert service.get_status().volume_sync_error_code is None
+
+
+def test_the_warning_lists_a_few_paths_and_counts_all(tmp_path, not_mounted, remote):
+    service = GitService(_settings(tmp_path, 'exports', remote))
+    service.clone()
+    client = MagicMock()
+    client.files.upload.side_effect = PermissionError('WRITE VOLUME missing')
+
+    with patch('src.common.workspace_client.get_workspace_client', return_value=client):
+        for i in range(7):
+            service.save_yaml(f'p{i}.yaml', {'name': f'p{i}'})
+
+    params = service.get_status().to_dict()['volume_sync_error_params']
+    assert params['count'] == 7
+    assert params['path'].endswith('p4.yaml (+2)')
+
+
+def test_reinitializing_at_the_same_location_keeps_the_pending_writes(tmp_path, not_mounted, remote):
+    settings = _settings(tmp_path, 'exports', remote)
+    service = GitService(settings)
+    service.clone()
+    with patch('src.common.workspace_client.get_workspace_client', return_value=_failing_for('roles.yaml')):
+        service.save_yaml('roles.yaml', {'name': 'admins'}, subdir='config')
+
+    service.reinitialize(settings)
+    assert service.get_status().volume_sync_error_code == GIT_VOLUME_SYNC_FAILED
+
+    service.reinitialize(_settings(tmp_path, 'other', remote))
+    assert service.get_status().volume_sync_error_code is None
+
+
+def _manager_with(settings):
+    from src.controller.settings_manager import SettingsManager
+
+    manager = SettingsManager.__new__(SettingsManager)
+    manager._settings = settings
+    manager._db = MagicMock()
+    manager._jobs = None
+    manager._client = None
+    manager._available_jobs = []
+    manager._installations = {}
+    return manager
+
+
+@pytest.mark.parametrize('update, reinitialized', [
+    # The General settings form always sends the volume settings
+    ({'databricks_catalog': 'main', 'databricks_schema': 'gov', 'databricks_volume': 'exports'}, False),
+    ({'databricks_catalog': 'main', 'databricks_schema': 'gov', 'databricks_volume': 'other'}, True),
+    ({'git_branch': 'release'}, True),
+])
+def test_settings_reinitialize_git_only_when_its_values_change(tmp_path, update, reinitialized):
+    from src.controller import settings_manager as settings_manager_module
+
+    settings = MagicMock()
+    for key, value in vars(_settings(tmp_path, 'exports')).items():
+        setattr(settings, key, value)
+    manager = _manager_with(settings)
+    with patch.object(settings_manager_module, 'app_settings_repo'), \
+            patch.object(settings_manager_module, 'workflow_installation_repo') as installs, \
+            patch('src.common.git.reinitialize_git_service') as reinit:
+        installs.get_all_installed.return_value = []
+        manager.update_settings(dict(update))
+
+    assert reinit.called is reinitialized
 
 
 def test_a_mounted_or_local_working_copy_is_not_copied(tmp_path, remote):

@@ -185,7 +185,9 @@ class GitService:
         self._error_message: Optional[str] = None
         self._error_code: Optional[str] = None
         self._error_params: Optional[Dict[str, Any]] = None
-        self._volume_sync_error: Optional[Dict[str, Any]] = None
+        # Volume paths whose last write or delete failed, with the error. A path
+        # leaves the set only when that same path is written or deleted.
+        self._volume_sync_failures: Dict[str, str] = {}
 
         # Determine repo directory based on volume configuration
         self._repo_dir: Optional[Path] = None
@@ -269,14 +271,18 @@ class GitService:
         Args:
             settings: Updated settings. If None, will reload from global settings.
         """
+        previous_location = (self._repo_dir, self._volume_export_path)
         self._settings = settings or get_settings()
         self._repo = None
         self._clone_status = GitCloneStatus.NOT_CONFIGURED
         self._set_error(None)
-        self._volume_sync_error = None
         self._repo_dir = None
         self._volume_export_path = None
         self._init_paths()
+        # Pending volume writes still apply while the working copy and the
+        # volume stay where they were.
+        if (self._repo_dir, self._volume_export_path) != previous_location:
+            self._volume_sync_failures = {}
         logger.info(f"Git service reinitialized (status: {self._clone_status.value}, repo_dir: {self._repo_dir})")
 
     @property
@@ -342,7 +348,7 @@ class GitService:
             )
         
         self._clone_status = GitCloneStatus.CLONING
-        self._volume_sync_error = None
+        self._volume_sync_failures = {}
         
         try:
             # Create parent directory if needed
@@ -510,7 +516,7 @@ class GitService:
             except Exception:
                 pass
             
-            sync_error = self._volume_sync_error or {}
+            sync_error = self._volume_sync_error() or {}
             return GitStatus(
                 clone_status=GitCloneStatus.CLONED,
                 repo_url=self._settings.GIT_REPO_URL,
@@ -700,9 +706,23 @@ class GitService:
         # The export is in the working copy (and reaches the remote on push);
         # only the volume copy is missing, so this is a warning, not a failure.
         logger.warning(f"Could not write {volume_path} to the volume: {error}")
-        self._volume_sync_error = {
+        self._volume_sync_failures[volume_path] = type(error).__name__
+
+    # Paths listed in the warning; the rest are counted.
+    MAX_LISTED_SYNC_FAILURES = 5
+
+    def _volume_sync_error(self) -> Optional[Dict[str, Any]]:
+        """The warning for volume writes still pending, or None when all landed."""
+        if not self._volume_sync_failures:
+            return None
+        paths = list(self._volume_sync_failures)
+        listed = ', '.join(paths[:self.MAX_LISTED_SYNC_FAILURES])
+        hidden = len(paths) - self.MAX_LISTED_SYNC_FAILURES
+        if hidden > 0:
+            listed = f"{listed} (+{hidden})"
+        return {
             'code': GIT_VOLUME_SYNC_FAILED,
-            'params': {'path': volume_path},
+            'params': {'path': listed, 'paths': paths, 'count': len(paths)},
         }
 
     def _copy_to_volume(self, file_path: Path) -> None:
@@ -717,7 +737,7 @@ class GitService:
             get_workspace_client().files.upload(
                 volume_path, BytesIO(file_path.read_bytes()), overwrite=True
             )
-            self._volume_sync_error = None
+            self._volume_sync_failures.pop(volume_path, None)
         except Exception as e:
             self._record_volume_sync_failure(volume_path, e)
 
@@ -735,7 +755,7 @@ class GitService:
                 get_workspace_client().files.delete(volume_path)
             except NotFound:
                 pass
-            self._volume_sync_error = None
+            self._volume_sync_failures.pop(volume_path, None)
         except Exception as e:
             self._record_volume_sync_failure(volume_path, e)
 
