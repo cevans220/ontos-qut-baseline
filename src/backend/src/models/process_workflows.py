@@ -154,18 +154,34 @@ class StepExecutionStatus(str, Enum):
 
 # --- Trigger Configuration ---
 
+class GateErrorMode(str, Enum):
+    """What a ``before_status_change`` gate does when evaluating it raises."""
+    FAIL_OPEN = "fail_open"  # The transition proceeds (the error is logged and audited)
+    FAIL_CLOSED = "fail_closed"  # The transition is refused
+
+
 class WorkflowTrigger(BaseModel):
     """Trigger configuration for a workflow."""
     type: TriggerType = Field(..., description="Type of trigger")
     entity_types: List[EntityType] = Field(default_factory=list, description="Entity types that trigger this workflow")
-    
+
     # For on_status_change
     from_status: Optional[str] = Field(None, description="Status to transition from (for status change triggers)")
     to_status: Optional[str] = Field(None, description="Status to transition to (for status change triggers)")
-    
+
     # For scheduled
     schedule: Optional[str] = Field(None, description="Cron expression for scheduled triggers")
-    
+
+    # For before_status_change
+    on_error: GateErrorMode = Field(
+        GateErrorMode.FAIL_OPEN,
+        description=(
+            "before_status_change only: what happens when evaluating this gate raises. "
+            "fail_open lets the transition proceed, fail_closed refuses it. "
+            "A gate that fails normally blocks in both modes."
+        ),
+    )
+
     class Config:
         json_schema_extra = {
             "example": {

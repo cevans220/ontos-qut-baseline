@@ -35,7 +35,8 @@ function reasonText(reason: BlockedReason, t: TFunction): string {
  * an admin wrote (a Fail step's message) is shown as written. An update that
  * tries to change the status (`status_change_requires_transition`) and a status
  * that isn't a lifecycle one (`certified_is_not_a_status`, `invalid_status`)
- * are translated too. Any other error is the English `error` the API sent.
+ * are translated too, and so is a `fail_closed` gate that couldn't be evaluated
+ * (`status_change_gate_error`). Any other error is the English `error` the API sent.
  *
  * `statusNamespace` is the namespace whose `status.<status>` keys label the
  * entity's statuses (`data-products`, `data-contracts`).
@@ -65,6 +66,16 @@ export function statusChangeErrorText(
     return t('workflow-gates:invalidStatus', {
       status: String(params.status ?? ''),
       allowed: allowed.map(statusLabel).join(', '),
+      defaultValue: error,
+    });
+  }
+  // A fail_closed gate that couldn't be evaluated (#1103)
+  if (response.errorCode === 'status_change_gate_error' && params) {
+    const workflows = Array.isArray(params.workflows) ? params.workflows.map(String) : [];
+    return t(workflows.length ? 'workflow-gates:gateError' : 'workflow-gates:gateErrorUnnamed', {
+      fromStatus: statusLabel(params.fromStatus),
+      toStatus: statusLabel(params.toStatus),
+      workflows: workflows.join(', '),
       defaultValue: error,
     });
   }

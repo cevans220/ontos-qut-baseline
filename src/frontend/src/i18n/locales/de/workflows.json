@@ -104,7 +104,9 @@
       "fromStatusPlaceholder": "z. B. draft",
       "toStatus": "Zu Status",
       "toStatusPlaceholder": "z. B. active",
-      "descriptionPlaceholder": "Workflow-Beschreibung"
+      "descriptionPlaceholder": "Workflow-Beschreibung",
+      "failClosed": "Übergang ablehnen, wenn dieses Gate nicht ausgewertet werden kann",
+      "failClosedHint": "Fail closed: Wenn bei der Auswertung dieses Gates ein Fehler auftritt (kein normales Fehlschlagen), wird die Statusänderung abgelehnt. Aus (fail open) wird die Änderung durchgeführt und der Fehler protokolliert und auditiert."
     },
     "stepConfig": {
       "title": "Schritt-Konfiguration",

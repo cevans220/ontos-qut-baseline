@@ -104,7 +104,9 @@
       "fromStatusPlaceholder": "e.g. draft",
       "toStatus": "To Status",
       "toStatusPlaceholder": "e.g. active",
-      "descriptionPlaceholder": "Workflow description"
+      "descriptionPlaceholder": "Workflow description",
+      "failClosed": "Refuse the transition if this gate can't be evaluated",
+      "failClosedHint": "Fail closed: when evaluating this gate raises an error (not a normal failure), the status change is refused. Off (fail open), the change proceeds and the error is logged and audited."
     },
     "stepConfig": {
       "title": "Step Configuration",

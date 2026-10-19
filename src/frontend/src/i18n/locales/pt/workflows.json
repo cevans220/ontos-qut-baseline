@@ -104,7 +104,9 @@
       "fromStatusPlaceholder": "ex.: draft",
       "toStatus": "Status de destino",
       "toStatusPlaceholder": "ex.: active",
-      "descriptionPlaceholder": "Descrição do fluxo de trabalho"
+      "descriptionPlaceholder": "Descrição do fluxo de trabalho",
+      "failClosed": "Recusar a transição se este gate não puder ser avaliado",
+      "failClosedHint": "Fail closed: quando a avaliação deste gate gera um erro (e não uma falha normal), a mudança de status é recusada. Desligado (fail open), a mudança acontece e o erro é registrado no log e na auditoria."
     },
     "stepConfig": {
       "title": "Configuração da etapa",

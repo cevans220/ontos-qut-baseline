@@ -4155,26 +4155,19 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
                 raise ValueError(f"Invalid status transition from {current_status} to {new_status}")
         
         # Run before_status_change workflows (gating)
-        try:
-            from src.common.workflow_triggers import get_trigger_registry
-            from src.models.process_workflows import EntityType as WFEntityType
-            trigger_registry = get_trigger_registry(db)
-            gate_passed, gate_executions = trigger_registry.before_status_change(
-                entity_type=WFEntityType.DATA_CONTRACT,
-                entity_id=contract_id,
-                from_status=current_status,
-                to_status=new_status,
-                entity_name=contract.name,
-                entity_data={"name": contract.name, "status": current_status},
-                user_email=current_user,
-            )
-            if not gate_passed:
-                from src.common.workflow_triggers import StatusChangeBlockedError
-                raise StatusChangeBlockedError(current_status, new_status, gate_executions)
-        except ValueError:
-            raise
-        except Exception as e:
-            logger.warning(f"before_status_change trigger error (non-fatal): {e}")
+        # (a gate that errors refuses the transition when it is fail_closed, #1103)
+        from src.common.workflow_triggers import run_status_gates
+        from src.models.process_workflows import EntityType as WFEntityType
+        run_status_gates(
+            db,
+            entity_type=WFEntityType.DATA_CONTRACT,
+            entity_id=contract_id,
+            from_status=current_status,
+            to_status=new_status,
+            entity_name=contract.name,
+            entity_data={"name": contract.name, "status": current_status},
+            user_email=current_user,
+        )
         
         try:
             updated = data_contract_repo.update(

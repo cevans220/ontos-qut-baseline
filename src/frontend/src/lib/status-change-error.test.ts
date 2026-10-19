@@ -98,6 +98,33 @@ describe('statusChangeErrorText', () => {
       errorParams: { status: 'archived', allowed: ['draft', 'active'] },
     }, i18n.t, 'data-contracts')).toBe('archived não é um status do ciclo de vida. Use um destes: Rascunho, Ativo.');
   });
+
+  it('translates a fail_closed gate that could not be evaluated (#1103)', async () => {
+    const gateError = {
+      error: "Status transition from 'draft' to 'proposed' refused: a workflow gate "
+        + '(Enforcement Gate) could not be evaluated. Ask an administrator to check the workflow.',
+      errorCode: 'status_change_gate_error',
+      errorParams: { fromStatus: 'draft', toStatus: 'proposed', workflows: ['Enforcement Gate'] },
+    };
+    expect(statusChangeErrorText(gateError, i18n.t, 'data-products')).toBe(
+      'The status change from Draft to Proposed was refused: the workflow gate Enforcement Gate '
+      + 'could not be evaluated. Ask an administrator to check the workflow.',
+    );
+
+    await i18n.changeLanguage('pt');
+    expect(statusChangeErrorText(gateError, i18n.t, 'data-products')).toBe(
+      'A mudança de status de Rascunho para Proposto foi recusada: não foi possível avaliar o gate '
+      + 'de workflow Enforcement Gate. Peça a um administrador para verificar o workflow.',
+    );
+    // The gates couldn't be listed: no names
+    expect(statusChangeErrorText(
+      { ...gateError, errorParams: { fromStatus: 'draft', toStatus: 'proposed', workflows: [] } },
+      i18n.t, 'data-contracts',
+    )).toBe(
+      'A mudança de status de Rascunho para Proposto foi recusada: não foi possível avaliar um gate '
+      + 'de workflow. Peça a um administrador para verificar o workflow.',
+    );
+  });
 });
 
 describe('apiErrorOf', () => {

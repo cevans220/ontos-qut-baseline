@@ -126,6 +126,7 @@ import type {
   StepType,
   TriggerType,
   EntityType,
+  GateErrorMode,
   StepTypeSchema,
   CompliancePolicyRef,
   HttpConnectionRef,
@@ -850,6 +851,7 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
   const [entityTypes, setEntityTypes] = useState<EntityType[]>(['table']);
   const [triggerFromStatus, setTriggerFromStatus] = useState('');
   const [triggerToStatus, setTriggerToStatus] = useState('');
+  const [triggerOnError, setTriggerOnError] = useState<GateErrorMode>('fail_open');
   const [isActive, setIsActive] = useState(true);
   const [steps, setSteps] = useState<WorkflowStepCreate[]>([]);
   const [workflowType, setWorkflowType] = useState<WorkflowTypeValue | null>(isNew ? (initialType || null) : null);
@@ -1100,6 +1102,7 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
             setEntityTypes(response.data.trigger.entity_types);
             setTriggerFromStatus(response.data.trigger.from_status || '');
             setTriggerToStatus(response.data.trigger.to_status || '');
+            setTriggerOnError(response.data.trigger.on_error || 'fail_open');
             setIsActive(response.data.is_active);
             setWorkflowType((response.data.workflow_type as WorkflowTypeValue) || 'process');
             const loadedSteps = response.data.steps.map(s => ({
@@ -1489,6 +1492,7 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
           entity_types: entityTypes,
           ...(triggerFromStatus ? { from_status: triggerFromStatus } : {}),
           ...(triggerToStatus ? { to_status: triggerToStatus } : {}),
+          ...(triggerType === 'before_status_change' ? { on_error: triggerOnError } : {}),
         },
         workflow_type: workflowType || 'process',
         is_active: isActive,
@@ -1814,6 +1818,23 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
                           placeholder={t('workflows:designer.triggerConfig.toStatusPlaceholder')}
                         />
                       </div>
+                    </div>
+                  )}
+                  {triggerType === 'before_status_change' && (
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="trigger-on-error">
+                          {t('workflows:designer.triggerConfig.failClosed')}
+                        </Label>
+                        <p className="text-xs text-muted-foreground">
+                          {t('workflows:designer.triggerConfig.failClosedHint')}
+                        </p>
+                      </div>
+                      <Switch
+                        id="trigger-on-error"
+                        checked={triggerOnError === 'fail_closed'}
+                        onCheckedChange={(on) => setTriggerOnError(on ? 'fail_closed' : 'fail_open')}
+                      />
                     </div>
                   )}
 

@@ -104,7 +104,9 @@
       "fromStatusPlaceholder": "par ex. brouillon",
       "toStatus": "Vers le statut",
       "toStatusPlaceholder": "par ex. actif",
-      "descriptionPlaceholder": "Description du workflow"
+      "descriptionPlaceholder": "Description du workflow",
+      "failClosed": "Refuser la transition si cette porte ne peut pas être évaluée",
+      "failClosedHint": "Fail closed : si l'évaluation de cette porte lève une erreur (et non un échec normal), le changement de statut est refusé. Désactivé (fail open), le changement a lieu et l'erreur est journalisée et auditée."
     },
     "stepConfig": {
       "title": "Configuration de l'étape",

@@ -23,6 +23,7 @@ from src.models.process_workflows import (
     WorkflowScope,
     StepType,
     TriggerType,
+    GateErrorMode,
     EntityType,
     ScopeType,
     WorkflowType,
@@ -151,6 +152,7 @@ class WorkflowsManager:
                     from_status=trigger_data.get('from_status'),
                     to_status=trigger_data.get('to_status'),
                     schedule=trigger_data.get('schedule'),
+                    on_error=self._safe_gate_error_mode(trigger_data.get('on_error')),
                 )
                 
                 # Parse scope
@@ -343,6 +345,7 @@ class WorkflowsManager:
             from_status=trigger_config.get('from_status'),
             to_status=trigger_config.get('to_status'),
             schedule=trigger_config.get('schedule'),
+            on_error=self._safe_gate_error_mode(trigger_config.get('on_error')),
         )
         
         scope = WorkflowScope(
@@ -1302,6 +1305,17 @@ class WorkflowsManager:
             return TriggerType.MANUAL
 
     @staticmethod
+    def _safe_gate_error_mode(value: Optional[str]) -> GateErrorMode:
+        """Parse a gate's ``on_error``, falling back to FAIL_OPEN when unset or unknown."""
+        if not value:
+            return GateErrorMode.FAIL_OPEN
+        try:
+            return GateErrorMode(value)
+        except ValueError:
+            logger.warning("Unknown gate on_error '%s' in DB — treating as fail_open", value)
+            return GateErrorMode.FAIL_OPEN
+
+    @staticmethod
     def _safe_entity_type(value: str) -> EntityType:
         """Parse an entity type string, skipping unknown values."""
         try:
@@ -1326,6 +1340,7 @@ class WorkflowsManager:
             from_status=trigger_config.get('from_status'),
             to_status=trigger_config.get('to_status'),
             schedule=trigger_config.get('schedule'),
+            on_error=self._safe_gate_error_mode(trigger_config.get('on_error')),
         )
         
         scope = WorkflowScope(

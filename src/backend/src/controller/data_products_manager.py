@@ -969,26 +969,19 @@ class DataProductsManager(DeliveryMixin, SearchableAsset):
                 )
             
             # Run before_status_change workflows (gating)
-            try:
-                from src.common.workflow_triggers import get_trigger_registry
-                from src.models.process_workflows import EntityType as WFEntityType
-                trigger_registry = get_trigger_registry(self._db)
-                gate_passed, gate_executions = trigger_registry.before_status_change(
-                    entity_type=WFEntityType.DATA_PRODUCT,
-                    entity_id=product_id,
-                    from_status=current_status,
-                    to_status=new_status_lower,
-                    entity_name=product_db.name,
-                    entity_data={"name": product_db.name, "status": current_status},
-                    user_email=current_user,
-                )
-                if not gate_passed:
-                    from src.common.workflow_triggers import StatusChangeBlockedError
-                    raise StatusChangeBlockedError(current_status, new_status_lower, gate_executions)
-            except ValueError:
-                raise
-            except Exception as e:
-                logger.warning(f"before_status_change trigger error (non-fatal): {e}")
+            # (a gate that errors refuses the transition when it is fail_closed, #1103)
+            from src.common.workflow_triggers import run_status_gates
+            from src.models.process_workflows import EntityType as WFEntityType
+            run_status_gates(
+                self._db,
+                entity_type=WFEntityType.DATA_PRODUCT,
+                entity_id=product_id,
+                from_status=current_status,
+                to_status=new_status_lower,
+                entity_name=product_db.name,
+                entity_data={"name": product_db.name, "status": current_status},
+                user_email=current_user,
+            )
             
             # Update status
             old_status = product_db.status

@@ -104,7 +104,9 @@
       "fromStatusPlaceholder": "es. bozza",
       "toStatus": "A stato",
       "toStatusPlaceholder": "es. attivo",
-      "descriptionPlaceholder": "Descrizione del workflow"
+      "descriptionPlaceholder": "Descrizione del workflow",
+      "failClosed": "Rifiuta la transizione se questo gate non può essere valutato",
+      "failClosedHint": "Fail closed: se la valutazione di questo gate genera un errore (non un normale fallimento), il cambio di stato viene rifiutato. Disattivato (fail open), il cambio avviene e l'errore viene registrato e sottoposto ad audit."
     },
     "stepConfig": {
       "title": "Configurazione passaggio",

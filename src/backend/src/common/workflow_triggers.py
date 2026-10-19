@@ -16,6 +16,7 @@ from src.models.process_workflows import (
     ProcessWorkflow,
     WorkflowExecution,
     ExecutionStatus,
+    GateErrorMode,
 )
 from src.common.api_errors import CodedValueError
 from src.common.logging import get_logger
@@ -68,12 +69,15 @@ class TriggerRegistry:
         event: TriggerEvent,
         *,
         blocking: bool = True,
+        errors: Optional[List[Tuple[ProcessWorkflow, Exception]]] = None,
     ) -> List[WorkflowExecution]:
         """Fire a trigger event and execute matching workflows.
         
         Args:
             event: The trigger event
             blocking: If True, execute workflows synchronously
+            errors: When given, each workflow whose execution raised is
+                appended with its exception (it has no execution in the result)
             
         Returns:
             List of workflow executions
@@ -135,6 +139,8 @@ class TriggerRegistry:
                 )
             except Exception as e:
                 logger.exception(f"Failed to execute workflow '{workflow.name}': {e}")
+                if errors is not None:
+                    errors.append((workflow, e))
         
         return executions
 
@@ -368,6 +374,11 @@ class TriggerRegistry:
 
         Runs BEFORE the status is persisted. Returns (all_passed, executions)
         so the caller can block the transition when any workflow fails.
+
+        A gate whose evaluation raises has no execution. The error is logged
+        and audited; when the gate is ``on_error: fail_closed`` this raises
+        ``GateEvaluationError`` (the transition is refused), otherwise the
+        gate is left out, as before.
         """
         event = TriggerEvent(
             trigger_type=TriggerType.BEFORE_STATUS_CHANGE,
@@ -385,7 +396,13 @@ class TriggerRegistry:
             f"before_status_change called for {entity_type.value} '{entity_name}': "
             f"'{from_status}' -> '{to_status}'"
         )
-        executions = self.fire_trigger(event, blocking=True)
+        gate_errors: List[Tuple[ProcessWorkflow, Exception]] = []
+        executions = self.fire_trigger(event, blocking=True, errors=gate_errors)
+        for workflow, error in gate_errors:
+            report_gate_error(event, error, workflow=workflow)
+        closed = [wf.name for wf, _ in gate_errors if wf.trigger.on_error == GateErrorMode.FAIL_CLOSED]
+        if closed:
+            raise GateEvaluationError(from_status, to_status, closed)
 
         all_passed = all(
             exe.status == ExecutionStatus.SUCCEEDED
@@ -1081,6 +1098,180 @@ class StatusChangeBlockedError(CodedValueError):
             toStatus=to_status,
             reasons=failed_execution_reasons(executions),
         )
+
+    @classmethod
+    def without_reasons(cls, from_status: str, to_status: str) -> 'StatusChangeBlockedError':
+        """The error with a generic reason, built without reading the executions."""
+        blocked = cls.__new__(cls)
+        CodedValueError.__init__(
+            blocked,
+            f"Status transition from '{from_status}' to '{to_status}' "
+            f"blocked by workflow: Workflow validation failed",
+            fromStatus=from_status,
+            toStatus=to_status,
+            reasons=[],
+        )
+        return blocked
+
+
+class GateEvaluationError(CodedValueError):
+    """A ``before_status_change`` gate marked ``fail_closed`` could not be evaluated.
+
+    ``str()`` is the English message; ``params`` has the statuses and the
+    names of the gates that raised (empty when the gates couldn't be listed).
+    """
+
+    code = 'status_change_gate_error'
+
+    def __init__(self, from_status: str, to_status: str, workflows: List[str]):
+        names = f" ({', '.join(workflows)})" if workflows else ""
+        super().__init__(
+            f"Status transition from '{from_status}' to '{to_status}' refused: "
+            f"a workflow gate{names} could not be evaluated. Ask an administrator "
+            f"to check the workflow.",
+            fromStatus=from_status,
+            toStatus=to_status,
+            workflows=workflows,
+        )
+
+
+def report_gate_error(
+    event: TriggerEvent,
+    error: Exception,
+    *,
+    workflow: Optional[ProcessWorkflow] = None,
+) -> None:
+    """Log a gate that raised at error level and write it to the audit log.
+
+    ``workflow`` is None when the error came before the gates were known
+    (listing them failed).
+    """
+    mode = workflow.trigger.on_error.value if workflow else None
+    name = workflow.name if workflow else None
+    logger.error(
+        f"before_status_change gate error for {event.entity_type.value} '{event.entity_id}' "
+        f"({event.from_status} -> {event.to_status}), workflow {name or '(not listed)'}, "
+        f"on_error={mode or 'unknown'}: {error}",
+        exc_info=error,
+    )
+    try:
+        from src.controller.audit_manager import log_system_action
+        log_system_action(
+            username=event.user_email or 'system',
+            feature='process-workflows',
+            action='GATE_ERROR',
+            success=False,
+            details={
+                'entity_type': event.entity_type.value,
+                'entity_id': event.entity_id,
+                'from_status': event.from_status,
+                'to_status': event.to_status,
+                'workflow_id': workflow.id if workflow else None,
+                'workflow_name': name,
+                'on_error': mode,
+                'error': f"{type(error).__name__}: {error}",
+            },
+        )
+    except Exception as audit_err:  # The audit must never hide the gate decision
+        logger.error(f"Could not audit the gate error: {audit_err}", exc_info=True)
+
+
+def _fail_closed_gate_names(db: Session, event: TriggerEvent) -> List[str]:
+    """Active ``fail_closed`` gates that would match ``event``, read directly from the table.
+
+    Used when listing the gates through the workflows manager raised, so the
+    mode of each gate is still honoured. Kept independent of that code path.
+    """
+    import json
+    from src.db_models.process_workflows import ProcessWorkflowDb
+
+    names: List[str] = []
+    rows = db.query(ProcessWorkflowDb).filter(ProcessWorkflowDb.is_active == True).all()  # noqa: E712
+    for row in rows:
+        try:
+            trigger = json.loads(row.trigger_config) if row.trigger_config else {}
+        except (TypeError, ValueError):
+            continue
+        if trigger.get('type') != TriggerType.BEFORE_STATUS_CHANGE.value:
+            continue
+        if trigger.get('on_error') != GateErrorMode.FAIL_CLOSED.value:
+            continue
+        entity_types = trigger.get('entity_types') or []
+        if entity_types and event.entity_type.value not in entity_types:
+            continue
+        if trigger.get('from_status') and trigger['from_status'] != event.from_status:
+            continue
+        if trigger.get('to_status') and trigger['to_status'] != event.to_status:
+            continue
+        names.append(row.name)
+    return names
+
+
+def run_status_gates(
+    db: Session,
+    *,
+    entity_type: EntityType,
+    entity_id: str,
+    from_status: str,
+    to_status: str,
+    entity_name: Optional[str] = None,
+    entity_data: Optional[Dict[str, Any]] = None,
+    user_email: Optional[str] = None,
+) -> None:
+    """Run the ``before_status_change`` gates of a transition; raise when it must not proceed.
+
+    - A gate that fails (or waits for approval) blocks: ``StatusChangeBlockedError``.
+    - A gate that raises while it is evaluated is logged and audited; a
+      ``fail_closed`` gate refuses the transition (``GateEvaluationError``),
+      a ``fail_open`` one (the default) lets it proceed.
+    - When the gates can't even be listed, the ``fail_closed`` ones are read
+      straight from the workflows table; if that fails too, the mode is
+      unknown and the transition proceeds (the error is still reported).
+    """
+    event = TriggerEvent(
+        trigger_type=TriggerType.BEFORE_STATUS_CHANGE,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        entity_name=entity_name,
+        entity_data=entity_data,
+        user_email=user_email,
+        from_status=from_status,
+        to_status=to_status,
+    )
+    try:
+        gate_passed, gate_executions = get_trigger_registry(db).before_status_change(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            from_status=from_status,
+            to_status=to_status,
+            entity_name=entity_name,
+            entity_data=entity_data,
+            user_email=user_email,
+        )
+    except ValueError:
+        raise
+    except Exception as e:
+        report_gate_error(event, e)
+        try:
+            closed = _fail_closed_gate_names(db, event)
+        except Exception as lookup_err:
+            logger.error(
+                f"Could not read the gates' on_error mode after the gate error, "
+                f"so the transition proceeds: {lookup_err}",
+                exc_info=True,
+            )
+            return
+        if closed:
+            raise GateEvaluationError(from_status, to_status, closed) from e
+        return
+    if not gate_passed:
+        try:
+            blocked = StatusChangeBlockedError(from_status, to_status, gate_executions)
+        except Exception as e:
+            # A blocking gate stays blocking even if its message can't be built (#1012)
+            logger.error(f"Could not describe the blocking gates: {e}", exc_info=True)
+            blocked = StatusChangeBlockedError.without_reasons(from_status, to_status)
+        raise blocked
 
 
 def get_trigger_registry(db: Session) -> TriggerRegistry:

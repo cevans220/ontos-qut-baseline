@@ -115,6 +115,9 @@ export type StepExecutionStatus =
   | 'failed'
   | 'skipped';
 
+// What a before_status_change gate does when evaluating it raises
+export type GateErrorMode = 'fail_open' | 'fail_closed';
+
 // Trigger configuration
 export interface WorkflowTrigger {
   type: TriggerType;
@@ -122,6 +125,8 @@ export interface WorkflowTrigger {
   from_status?: string;
   to_status?: string;
   schedule?: string;
+  /** before_status_change only; the backend defaults to fail_open */
+  on_error?: GateErrorMode;
 }
 
 // Scope configuration
