@@ -54,7 +54,8 @@
     "uploadError": "Uploaden van contract mislukt",
     "uploadFailed": "Uploaden mislukt",
     "uploadOdpsHint": "\n\nTip: Deze pagina is voor datacontracten (ODCS-formaat). Als u een dataproduct (ODPS-formaat) probeert te uploaden, gebruik dan de pagina Dataproducten.",
-    "uploadSuccess": "Contract succesvol geüpload"
+    "uploadSuccess": "Contract succesvol geüpload",
+    "uploadSuccessCount": "{{count}} contract(en) geïmporteerd"
   },
   "status": {
     "draft": "Concept",
@@ -209,7 +210,14 @@
     "importedTitle": "Geïmporteerd",
     "importedSuccess": "ODCS-JSON succesvol geïmporteerd",
     "importOdcsError": "Importeren van ODCS-JSON mislukt",
-    "importJsonButton": "JSON importeren"
+    "importJsonButton": "JSON importeren",
+    "uploadDescription": "Selecteer een of meer ODCS-bestanden (YAML/JSON). Elk bestand kan één contract of een array bevatten.",
+    "createMissingDomains": "Ontbrekende domeinen aanmaken",
+    "createMissingDomainsHint": "Maakt domeinen die nog niet bestaan automatisch aan. Uit: domeinen zonder overeenkomst blijven niet toegewezen (het origineel blijft bewaard).",
+    "adoptIds": "ID's uit het bestand overnemen",
+    "adoptIdsHint": "Gebruikt een geldige, niet-conflicterende UUID uit het bestand als primaire sleutel, zodat koppelingen tussen entiteiten de import overleven.",
+    "duplicatesAsNew": "Dubbele ID's als nieuwe kopieën importeren",
+    "duplicatesAsNewHint": "Uit (standaard): een entiteit waarvan de ID al bestaat, wordt overgeslagen. Aan: ze wordt geïmporteerd als nieuwe kopie met een nieuwe ID."
   },
   "editor": {
     "title": "Contract Editor",
@@ -266,6 +274,8 @@
       "domain": "Domein",
       "project": "Project",
       "projectIdTitle": "Project-ID: {{id}}",
+      "dataProduct": "Dataproduct",
+      "dataProductIdTitle": "Product-ID: {{id}}",
       "tenant": "Tenant",
       "team": "Team",
       "teamIdTitle": "Team-ID: {{id}}",

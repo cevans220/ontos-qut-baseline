@@ -54,7 +54,8 @@
     "uploadError": "Échec du téléversement du contrat",
     "uploadFailed": "Échec du téléversement",
     "uploadOdpsHint": "\n\nAstuce : cette page concerne les contrats de données (format ODCS). Si vous essayez de téléverser un produit de données (format ODPS), veuillez plutôt utiliser la page Produits de données.",
-    "uploadSuccess": "Contrat téléversé avec succès"
+    "uploadSuccess": "Contrat téléversé avec succès",
+    "uploadSuccessCount": "{{count}} contrat(s) importé(s) avec succès"
   },
   "status": {
     "draft": "Brouillon",
@@ -209,7 +210,14 @@
     "importedTitle": "Importé",
     "importedSuccess": "JSON ODCS importé avec succès",
     "importOdcsError": "Échec de l'importation du JSON ODCS",
-    "importJsonButton": "Importer le JSON"
+    "importJsonButton": "Importer le JSON",
+    "uploadDescription": "Sélectionnez un ou plusieurs fichiers ODCS (YAML/JSON). Chaque fichier peut contenir un seul contrat ou un tableau.",
+    "createMissingDomains": "Créer les domaines manquants",
+    "createMissingDomainsHint": "Crée automatiquement les domaines qui n'existent pas encore. Désactivé : les domaines sans correspondance restent non attribués (l'original est conservé).",
+    "adoptIds": "Reprendre les ID du fichier",
+    "adoptIdsHint": "Réutilise un UUID valide et sans collision du fichier comme clé primaire, afin que les liens entre entités survivent à l'import.",
+    "duplicatesAsNew": "Importer les ID en double comme nouvelles copies",
+    "duplicatesAsNewHint": "Désactivé (par défaut) : une entité dont l'ID existe déjà est ignorée. Activé : elle est importée comme nouvelle copie avec un nouvel ID."
   },
   "editor": {
     "title": "Éditeur de Contrat",
@@ -266,6 +274,8 @@
       "domain": "Domaine",
       "project": "Projet",
       "projectIdTitle": "ID du projet : {{id}}",
+      "dataProduct": "Produit de données",
+      "dataProductIdTitle": "ID du produit : {{id}}",
       "tenant": "Tenant",
       "team": "Équipe",
       "teamIdTitle": "ID de l'équipe : {{id}}",

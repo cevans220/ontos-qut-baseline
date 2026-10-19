@@ -54,7 +54,8 @@
     "uploadError": "Failed to upload contract",
     "uploadFailed": "Upload failed",
     "uploadOdpsHint": "\n\nHint: This page is for Data Contracts (ODCS format). If you're trying to upload a Data Product (ODPS format), please use the Data Products page instead.",
-    "uploadSuccess": "Contract uploaded successfully"
+    "uploadSuccess": "Contract uploaded successfully",
+    "uploadSuccessCount": "{{count}} contract(s) imported successfully"
   },
   "status": {
     "draft": "Draft",
@@ -210,7 +211,13 @@
     "importedSuccess": "ODCS JSON imported successfully",
     "importOdcsError": "Failed to import ODCS JSON",
     "importJsonButton": "Import JSON",
-    "uploadDescription": "Select one or more ODCS files (YAML/JSON). Each file may contain a single contract or an array."
+    "uploadDescription": "Select one or more ODCS files (YAML/JSON). Each file may contain a single contract or an array.",
+    "createMissingDomains": "Create missing domains",
+    "createMissingDomainsHint": "Auto-create domains that don't already exist. Off: unmatched domains are left unassigned (the original is preserved).",
+    "adoptIds": "Adopt IDs from file",
+    "adoptIdsHint": "Reuse a valid, non-colliding UUID from the file as the primary key so links between entities survive import.",
+    "duplicatesAsNew": "Import duplicate IDs as new copies",
+    "duplicatesAsNewHint": "Off (default): an entity whose ID already exists is skipped. On: it is imported as a new copy with a fresh ID."
   },
   "editor": {
     "title": "Contract Editor",
@@ -267,6 +274,8 @@
       "domain": "Domain",
       "project": "Project",
       "projectIdTitle": "Project ID: {{id}}",
+      "dataProduct": "Data Product",
+      "dataProductIdTitle": "Product ID: {{id}}",
       "tenant": "Tenant",
       "team": "Team",
       "teamIdTitle": "Team ID: {{id}}",

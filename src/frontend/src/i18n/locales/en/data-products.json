@@ -369,7 +369,8 @@
       "deleteSupportChannel": "Delete this support channel?",
       "unlinkContract": "Unlink contract from this deliverable?",
       "createGenieSpace": "Create a Genie Space for \"{{name}}\"?"
-    }
+    },
+    "contractDangling": "Contract no longer exists"
   },
   "form": {
     "createTitle": "Create Data Product",

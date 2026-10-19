@@ -54,7 +54,8 @@
     "uploadError": "Falha ao enviar contrato",
     "uploadFailed": "Falha no envio",
     "uploadOdpsHint": " \n\nDica: Esta página é para Contratos de Dados (formato ODCS). Se você está tentando enviar um Produto de Dados (formato ODPS), use a página de Produtos de Dados.",
-    "uploadSuccess": "Contrato enviado com sucesso"
+    "uploadSuccess": "Contrato enviado com sucesso",
+    "uploadSuccessCount": "{{count}} contrato(s) importado(s) com sucesso"
   },
   "status": {
     "draft": "Rascunho",
@@ -209,7 +210,14 @@
     "importedTitle": "Importado",
     "importedSuccess": "JSON ODCS importado com sucesso",
     "importOdcsError": "Falha ao importar JSON ODCS",
-    "importJsonButton": "Importar JSON"
+    "importJsonButton": "Importar JSON",
+    "uploadDescription": "Selecione um ou mais arquivos ODCS (YAML/JSON). Cada arquivo pode conter um único contrato ou um array.",
+    "createMissingDomains": "Criar domínios ausentes",
+    "createMissingDomainsHint": "Cria automaticamente os domínios que ainda não existem. Desligado: domínios sem correspondência ficam sem atribuição (o original é preservado).",
+    "adoptIds": "Adotar os IDs do arquivo",
+    "adoptIdsHint": "Reutiliza um UUID válido e sem colisão do arquivo como chave primária, para que os vínculos entre entidades sobrevivam à importação.",
+    "duplicatesAsNew": "Importar IDs duplicados como novas cópias",
+    "duplicatesAsNewHint": "Desligado (padrão): uma entidade cujo ID já existe é ignorada. Ligado: ela é importada como nova cópia com um ID novo."
   },
   "editor": {
     "title": "Editor de Contrato",
@@ -266,6 +274,8 @@
       "domain": "Domínio",
       "project": "Projeto",
       "projectIdTitle": "ID do Projeto: {{id}}",
+      "dataProduct": "Produto de Dados",
+      "dataProductIdTitle": "ID do produto: {{id}}",
       "tenant": "Tenant",
       "team": "Equipe",
       "teamIdTitle": "ID da Equipe: {{id}}",

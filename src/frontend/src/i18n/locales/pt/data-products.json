@@ -50,13 +50,28 @@
   "upload": {
     "success": "Upload bem-sucedido",
     "successMessage": "{{filename}} processado com sucesso. {{count}} produto(s) processado(s).",
+    "partialSuccess": "Importado com problemas",
     "failed": "Falha no upload",
     "unexpectedError": "Ocorreu um erro inesperado durante o upload.",
     "uploading": "Enviando...",
     "tooltipTitle": "Enviar produto de dados (formato ODPS)",
     "tooltipDescription": "Aceita arquivos YAML ou JSON seguindo o esquema ODPS (Open Data Product Standard).",
     "tooltipHint": "Para contratos de dados (ODCS), use a página Contratos de dados.",
-    "odcsHint": "Dica: esta página é para produtos de dados (formato ODPS). Se você está tentando enviar um contrato de dados (formato ODCS), use a página Contratos de dados."
+    "odcsHint": "Dica: esta página é para produtos de dados (formato ODPS). Se você está tentando enviar um contrato de dados (formato ODCS), use a página Contratos de dados.",
+    "dialogTitle": "Enviar produtos de dados",
+    "dialogDescription": "Selecione um ou mais arquivos ODPS (YAML/JSON). Cada arquivo pode conter um único produto ou um array.",
+    "createMissingDomains": "Criar domínios ausentes",
+    "createMissingDomainsHint": "Cria automaticamente os domínios que ainda não existem. Desligado: domínios sem correspondência ficam sem atribuição (o original é preservado).",
+    "adoptIds": "Adotar os IDs do arquivo",
+    "adoptIdsHint": "Reutiliza um UUID válido e sem colisão do arquivo como chave primária, para que os vínculos entre entidades sobrevivam à importação.",
+    "duplicatesAsNew": "Importar IDs duplicados como novas cópias",
+    "duplicatesAsNewHint": "Desligado (padrão): um produto cujo ID já existe é ignorado. Ligado: ele é importado como nova cópia com um ID novo.",
+    "dropActive": "Solte o(s) arquivo(s) aqui",
+    "dropInactive": "Arraste e solte arquivo(s) de produto aqui, ou clique para selecionar",
+    "supportedFormats": "Formatos suportados: JSON ou YAML (ODPS)",
+    "orPasteOdps": "Ou cole o JSON ODPS",
+    "pasteOdpsPlaceholder": "Cole aqui o JSON do produto ODPS",
+    "importJsonButton": "Importar JSON"
   },
   "genie": {
     "noSelection": "Nenhuma seleção",
@@ -354,7 +369,8 @@
       "deleteSupportChannel": "Excluir este canal de suporte?",
       "unlinkContract": "Desvincular o contrato deste entregável?",
       "createGenieSpace": "Criar um Genie Space para \"{{name}}\"?"
-    }
+    },
+    "contractDangling": "O contrato não existe mais"
   },
   "form": {
     "createTitle": "Criar produto de dados",

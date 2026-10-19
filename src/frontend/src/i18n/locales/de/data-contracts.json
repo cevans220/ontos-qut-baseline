@@ -54,7 +54,8 @@
     "uploadError": "Vertrag konnte nicht hochgeladen werden",
     "uploadFailed": "Hochladen fehlgeschlagen",
     "uploadOdpsHint": "\n\nHinweis: Diese Seite ist für Datenverträge (ODCS-Format). Wenn Sie ein Datenprodukt (ODPS-Format) hochladen möchten, verwenden Sie stattdessen die Seite Datenprodukte.",
-    "uploadSuccess": "Vertrag erfolgreich hochgeladen"
+    "uploadSuccess": "Vertrag erfolgreich hochgeladen",
+    "uploadSuccessCount": "{{count}} Vertrag/Verträge erfolgreich importiert"
   },
   "status": {
     "draft": "Entwurf",
@@ -209,7 +210,14 @@
     "importedTitle": "Importiert",
     "importedSuccess": "ODCS-JSON erfolgreich importiert",
     "importOdcsError": "ODCS-JSON konnte nicht importiert werden",
-    "importJsonButton": "JSON importieren"
+    "importJsonButton": "JSON importieren",
+    "uploadDescription": "Wählen Sie eine oder mehrere ODCS-Dateien (YAML/JSON). Jede Datei kann einen einzelnen Vertrag oder ein Array enthalten.",
+    "createMissingDomains": "Fehlende Domänen anlegen",
+    "createMissingDomainsHint": "Nicht vorhandene Domänen automatisch anlegen. Aus: nicht zugeordnete Domänen bleiben leer (der Originalwert bleibt erhalten).",
+    "adoptIds": "IDs aus der Datei übernehmen",
+    "adoptIdsHint": "Eine gültige, nicht kollidierende UUID aus der Datei als Primärschlüssel verwenden, damit Verknüpfungen zwischen Entitäten den Import überstehen.",
+    "duplicatesAsNew": "Doppelte IDs als neue Kopien importieren",
+    "duplicatesAsNewHint": "Aus (Standard): Eine Entität, deren ID bereits existiert, wird übersprungen. An: Sie wird als neue Kopie mit neuer ID importiert."
   },
   "editor": {
     "title": "Vertrags-Editor",
@@ -266,6 +274,8 @@
       "domain": "Domäne",
       "project": "Projekt",
       "projectIdTitle": "Projekt-ID: {{id}}",
+      "dataProduct": "Datenprodukt",
+      "dataProductIdTitle": "Produkt-ID: {{id}}",
       "tenant": "Mandant",
       "team": "Team",
       "teamIdTitle": "Team-ID: {{id}}",

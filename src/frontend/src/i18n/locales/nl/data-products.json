@@ -50,13 +50,28 @@
   "upload": {
     "success": "Upload Succesvol",
     "successMessage": "{{filename}} succesvol verwerkt. {{count}} product(en) verwerkt.",
+    "partialSuccess": "Geïmporteerd met problemen",
     "failed": "Upload Mislukt",
     "unexpectedError": "Er is een onverwachte fout opgetreden tijdens het uploaden.",
     "uploading": "Uploaden...",
     "tooltipTitle": "Dataproduct Uploaden (ODPS formaat)",
     "tooltipDescription": "Accepteert YAML of JSON bestanden die het ODPS (Open Data Product Standard) schema volgen.",
     "tooltipHint": "Voor Datacontracten (ODCS), gebruik in plaats daarvan de Datacontracten pagina.",
-    "odcsHint": "Hint: Deze pagina is voor Dataproducten (ODPS formaat). Als je een Datacontract (ODCS formaat) probeert te uploaden, gebruik dan in plaats daarvan de Datacontracten pagina."
+    "odcsHint": "Hint: Deze pagina is voor Dataproducten (ODPS formaat). Als je een Datacontract (ODCS formaat) probeert te uploaden, gebruik dan in plaats daarvan de Datacontracten pagina.",
+    "dialogTitle": "Dataproducten uploaden",
+    "dialogDescription": "Selecteer een of meer ODPS-bestanden (YAML/JSON). Elk bestand kan één product of een array bevatten.",
+    "createMissingDomains": "Ontbrekende domeinen aanmaken",
+    "createMissingDomainsHint": "Maakt domeinen die nog niet bestaan automatisch aan. Uit: domeinen zonder overeenkomst blijven niet toegewezen (het origineel blijft bewaard).",
+    "adoptIds": "ID's uit het bestand overnemen",
+    "adoptIdsHint": "Gebruikt een geldige, niet-conflicterende UUID uit het bestand als primaire sleutel, zodat koppelingen tussen entiteiten de import overleven.",
+    "duplicatesAsNew": "Dubbele ID's als nieuwe kopieën importeren",
+    "duplicatesAsNewHint": "Uit (standaard): een product waarvan de ID al bestaat, wordt overgeslagen. Aan: het wordt geïmporteerd als nieuwe kopie met een nieuwe ID.",
+    "dropActive": "Zet het bestand/de bestanden hier neer",
+    "dropInactive": "Sleep productbestand(en) hierheen of klik om te selecteren",
+    "supportedFormats": "Ondersteunde formaten: JSON of YAML (ODPS)",
+    "orPasteOdps": "Of plak ODPS-JSON",
+    "pasteOdpsPlaceholder": "Plak hier de ODPS-product-JSON",
+    "importJsonButton": "JSON importeren"
   },
   "genie": {
     "noSelection": "Geen Selectie",
@@ -354,7 +369,8 @@
       "deleteSupportChannel": "Dit supportkanaal verwijderen?",
       "unlinkContract": "Contract ontkoppelen van deze levering?",
       "createGenieSpace": "Een Genie Space aanmaken voor \"{{name}}\"?"
-    }
+    },
+    "contractDangling": "Contract bestaat niet meer"
   },
   "form": {
     "createTitle": "Dataproduct Aanmaken",

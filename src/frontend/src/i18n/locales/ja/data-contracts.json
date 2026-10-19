@@ -54,7 +54,8 @@
     "uploadError": "コントラクトのアップロードに失敗しました",
     "uploadFailed": "アップロードに失敗しました",
     "uploadOdpsHint": "\n\nヒント: このページはデータコントラクト（ODCS 形式）用です。データプロダクト（ODPS 形式）をアップロードする場合は、代わりにデータプロダクトのページを使用してください。",
-    "uploadSuccess": "コントラクトをアップロードしました"
+    "uploadSuccess": "コントラクトをアップロードしました",
+    "uploadSuccessCount": "{{count}} 件の契約をインポートしました"
   },
   "status": {
     "draft": "下書き",
@@ -209,7 +210,14 @@
     "importedTitle": "インポート済み",
     "importedSuccess": "ODCS JSON をインポートしました",
     "importOdcsError": "ODCS JSON のインポートに失敗しました",
-    "importJsonButton": "JSON をインポート"
+    "importJsonButton": "JSON をインポート",
+    "uploadDescription": "1 つ以上の ODCS ファイル（YAML/JSON）を選択してください。各ファイルには契約を 1 つ、または配列で含めることができます。",
+    "createMissingDomains": "不足しているドメインを作成",
+    "createMissingDomainsHint": "存在しないドメインを自動作成します。オフ: 一致しないドメインは未割り当てのままになります（元の値は保持されます）。",
+    "adoptIds": "ファイルの ID を使用",
+    "adoptIdsHint": "ファイル内の有効で重複しない UUID を主キーとして再利用し、エンティティ間のリンクがインポート後も保たれるようにします。",
+    "duplicatesAsNew": "重複した ID を新しいコピーとしてインポート",
+    "duplicatesAsNewHint": "オフ（既定）: ID が既に存在するエンティティはスキップされます。オン: 新しい ID の新しいコピーとしてインポートされます。"
   },
   "editor": {
     "title": "契約エディタ",
@@ -266,6 +274,8 @@
       "domain": "ドメイン",
       "project": "プロジェクト",
       "projectIdTitle": "プロジェクト ID: {{id}}",
+      "dataProduct": "データプロダクト",
+      "dataProductIdTitle": "プロダクト ID: {{id}}",
       "tenant": "テナント",
       "team": "チーム",
       "teamIdTitle": "チーム ID: {{id}}",

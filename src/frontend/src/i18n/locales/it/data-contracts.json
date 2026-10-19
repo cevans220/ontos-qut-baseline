@@ -54,7 +54,8 @@
     "uploadError": "Impossibile caricare il contratto",
     "uploadFailed": "Caricamento non riuscito",
     "uploadOdpsHint": "\n\nSuggerimento: questa pagina è per i Contratti Dati (formato ODCS). Se stai cercando di caricare un Prodotto Dati (formato ODPS), usa invece la pagina Prodotti Dati.",
-    "uploadSuccess": "Contratto caricato con successo"
+    "uploadSuccess": "Contratto caricato con successo",
+    "uploadSuccessCount": "{{count}} contratto/i importato/i correttamente"
   },
   "status": {
     "draft": "Bozza",
@@ -209,7 +210,14 @@
     "importedTitle": "Importato",
     "importedSuccess": "JSON ODCS importato con successo",
     "importOdcsError": "Impossibile importare il JSON ODCS",
-    "importJsonButton": "Importa JSON"
+    "importJsonButton": "Importa JSON",
+    "uploadDescription": "Seleziona uno o più file ODCS (YAML/JSON). Ogni file può contenere un singolo contratto o un array.",
+    "createMissingDomains": "Crea i domini mancanti",
+    "createMissingDomainsHint": "Crea automaticamente i domini che non esistono. Disattivato: i domini senza corrispondenza restano non assegnati (l'originale viene conservato).",
+    "adoptIds": "Adotta gli ID dal file",
+    "adoptIdsHint": "Riutilizza un UUID valido e senza collisioni dal file come chiave primaria, così i collegamenti tra entità sopravvivono all'importazione.",
+    "duplicatesAsNew": "Importa gli ID duplicati come nuove copie",
+    "duplicatesAsNewHint": "Disattivato (predefinito): un'entità il cui ID esiste già viene saltata. Attivato: viene importata come nuova copia con un nuovo ID."
   },
   "editor": {
     "title": "Editor Contratto",
@@ -266,6 +274,8 @@
       "domain": "Dominio",
       "project": "Progetto",
       "projectIdTitle": "ID Progetto: {{id}}",
+      "dataProduct": "Prodotto di dati",
+      "dataProductIdTitle": "ID prodotto: {{id}}",
       "tenant": "Tenant",
       "team": "Team",
       "teamIdTitle": "ID Team: {{id}}",
