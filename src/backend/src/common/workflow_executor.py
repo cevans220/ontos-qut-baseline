@@ -2867,7 +2867,8 @@ class WorkflowExecutor:
                 'responded_by': user_email,
                 **(result_data or {}),
             },
-            error_message=None if step_result else (result_data or {}).get('reason', 'Request denied'),
+            # The approve routes send reason None when the approver wrote none
+            error_message=None if step_result else ((result_data or {}).get('reason') or 'Request denied'),
             duration_ms=0,  # Approval duration not tracked this way
         )
         
@@ -2993,7 +2994,7 @@ class WorkflowExecutor:
                 final_status = ExecutionStatus.SUCCEEDED
             else:
                 final_status = ExecutionStatus.FAILED
-                error_message = (result_data or {}).get('reason', 'Request denied')
+                error_message = (result_data or {}).get('reason') or 'Request denied'
         
         while next_step_id:
             step = steps_by_id.get(next_step_id)

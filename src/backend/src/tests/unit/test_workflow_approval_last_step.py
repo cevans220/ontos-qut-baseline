@@ -109,6 +109,31 @@ def test_a_rejection_without_an_on_fail_step_fails(db_session):
     assert resumed.error_message == 'Request denied'
 
 
+def test_a_rejection_without_a_reason_says_request_denied(db_session):
+    """The approve routes always send ``reason``, as None when none was written."""
+    from src.db_models.process_workflows import WorkflowStepExecutionDb
+
+    workflow = _workflow(db_session, [_approval()])
+    execution = _paused(db_session, workflow)
+
+    resumed = WorkflowExecutor(db_session).resume_workflow(
+        execution_id=execution.id,
+        step_result=False,
+        result_data={'decision': 'rejected', 'reason': None},
+        user_email='reviewer@example.com',
+    )
+
+    assert resumed.status.value == 'failed'
+    assert resumed.error_message == 'Request denied'
+    step_errors = [
+        row.error_message
+        for row in db_session.query(WorkflowStepExecutionDb)
+        .filter(WorkflowStepExecutionDb.execution_id == execution.id).all()
+        if row.passed is False
+    ]
+    assert step_errors == ['Request denied']
+
+
 def test_an_approval_followed_by_a_step_still_runs_it(db_session):
     workflow = _workflow(db_session, [
         _approval(on_pass='ok'),
