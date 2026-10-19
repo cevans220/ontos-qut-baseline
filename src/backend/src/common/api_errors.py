@@ -32,6 +32,11 @@ INTERNAL_ERROR_MESSAGE = (
 )
 
 
+def new_error_id() -> str:
+    """A short id that ties an error shown to a user to its log entry."""
+    return uuid.uuid4().hex[:12]
+
+
 class CodedValueError(ValueError):
     """A ``ValueError`` with a code and parameters for the UI."""
 
@@ -92,7 +97,7 @@ def _leaked_cause(exc: StarletteHTTPException) -> Optional[BaseException]:
 
 def _internal_error_response(request: Request, exc: StarletteHTTPException, cause: BaseException) -> Response:
     """A server error without the exception's text; the text goes to the log with an error id."""
-    error_id = uuid.uuid4().hex[:12]
+    error_id = new_error_id()
     logger.error(
         "Server error %s on %s %s (%s): %s",
         error_id, request.method, request.url.path, type(cause).__name__, exc.detail,
