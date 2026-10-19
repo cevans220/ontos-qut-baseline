@@ -269,6 +269,7 @@ class ContractCloner:
             cloned_server = {
                 'id': new_server_id,
                 'contract_id': new_contract_id,
+                'stable_id': getattr(server, 'stable_id', None),
                 'server': server.server,
                 'type': server.type,
                 'description': server.description,

@@ -7004,6 +7004,7 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
                 
                 # Create ServerConfig object
                 server_config = ServerConfig(
+                    id=getattr(s, 'stable_id', None),
                     server=s.server,
                     type=s.type,
                     description=s.description,
