@@ -352,7 +352,8 @@ app = FastAPI(
     openapi_tags=openapi_tags
 )
 
-# Errors with a code (CodedValueError) are answered as {code, message, params}
+# Errors with a code (CodedValueError) are answered as {code, message, params};
+# server errors that repeat an exception's text get a generic message instead
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from src.common.api_errors import coded_http_exception_handler
 app.add_exception_handler(StarletteHTTPException, coded_http_exception_handler)

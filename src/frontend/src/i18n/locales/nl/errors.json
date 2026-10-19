@@ -23,5 +23,6 @@
     "title": "Fout",
     "message": "Er is een onverwachte fout opgetreden.",
     "retry": "Opnieuw Proberen"
-  }
+  },
+  "internalError": "Er is een onverwachte fout opgetreden. De details staan in het serverlogboek (fout-id {{errorId}})."
 }
