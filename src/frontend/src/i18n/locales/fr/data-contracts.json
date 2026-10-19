@@ -520,7 +520,8 @@
       "invalidTransition": "Le contrat est maintenant {{fromStatus}} et ne peut plus être approuvé ni rejeté. Rechargez la page pour voir son statut actuel.",
       "approveFailed": "Échec de l'approbation",
       "rejectFailed": "Échec du rejet",
-      "startProfilingFailed": "Échec du démarrage du profilage"
+      "startProfilingFailed": "Échec du démarrage du profilage",
+      "invalidVersionFormat": "« {{version}} » n'est pas une version valide : une nouvelle version suit le format X.Y.Z, par exemple 2.0.0."
     }
   },
   "list": {

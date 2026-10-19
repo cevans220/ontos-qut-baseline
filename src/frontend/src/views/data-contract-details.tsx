@@ -64,6 +64,7 @@ import type { DataProduct } from '@/types/data-product'
 import type { DataProfilingRun } from '@/types/data-contract'
 import { useCopilotContext } from '@/hooks/use-copilot-context'
 import { useApi } from '@/hooks/use-api'
+import { contractVersionErrorText } from '@/lib/contract-version-error'
 import CertificationBadge from '@/components/common/certification-badge'
 import PublicationScopeBadge from '@/components/common/publication-scope-badge'
 import { DirectCertifyDialog, DirectPublishDialog } from '@/components/common/direct-lifecycle-dialogs'
@@ -915,17 +916,13 @@ export default function DataContractDetails() {
     toast({ title: t('data-contracts:detailsView.toast.creatingVersionTitle', 'Creating New Version'), description: t('data-contracts:detailsView.toast.creatingVersionDesc', 'Creating version {{version}}...', { version: newVersionString }) })
     try {
       // A full copy (schema, quality, servers ...), like the versioning dialog
-      const res = await fetch(`/api/data-contracts/${contractId}/clone`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ new_version: newVersionString.trim() })
+      const response = await post<{ id?: string }>(`/api/data-contracts/${contractId}/clone`, {
+        new_version: newVersionString.trim(),
       })
-      if (!res.ok) {
-        const text = await res.text().catch(() => '')
-        throw new Error(text || t('data-contracts:detailsView.errors.createVersionFailed', 'Failed to create new version.'))
+      if (response.error) {
+        throw new Error(contractVersionErrorText(response, newVersionString.trim(), t))
       }
-      const data = await res.json()
-      const newId = data?.id
+      const newId = response.data?.id
       if (!newId) throw new Error(t('data-contracts:detailsView.errors.invalidVersionResponse', 'Invalid response when creating version.'))
       toast({ title: t('common:status.success', 'Success'), description: t('data-contracts:detailsView.toast.versionCreated', 'Version {{version}} created successfully!', { version: newVersionString }) })
       setIsVersionDialogOpen(false)
@@ -3267,6 +3264,7 @@ export default function DataContractDetails() {
           currentVersion={contract.version}
           productTitle={contract.name}
           onSubmit={submitNewVersion}
+          requireSemver
         />
       )}
 

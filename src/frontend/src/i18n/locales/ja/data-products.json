@@ -1077,8 +1077,10 @@
     "versionPlaceholder": "例: v1.1, v2.0-beta",
     "createButton": "バージョンを作成",
     "errors": {
-      "versionEmpty": "バージョン文字列は空にできません。"
-    }
+      "versionEmpty": "バージョン文字列は空にできません。",
+      "versionFormat": "「{{version}}」は X.Y.Z の形式ではありません（例: 2.0.0）。"
+    },
+    "versionPlaceholderSemver": "例: 2.0.0"
   },
   "graphView": {
     "unnamedProduct": "名前のない製品",

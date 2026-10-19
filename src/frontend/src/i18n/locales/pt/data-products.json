@@ -1077,8 +1077,10 @@
     "versionPlaceholder": "ex.: v1.1, v2.0-beta",
     "createButton": "Criar versão",
     "errors": {
-      "versionEmpty": "O identificador da versão não pode estar vazio."
-    }
+      "versionEmpty": "O identificador da versão não pode estar vazio.",
+      "versionFormat": "\"{{version}}\" não está no formato X.Y.Z (por exemplo 2.0.0)."
+    },
+    "versionPlaceholderSemver": "ex.: 2.0.0"
   },
   "graphView": {
     "unnamedProduct": "Produto sem nome",

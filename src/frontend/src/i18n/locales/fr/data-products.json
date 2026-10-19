@@ -1077,8 +1077,10 @@
     "versionPlaceholder": "par ex. v1.1, v2.0-beta",
     "createButton": "Créer la version",
     "errors": {
-      "versionEmpty": "La chaîne de version ne peut pas être vide."
-    }
+      "versionEmpty": "La chaîne de version ne peut pas être vide.",
+      "versionFormat": "« {{version}} » n'est pas au format X.Y.Z (par exemple 2.0.0)."
+    },
+    "versionPlaceholderSemver": "p. ex. 2.0.0"
   },
   "graphView": {
     "unnamedProduct": "Produit sans nom",

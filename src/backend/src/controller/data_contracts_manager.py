@@ -129,8 +129,18 @@ from src.controller.domain_export_adapter import (
 
 from src.common.logging import get_logger
 from src.common.delivery_mixin import DeliveryMixin
+from src.common.api_errors import CodedValueError
 
 logger = get_logger(__name__)
+
+
+class InvalidVersionFormatError(CodedValueError):
+    """A new contract version that isn't ``X.Y.Z`` (or ``X.Y.Z-draft`` for a personal draft)."""
+
+    code = 'invalid_version_format'
+
+    def __init__(self, version: str, message: str):
+        super().__init__(message, version=version)
 
 
 def _relationship_read(rel) -> Dict[str, Any]:
@@ -4764,10 +4774,12 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
         # Validate semantic version format (allow -draft suffix for personal drafts)
         if as_personal_draft:
             if not re.match(r'^\d+\.\d+\.\d+(-draft)?$', new_version):
-                raise ValueError("new_version must be in format X.Y.Z or X.Y.Z-draft")
+                raise InvalidVersionFormatError(
+                    new_version, "new_version must be in format X.Y.Z or X.Y.Z-draft")
         else:
             if not re.match(r'^\d+\.\d+\.\d+$', new_version):
-                raise ValueError("new_version must be in format X.Y.Z (e.g., 2.0.0)")
+                raise InvalidVersionFormatError(
+                    new_version, "new_version must be in format X.Y.Z (e.g., 2.0.0)")
         
         # Get source contract
         source_contract = data_contract_repo.get(db, id=contract_id)
@@ -4924,7 +4936,12 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
             
             db.commit()
             db.refresh(new_contract)
-            
+
+            # A new version is found in search right away, as with create_new_version.
+            # A personal draft is left out, as before: only its owner sees it.
+            if not as_personal_draft:
+                self._update_search_index(new_contract, db)
+
             return new_contract
             
         except Exception as e:

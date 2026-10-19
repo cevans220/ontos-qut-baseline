@@ -520,7 +520,8 @@
       "invalidTransition": "Het contract is nu {{fromStatus}} en kan niet meer worden goedgekeurd of afgewezen. Laad de pagina opnieuw om de huidige status te zien.",
       "approveFailed": "Goedkeuren mislukt",
       "rejectFailed": "Afwijzen mislukt",
-      "startProfilingFailed": "Starten van profilering mislukt"
+      "startProfilingFailed": "Starten van profilering mislukt",
+      "invalidVersionFormat": "\"{{version}}\" is geen geldige versie: een nieuwe versie heeft de vorm X.Y.Z, bijvoorbeeld 2.0.0."
     }
   },
   "list": {

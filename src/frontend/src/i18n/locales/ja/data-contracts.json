@@ -520,7 +520,8 @@
       "invalidTransition": "契約は現在{{fromStatus}}のため、承認も却下もできません。ページを再読み込みして現在のステータスを確認してください。",
       "approveFailed": "承認に失敗しました",
       "rejectFailed": "却下に失敗しました",
-      "startProfilingFailed": "プロファイリングの開始に失敗しました"
+      "startProfilingFailed": "プロファイリングの開始に失敗しました",
+      "invalidVersionFormat": "「{{version}}」は有効なバージョンではありません。新しいバージョンは X.Y.Z の形式です（例: 2.0.0）。"
     }
   },
   "list": {

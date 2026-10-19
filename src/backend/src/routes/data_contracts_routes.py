@@ -8,7 +8,7 @@ from uuid import uuid4
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, Depends, Request, Body, Query, BackgroundTasks
 from fastapi.responses import JSONResponse
 
-from src.controller.data_contracts_manager import DataContractsManager
+from src.controller.data_contracts_manager import DataContractsManager, InvalidVersionFormatError
 from src.common.dependencies import (
     DBSessionDep,
     AuditManagerDep,
@@ -3937,6 +3937,9 @@ async def clone_contract_for_new_version(
         from src.models.data_contracts_api import DataContractRead
         return DataContractRead.model_validate(new_contract, from_attributes=True).model_dump()
 
+    except InvalidVersionFormatError as e:
+        # Sent with its code and the version, so the page can say it in the user's language
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except ValueError as e:
         logger.error("Validation error cloning contract %s: %s", contract_id, e)
         raise HTTPException(status_code=400, detail="Invalid contract data")

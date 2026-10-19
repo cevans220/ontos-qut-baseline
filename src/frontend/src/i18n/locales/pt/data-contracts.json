@@ -520,7 +520,8 @@
       "invalidTransition": "O contrato agora está com o status {{fromStatus}} e não pode mais ser aprovado nem rejeitado. Recarregue a página para ver o status atual.",
       "approveFailed": "Falha ao aprovar",
       "rejectFailed": "Falha ao rejeitar",
-      "startProfilingFailed": "Falha ao iniciar perfilamento"
+      "startProfilingFailed": "Falha ao iniciar perfilamento",
+      "invalidVersionFormat": "\"{{version}}\" não é uma versão válida: uma nova versão usa o formato X.Y.Z, por exemplo 2.0.0."
     }
   },
   "list": {
