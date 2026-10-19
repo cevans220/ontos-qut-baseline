@@ -475,6 +475,8 @@
     "titleFallback": "ワークフロー実行",
     "executionId": "実行 ID: {{id}}...",
     "stepsProgress": "{{done}}/{{total}} ステップ",
+    "stepsProgressWithRemoved_one": "{{done}}/{{total}} ステップ（削除済み +{{count}}）",
+    "stepsProgressWithRemoved_other": "{{done}}/{{total}} ステップ（削除済み +{{count}}）",
     "triggeredBy": "トリガー者: {{user}}",
     "workflowSteps": "ワークフローステップ",
     "loadDefinitionFailed": "ワークフロー定義の読み込みに失敗しました",

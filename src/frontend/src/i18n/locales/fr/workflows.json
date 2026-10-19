@@ -475,6 +475,8 @@
     "titleFallback": "Exécution du workflow",
     "executionId": "ID d'exécution : {{id}}...",
     "stepsProgress": "{{done}}/{{total}} étapes",
+    "stepsProgressWithRemoved_one": "{{done}}/{{total}} étapes (+{{count}} supprimée)",
+    "stepsProgressWithRemoved_other": "{{done}}/{{total}} étapes (+{{count}} supprimées)",
     "triggeredBy": "Déclenché par : {{user}}",
     "workflowSteps": "Étapes du workflow",
     "loadDefinitionFailed": "Échec du chargement de la définition du workflow",

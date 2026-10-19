@@ -14,7 +14,7 @@ vi.mock('@/hooks/use-api', () => ({ useApi: () => ({ get }) }));
 
 import i18n from '@/i18n/config';
 import {
-  WorkflowExecutionDialog, getLastStepRun, getRemovedStepRuns,
+  WorkflowExecutionDialog, getLastStepRun, getRemovedStepRuns, getStepsProgress,
 } from './workflow-execution-dialog';
 
 const STEPS = [
@@ -52,6 +52,13 @@ describe('getRemovedStepRuns', () => {
   });
 });
 
+describe('getStepsProgress', () => {
+  it('counts the current steps that completed, out of the current steps', () => {
+    // success_count is 3: one current step and two removed ones
+    expect(getStepsProgress(STEPS as any, execution())).toEqual({ done: 1, total: 2, removed: 2 });
+  });
+});
+
 describe('WorkflowExecutionDialog', () => {
   const workflow = { id: 'wf-1', name: 'Kept results', steps: STEPS } as unknown as ProcessWorkflow;
 
@@ -83,6 +90,32 @@ describe('WorkflowExecutionDialog', () => {
     expect(within(section).getByText('Falhou')).toBeTruthy();
   });
 
+  it('shows progress over the current steps, with the removed ones apart', async () => {
+    render(<WorkflowExecutionDialog execution={execution()} open onOpenChange={vi.fn()} />);
+
+    // success_count is 3, the workflow has 2 steps now: not "3/2 steps"
+    expect(await screen.findByText('1/2 steps (+2 removed)')).toBeTruthy();
+    expect(screen.queryByText('3/2 steps')).toBeNull();
+  });
+
+  it('shows the progress in the UI language', async () => {
+    await i18n.changeLanguage('pt');
+    render(<WorkflowExecutionDialog execution={execution()} open onOpenChange={vi.fn()} />);
+
+    expect(await screen.findByText('1/2 etapas (+2 removidas)')).toBeTruthy();
+  });
+
+  it('uses the singular for one removed step', async () => {
+    await i18n.changeLanguage('pt');
+    const one = execution({ step_executions: execution().step_executions.slice(0, 2) });
+    get.mockImplementation(async (url: string) => (
+      url === '/api/workflows/wf-1' ? { data: workflow } : { data: one }
+    ));
+    render(<WorkflowExecutionDialog execution={one} open onOpenChange={vi.fn()} />);
+
+    expect(await screen.findByText('1/2 etapas (+1 removida)')).toBeTruthy();
+  });
+
   it('shows no section when every result belongs to a current step', async () => {
     get.mockImplementation(async (url: string) => (
       url === '/api/workflows/wf-1'
@@ -93,5 +126,6 @@ describe('WorkflowExecutionDialog', () => {
 
     await screen.findByText('Check');
     expect(screen.queryByTestId('removed-step-runs')).toBeNull();
+    expect(await screen.findByText('1/2 steps')).toBeTruthy();
   });
 });

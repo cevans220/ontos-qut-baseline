@@ -87,6 +87,21 @@ export function getRemovedStepRuns(
   return Array.from(last.values());
 }
 
+// Progress over the workflow's current steps: how many of them completed, and
+// how many steps that ran were removed from the workflow later. The
+// execution's success_count counts the runs of the execution, including steps
+// removed since, so it can't be shown against the current number of steps.
+export function getStepsProgress(
+  steps: Pick<WorkflowStep, 'id' | 'step_id'>[],
+  execution: WorkflowExecution
+): { done: number; total: number; removed: number } {
+  return {
+    done: steps.filter(step => getStepExecutionState(step, execution) === 'succeeded').length,
+    total: steps.length,
+    removed: getRemovedStepRuns(steps, execution).length,
+  };
+}
+
 // A failed step's error, translated when the backend sent a code
 // (result_data.error_code / error_params), else as stored.
 export function getStepErrorText(
@@ -354,7 +369,15 @@ export function WorkflowExecutionDialog({
   };
   
   const statusConfig = statusBadges[execution.status] || statusBadges.pending;
-  
+
+  const shownExecution = stepResults ? { ...execution, step_executions: stepResults } : execution;
+  const progress = workflow?.steps ? getStepsProgress(workflow.steps, shownExecution) : null;
+  const progressText = !progress
+    ? t('workflows:execution.stepsProgress', { done: execution.success_count, total: '?' })
+    : progress.removed
+      ? t('workflows:execution.stepsProgressWithRemoved', { ...progress, count: progress.removed })
+      : t('workflows:execution.stepsProgress', progress);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl max-h-[85vh]">
@@ -404,7 +427,7 @@ export function WorkflowExecutionDialog({
                 {execution.status === 'paused' ? t('workflows:execution.summary.waitingAt') : t('workflows:execution.summary.progress')}
               </div>
               <div className="font-medium text-sm truncate">
-                {execution.current_step_name || t('workflows:execution.stepsProgress', { done: execution.success_count, total: workflow?.steps?.length || '?' })}
+                {execution.current_step_name || progressText}
               </div>
             </Card>
           </div>
@@ -432,7 +455,7 @@ export function WorkflowExecutionDialog({
               ) : workflow ? (
                 <SimpleWorkflowFlow
                   workflow={workflow}
-                  execution={stepResults ? { ...execution, step_executions: stepResults } : execution}
+                  execution={shownExecution}
                 />
               ) : (
                 <div className="text-center text-muted-foreground py-8">

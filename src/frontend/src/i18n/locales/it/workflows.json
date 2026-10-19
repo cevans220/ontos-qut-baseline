@@ -475,6 +475,8 @@
     "titleFallback": "Esecuzione del workflow",
     "executionId": "ID esecuzione: {{id}}...",
     "stepsProgress": "{{done}}/{{total}} passaggi",
+    "stepsProgressWithRemoved_one": "{{done}}/{{total}} passaggi (+{{count}} rimosso)",
+    "stepsProgressWithRemoved_other": "{{done}}/{{total}} passaggi (+{{count}} rimossi)",
     "triggeredBy": "Attivato da: {{user}}",
     "workflowSteps": "Passaggi del workflow",
     "loadDefinitionFailed": "Impossibile caricare la definizione del workflow",

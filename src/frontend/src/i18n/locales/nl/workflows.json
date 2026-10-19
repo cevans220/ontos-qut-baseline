@@ -475,6 +475,8 @@
     "titleFallback": "Workflow-uitvoering",
     "executionId": "Uitvoerings-ID: {{id}}...",
     "stepsProgress": "{{done}}/{{total}} stappen",
+    "stepsProgressWithRemoved_one": "{{done}}/{{total}} stappen (+{{count}} verwijderd)",
+    "stepsProgressWithRemoved_other": "{{done}}/{{total}} stappen (+{{count}} verwijderd)",
     "triggeredBy": "Geactiveerd door: {{user}}",
     "workflowSteps": "Workflowstappen",
     "loadDefinitionFailed": "Kon workflowdefinitie niet laden",

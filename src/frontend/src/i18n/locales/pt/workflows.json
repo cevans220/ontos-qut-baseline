@@ -475,6 +475,8 @@
     "titleFallback": "Execução do fluxo de trabalho",
     "executionId": "ID da execução: {{id}}...",
     "stepsProgress": "{{done}}/{{total}} etapas",
+    "stepsProgressWithRemoved_one": "{{done}}/{{total}} etapas (+{{count}} removida)",
+    "stepsProgressWithRemoved_other": "{{done}}/{{total}} etapas (+{{count}} removidas)",
     "triggeredBy": "Acionado por: {{user}}",
     "workflowSteps": "Etapas do fluxo de trabalho",
     "loadDefinitionFailed": "Falha ao carregar definição do fluxo de trabalho",
