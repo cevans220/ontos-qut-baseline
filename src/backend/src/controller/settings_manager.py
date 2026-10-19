@@ -1313,54 +1313,8 @@ class SettingsManager:
     def _git_setting_values(self) -> tuple:
         return tuple(getattr(self._settings, attr, None) for attr in self._GIT_SETTING_ATTRS)
 
-    def update_settings(self, settings: dict) -> Settings:
-        """Update settings"""
-        git_values_before = self._git_setting_values()
-        # Persist configured cluster ID string; do not scan clusters
-        desired_cluster_id: Optional[str] = settings.get('job_cluster_id')
-        desired_enabled: List[str] = settings.get('enabled_jobs', []) or []
-        
-        logger.info(f"SettingsManager.update_settings received cluster_id: {desired_cluster_id}")
-        logger.info(f"SettingsManager.update_settings current stored cluster_id: {self._settings.job_cluster_id}")
-
-        # Handle workspace_deployment_path BEFORE workflow changes so the deployer
-        # is initialized when install_workflow runs
-        if 'workspace_deployment_path' in settings:
-            new_path = settings.get('workspace_deployment_path')
-            if new_path == '':
-                new_path = None
-            app_settings_repo.set(self._db, 'WORKSPACE_DEPLOYMENT_PATH', new_path)
-            self._settings.WORKSPACE_DEPLOYMENT_PATH = new_path
-            logger.info(f"Updated WORKSPACE_DEPLOYMENT_PATH to: {new_path}")
-            self._reinitialize_workspace_deployer()
-
-        # Schema Importer async threshold (positive integer)
-        if 'schema_import_async_threshold' in settings:
-            value = settings.get('schema_import_async_threshold')
-            try:
-                int_val = int(value)
-            except (ValueError, TypeError):
-                raise ValueError("schema_import_async_threshold must be a positive integer")
-            if int_val < 1:
-                raise ValueError("schema_import_async_threshold must be a positive integer")
-            app_settings_repo.set(self._db, 'SCHEMA_IMPORT_ASYNC_THRESHOLD', str(int_val))
-            self._settings.SCHEMA_IMPORT_ASYNC_THRESHOLD = int_val
-            logger.info(f"Updated SCHEMA_IMPORT_ASYNC_THRESHOLD to: {int_val}")
-
-        # Schema Importer per-path child fetch limit (bounded 1..10000 per the
-        # connector contract, ListAssetsOptions)
-        if 'schema_import_child_limit' in settings:
-            value = settings.get('schema_import_child_limit')
-            try:
-                int_val = int(value)
-            except (ValueError, TypeError):
-                raise ValueError("schema_import_child_limit must be an integer between 1 and 10000")
-            if not (1 <= int_val <= 10000):
-                raise ValueError("schema_import_child_limit must be between 1 and 10000")
-            app_settings_repo.set(self._db, 'SCHEMA_IMPORT_CHILD_LIMIT', str(int_val))
-            self._settings.SCHEMA_IMPORT_CHILD_LIMIT = int_val
-            logger.info(f"Updated SCHEMA_IMPORT_CHILD_LIMIT to: {int_val}")
-
+    def _apply_job_changes(self, desired_enabled: List[str], desired_cluster_id: Optional[str]) -> None:
+        """Install and remove Databricks jobs so the installed set matches ``desired_enabled``."""
         # Compute job enable/disable delta against current state from DB (source of truth)
         try:
             enabled_installations = workflow_installation_repo.get_all_installed(self._db)
@@ -1501,11 +1455,75 @@ class SettingsManager:
             error_summary = f"Failed to update {len(errors)} workflow(s): " + "; ".join(errors)
             raise RuntimeError(error_summary)
 
+    def update_settings(self, settings: dict) -> Settings:
+        """Update settings"""
+        git_values_before = self._git_setting_values()
+        # Persist configured cluster ID string; do not scan clusters
+        cluster_in_payload = 'job_cluster_id' in settings
+        desired_cluster_id: Optional[str] = (
+            settings.get('job_cluster_id') if cluster_in_payload else self._settings.job_cluster_id
+        )
+        desired_enabled: List[str] = settings.get('enabled_jobs', []) or []
+        
+        logger.info(f"SettingsManager.update_settings received cluster_id: {desired_cluster_id}")
+        logger.info(f"SettingsManager.update_settings current stored cluster_id: {self._settings.job_cluster_id}")
+
+        # Handle workspace_deployment_path BEFORE workflow changes so the deployer
+        # is initialized when install_workflow runs
+        if 'workspace_deployment_path' in settings:
+            new_path = settings.get('workspace_deployment_path')
+            if new_path == '':
+                new_path = None
+            app_settings_repo.set(self._db, 'WORKSPACE_DEPLOYMENT_PATH', new_path)
+            self._settings.WORKSPACE_DEPLOYMENT_PATH = new_path
+            logger.info(f"Updated WORKSPACE_DEPLOYMENT_PATH to: {new_path}")
+            self._reinitialize_workspace_deployer()
+
+        # Schema Importer async threshold (positive integer)
+        if 'schema_import_async_threshold' in settings:
+            value = settings.get('schema_import_async_threshold')
+            try:
+                int_val = int(value)
+            except (ValueError, TypeError):
+                raise ValueError("schema_import_async_threshold must be a positive integer")
+            if int_val < 1:
+                raise ValueError("schema_import_async_threshold must be a positive integer")
+            app_settings_repo.set(self._db, 'SCHEMA_IMPORT_ASYNC_THRESHOLD', str(int_val))
+            self._settings.SCHEMA_IMPORT_ASYNC_THRESHOLD = int_val
+            logger.info(f"Updated SCHEMA_IMPORT_ASYNC_THRESHOLD to: {int_val}")
+
+        # Schema Importer per-path child fetch limit (bounded 1..10000 per the
+        # connector contract, ListAssetsOptions)
+        if 'schema_import_child_limit' in settings:
+            value = settings.get('schema_import_child_limit')
+            try:
+                int_val = int(value)
+            except (ValueError, TypeError):
+                raise ValueError("schema_import_child_limit must be an integer between 1 and 10000")
+            if not (1 <= int_val <= 10000):
+                raise ValueError("schema_import_child_limit must be between 1 and 10000")
+            app_settings_repo.set(self._db, 'SCHEMA_IMPORT_CHILD_LIMIT', str(int_val))
+            self._settings.SCHEMA_IMPORT_CHILD_LIMIT = int_val
+            logger.info(f"Updated SCHEMA_IMPORT_CHILD_LIMIT to: {int_val}")
+
+        # Jobs are reconciled only when the payload carries them: every other
+        # settings form (Git, General, UI customization, Delivery) saves only
+        # its own keys, and treating a missing `enabled_jobs` as an empty list
+        # used to uninstall every Databricks job. An explicit empty list (the
+        # Jobs screen with everything switched off) still removes them.
+        jobs_in_payload = 'enabled_jobs' in settings
+        if jobs_in_payload:
+            self._apply_job_changes(desired_enabled, desired_cluster_id)
+
         # Update stored settings after applying infra changes
-        self._settings.job_cluster_id = desired_cluster_id
-        self._settings.enabled_jobs = sorted(list(set(desired_enabled)))
-        self._settings.sync_enabled = settings.get('sync_enabled', False)
-        self._settings.sync_repository = settings.get('sync_repository')
+        if cluster_in_payload:
+            self._settings.job_cluster_id = desired_cluster_id
+        if jobs_in_payload:
+            self._settings.enabled_jobs = sorted(list(set(desired_enabled)))
+        if 'sync_enabled' in settings:
+            self._settings.sync_enabled = settings.get('sync_enabled', False)
+        if 'sync_repository' in settings:
+            self._settings.sync_repository = settings.get('sync_repository')
         self._settings.updated_at = datetime.utcnow()
         
         # Handle Databricks Unity Catalog settings
@@ -1624,15 +1642,16 @@ class SettingsManager:
         # The token is write-only: the settings page never gets it back, so it
         # sends an empty field when the user didn't retype it. An empty or
         # missing value keeps the saved token; `git_password_clear` removes it.
-        if settings.get('git_password_clear'):
-            app_settings_repo.set(self._db, 'GIT_PASSWORD', None)
-            self._settings.GIT_PASSWORD = None
-            logger.info("Cleared GIT_PASSWORD")
-        elif settings.get('git_password'):
+        # A new token in the same payload wins over a clear.
+        if settings.get('git_password'):
             value = settings['git_password']
             app_settings_repo.set(self._db, 'GIT_PASSWORD', value)
             self._settings.GIT_PASSWORD = value
             logger.info("Updated GIT_PASSWORD")
+        elif settings.get('git_password_clear'):
+            app_settings_repo.set(self._db, 'GIT_PASSWORD', None)
+            self._settings.GIT_PASSWORD = None
+            logger.info("Cleared GIT_PASSWORD")
         
         # UI Customization settings
         if 'ui_i18n_enabled' in settings:

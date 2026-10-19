@@ -94,6 +94,11 @@ async def update_settings(
             details['allow_job_enablement_requests'] = settings_payload.get('allow_job_enablement_requests')
         if 'schema_import_child_limit' in settings_payload:
             details['schema_import_child_limit'] = settings_payload.get('schema_import_child_limit')
+        # The Git token itself never goes to the audit log, only what happened to it.
+        if settings_payload.get('git_password'):
+            details['git_password'] = 'set'
+        elif settings_payload.get('git_password_clear'):
+            details['git_password'] = 'cleared'
 
         updated = manager.update_settings(settings_payload)
         success = True
