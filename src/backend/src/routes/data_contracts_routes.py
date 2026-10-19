@@ -2018,9 +2018,11 @@ async def export_odcs(contract_id: str, db: DBSessionDep, manager: DataContracts
                 'Content-Type': 'application/x-yaml; charset=utf-8'
             }
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.exception("Failed to list versions for contract %s", contract_id)
-        raise HTTPException(status_code=500, detail="Failed to list versions")
+        logger.exception("Failed to export contract %s as ODCS", contract_id)
+        raise HTTPException(status_code=500, detail="Failed to export the contract")
 
 @router.post('/data-contracts/{contract_id}/link-assets', response_model=dict)
 async def auto_link_contract_schema_to_assets(
