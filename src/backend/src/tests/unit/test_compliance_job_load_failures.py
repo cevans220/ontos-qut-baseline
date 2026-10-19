@@ -146,6 +146,27 @@ def test_a_database_newer_than_the_code_is_reported_only(tmp_path, capsys):
     assert 'newer than this code' in capsys.readouterr().out
 
 
+def test_scripts_with_two_heads_stop_the_job(tmp_path, capsys):
+    import shutil
+    from alembic.script import ScriptDirectory
+
+    scripts = tmp_path / 'alembic'
+    shutil.copytree(_ALEMBIC_DIR, scripts)
+    parent = ScriptDirectory(str(scripts)).get_revision(_head()).down_revision
+    (scripts / 'versions' / 'zz_second_head.py').write_text(
+        f"revision = 'zz_second_head'\ndown_revision = {parent!r}\n"
+        "branch_labels = None\ndepends_on = None\n"
+        "def upgrade():\n    pass\ndef downgrade():\n    pass\n"
+    )
+
+    with pytest.raises(job.SchemaRevisionError):
+        job.check_schema_revision(_engine_at(tmp_path, _head()), scripts)
+
+    out = capsys.readouterr().out
+    assert 'ERROR: The Alembic scripts shipped with this code have more than one head' in out
+    assert 'zz_second_head' in out and _head() in out
+
+
 def test_without_the_scripts_the_check_is_skipped(tmp_path, capsys):
     job.check_schema_revision(_engine_at(tmp_path, 'i9466e370gg2'), None)
 

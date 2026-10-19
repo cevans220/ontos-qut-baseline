@@ -258,7 +258,17 @@ def check_schema_revision(engine: Engine, script_location: Optional[Path]) -> No
     from alembic.util.exc import CommandError
 
     script = ScriptDirectory(str(script_location))
-    head = script.get_current_head()
+    try:
+        head = script.get_current_head()
+    except (CommandError, RevisionError):
+        heads = ", ".join(sorted(script.get_heads()))
+        message = (
+            f"The Alembic scripts shipped with this code have more than one head ({heads}), "
+            "so the revision the database should be at is unknown. Deploy code whose "
+            "migrations have a single head, then reinstall the Compliance Checks workflow."
+        )
+        print(f"  ERROR: {message}")
+        raise SchemaRevisionError(message)
     with engine.connect() as conn:
         current = MigrationContext.configure(conn).get_current_heads()
 
