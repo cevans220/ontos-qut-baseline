@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from src.db_models.process_workflows import WorkflowStepDb, WorkflowExecutionDb
@@ -201,10 +202,6 @@ class StepHandler(ABC):
 
 class _ReviewStepRefused(Exception):
     """A lifecycle step of a product review outcome was refused."""
-
-    def __init__(self, reached_status: Optional[str]):
-        super().__init__(reached_status)
-        self.reached_status = reached_status
 
 
 class RuleEntityLoadError(RuntimeError):
@@ -3336,15 +3333,21 @@ class WorkflowExecutor:
         search_manager = get_app_state_manager('search_manager')
         if search_manager:
             manager.set_search_manager(search_manager)
-        reached_status = current_status
+        applied: List[str] = []
         try:
             self._run_product_review_steps(
-                manager, trigger_context, product_id, steps, target_status, responded_by,
+                manager, trigger_context, product_id, steps, target_status, responded_by, applied,
             )
-            reached_status = target_status
-        except _ReviewStepRefused as refused:
-            reached_status = refused.reached_status or current_status
+        except _ReviewStepRefused:
+            pass
+        except SQLAlchemyError:
+            # The steps before the failed one are committed; the session must
+            # be usable again to fire their trigger below
+            self._db.rollback()
+            raise
         finally:
+            # Also after an unexpected error, for the steps already applied
+            reached_status = applied[-1] if applied else current_status
             if reached_status != current_status:
                 manager.fire_status_change_trigger(
                     product_id, product.name, current_status, reached_status, responded_by,
@@ -3363,19 +3366,20 @@ class WorkflowExecutor:
         steps: List[str],
         target_status: str,
         responded_by: Optional[str],
+        applied: List[str],
     ) -> None:
         """Apply the review's lifecycle steps without per-step triggers.
 
-        Raises ``_ReviewStepRefused`` with the status reached when a step is
-        refused, after telling the requester and the approver.
+        Each applied step is appended to ``applied``. Raises
+        ``_ReviewStepRefused`` when a step is refused, after telling the
+        requester and the approver.
         """
-        reached_status = None
         for step in steps:
             try:
                 manager.transition_status(
                     product_id, step, responded_by, fire_status_change_trigger=False,
                 )
-                reached_status = step
+                applied.append(step)
             except ValueError as e:
                 logger.warning(
                     "Review outcome of data product %s: the change to '%s' was refused: %s",
@@ -3390,7 +3394,7 @@ class WorkflowExecutor:
                     params={'toStatus': target_status, 'reason': str(e)},
                     error=e,
                 )
-                raise _ReviewStepRefused(reached_status) from e
+                raise _ReviewStepRefused() from e
 
     def _apply_requested_status_change(
         self,

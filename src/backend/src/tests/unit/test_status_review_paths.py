@@ -325,6 +325,73 @@ def test_a_refused_review_step_fires_on_status_change_for_the_applied_part(db_se
     assert (context['from_status'], context['to_status']) == ('under_review', 'approved')
 
 
+def _review_context(product):
+    return TriggerContext(
+        entity_type='data_product', entity_id=product.id, entity_name=product.name,
+        trigger_type=TriggerType.ON_REQUEST_REVIEW, user_email='producer@example.com',
+    )
+
+
+def _fail_the_activation(monkeypatch, error):
+    """transition_status applies under_review -> approved, then raises on -> active."""
+    from src.controller.data_products_manager import DataProductsManager
+
+    original = DataProductsManager.transition_status
+
+    def transition_status(self, product_id, new_status, *args, **kwargs):
+        if new_status == 'active':
+            raise error
+        self._update_search_index = lambda *a, **k: None
+        return original(self, product_id, new_status, *args, **kwargs)
+
+    monkeypatch.setattr(DataProductsManager, 'transition_status', transition_status)
+
+
+def test_an_error_in_a_later_review_step_fires_on_status_change_for_the_applied_part(
+    db_session, monkeypatch,
+):
+    any_change = _status_change_workflow(db_session, 'Any change')
+    product = _product(db_session)
+    _fail_the_activation(monkeypatch, RuntimeError('search index down'))
+
+    with pytest.raises(RuntimeError):
+        WorkflowExecutor(db_session)._apply_product_review_outcome(
+            _review_context(product), product.id, True, 'steward@example.com',
+        )
+
+    runs = _runs(db_session, any_change)
+    assert len(runs) == 1
+    context = json.loads(runs[0].trigger_context)
+    assert (context['from_status'], context['to_status']) == ('under_review', 'approved')
+
+
+def test_a_database_error_in_a_later_review_step_rolls_back_before_the_trigger(
+    db_session, monkeypatch,
+):
+    from sqlalchemy.exc import OperationalError
+
+    from src.controller.data_products_manager import DataProductsManager
+
+    product = _product(db_session)
+    _fail_the_activation(monkeypatch, OperationalError('UPDATE', {}, Exception('db down')))
+    calls = []
+    # Recorded only: the test session's rollback would drop the test's own data
+    monkeypatch.setattr(db_session, 'rollback', lambda: calls.append('rollback'))
+    monkeypatch.setattr(
+        DataProductsManager, 'fire_status_change_trigger',
+        lambda self, pid, name, from_status, to_status, user=None, **kw: calls.append(
+            ('trigger', from_status, to_status),
+        ),
+    )
+
+    with pytest.raises(OperationalError):
+        WorkflowExecutor(db_session)._apply_product_review_outcome(
+            _review_context(product), product.id, True, 'steward@example.com',
+        )
+
+    assert calls == ['rollback', ('trigger', 'under_review', 'approved')]
+
+
 def test_a_direct_status_change_still_fires_on_status_change(db_session):
     from src.controller.data_products_manager import DataProductsManager
 
