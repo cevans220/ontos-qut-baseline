@@ -7,7 +7,7 @@ Provides CRUD operations for workflow definitions and execution management.
 import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
-from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Query
 from sqlalchemy.orm import Session
 
 from src.common.database import get_db
@@ -942,6 +942,26 @@ async def validate_workflow(
 ) -> WorkflowValidationResult:
     """Validate a workflow definition."""
     return manager.validate_workflow(workflow)
+
+
+@router.post("/check-condition")
+async def check_condition(
+    request: Request,
+    body: Dict[str, Any] = Body(...),
+    _: bool = Depends(PermissionChecker('settings-workflows', FeatureAccessLevel.READ_ONLY)),
+) -> Dict[str, Any]:
+    """Check that a Conditional step's condition parses (used by the designer).
+
+    Returns ``{valid, code, params, message}``; ``code`` and ``params`` are for
+    the UI to translate, ``message`` is the English text.
+    """
+    from src.common.workflow_step_config import check_condition as _check_condition
+
+    condition = body.get('condition')
+    issue = _check_condition(condition if isinstance(condition, str) else None)
+    if issue is None:
+        return {'valid': True, 'code': None, 'params': {}, 'message': None}
+    return {'valid': False, **issue}
 
 
 @router.post("/load-defaults")

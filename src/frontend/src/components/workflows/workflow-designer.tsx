@@ -107,6 +107,13 @@ import {
   OnBehalfOfNode,
 } from './workflow-nodes';
 import TemplateVarsInspector from './template-vars-inspector';
+import { ConditionalStepConfig, ScriptStepConfig } from './step-config-forms';
+import {
+  localStepConfigIssue,
+  stepConfigIssueText,
+  type ConditionCheckResult,
+  type StepConfigIssue,
+} from './step-config-checks';
 
 import type {
   ProcessWorkflow,
@@ -814,6 +821,8 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
   const [isSaving, setIsSaving] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [_stepTypes, setStepTypes] = useState<StepTypeSchema[]>([]);
+  // Step whose config blocked the last save; its form shows the missing field.
+  const [invalidStepId, setInvalidStepId] = useState<string | null>(null);
   const [compliancePolicies, setCompliancePolicies] = useState<CompliancePolicyRef[]>([]);
   const [availableRoles, setAvailableRoles] = useState<{ id: string; name: string; source: 'app' | 'business'; has_groups?: boolean; category?: string; description?: string }[]>([]);
   // approverRoles is the approval-entity-filtered subset of availableRoles used
@@ -1387,6 +1396,26 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
     ));
   };
 
+  // Conditional and Script steps the backend would reject, with a translatable issue.
+  const findStepConfigIssue = async (): Promise<{ step: WorkflowStepCreate; issue: StepConfigIssue } | null> => {
+    for (const step of steps) {
+      const schema = _stepTypes.find(s => s.type === step.step_type)?.config_schema;
+      const local = localStepConfigIssue(step, schema);
+      if (local) {
+        return { step, issue: local };
+      }
+      if (step.step_type === 'conditional') {
+        const response = await post<ConditionCheckResult>('/api/workflows/check-condition', {
+          condition: (step.config as { condition?: string }).condition,
+        });
+        if (!response.error && response.data?.valid === false) {
+          return { step, issue: response.data };
+        }
+      }
+    }
+    return null;
+  };
+
   // Save workflow
   const handleSave = async () => {
     if (!workflowType) {
@@ -1406,6 +1435,22 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
       });
       return;
     }
+
+    const stepIssue = await findStepConfigIssue();
+    if (stepIssue) {
+      setInvalidStepId(stepIssue.step.step_id);
+      setSelectedNodeId(stepIssue.step.step_id);
+      toast({
+        title: t('workflows:designer.messages.validationError'),
+        description: t('workflows:designer.messages.stepConfigInvalid', {
+          step: stepIssue.step.name,
+          issue: stepConfigIssueText(stepIssue.issue, t),
+        }),
+        variant: 'destructive',
+      });
+      return;
+    }
+    setInvalidStepId(null);
 
     setIsSaving(true);
     try {
@@ -2045,6 +2090,27 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
                     </div>
                   )}
                   
+                  {selectedStep.step_type === 'conditional' && (
+                    <ConditionalStepConfig
+                      key={selectedStep.step_id}
+                      config={(selectedStep.config || {}) as Record<string, unknown>}
+                      onChange={(config) => updateStep(selectedStep.step_id, { config })}
+                      showRequired={invalidStepId === selectedStep.step_id}
+                    />
+                  )}
+
+                  {selectedStep.step_type === 'script' && (
+                    <ScriptStepConfig
+                      key={selectedStep.step_id}
+                      config={(selectedStep.config || {}) as Record<string, unknown>}
+                      schema={_stepTypes.find(s => s.type === 'script')?.config_schema}
+                      onChange={(config) => updateStep(selectedStep.step_id, { config })}
+                      triggerType={triggerType}
+                      entityType={entityTypes[0]}
+                      showRequired={invalidStepId === selectedStep.step_id}
+                    />
+                  )}
+
                   {selectedStep.step_type === 'notification' && (
                     <>
                       {(() => {

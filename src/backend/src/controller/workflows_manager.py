@@ -35,6 +35,7 @@ from src.models.process_workflows import (
 )
 from src.repositories.process_workflows_repository import process_workflow_repo
 from src.common.logging import get_logger
+from src.common.workflow_step_config import check_condition, check_script_config
 
 logger = get_logger(__name__)
 
@@ -487,12 +488,13 @@ class WorkflowsManager:
                 errors.append(f"Step '{step.step_id}': Remove tag step requires 'key' in config")
         
         elif step.step_type == StepType.CONDITIONAL:
-            if not config.get('condition'):
-                errors.append(f"Step '{step.step_id}': Conditional step requires 'condition' in config")
-        
+            issue = check_condition(config.get('condition'))
+            if issue:
+                errors.append(f"Step '{step.step_id}': {issue['message']}")
+
         elif step.step_type == StepType.SCRIPT:
-            if not config.get('code'):
-                errors.append(f"Step '{step.step_id}': Script step requires 'code' in config")
+            for issue in check_script_config(config):
+                errors.append(f"Step '{step.step_id}': {issue['message']}")
         
         elif step.step_type == StepType.ENTITY_ACTION:
             if not config.get('action'):
@@ -609,7 +611,7 @@ class WorkflowsManager:
                     "properties": {
                         "language": {"type": "string", "enum": ["python", "sql"], "default": "python"},
                         "code": {"type": "string", "description": "Script code"},
-                        "timeout_seconds": {"type": "integer", "default": 60}
+                        "timeout_seconds": {"type": "integer", "default": 60, "minimum": 1}
                     },
                     "required": ["code"]
                 },

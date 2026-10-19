@@ -43,7 +43,8 @@
       "createdSuccess": "Flujo de trabajo creado correctamente",
       "updatedSuccess": "Flujo de trabajo actualizado correctamente",
       "createFailed": "No se pudo crear el flujo de trabajo: {{error}}",
-      "updateFailed": "No se pudo actualizar el flujo de trabajo: {{error}}"
+      "updateFailed": "No se pudo actualizar el flujo de trabajo: {{error}}",
+      "stepConfigInvalid": "Paso \"{{step}}\": {{issue}}"
     },
     "badges": {
       "default": "Predeterminado",
@@ -241,6 +242,46 @@
       "timeoutSeconds": "Tiempo de espera (segundos)",
       "retryCount": "Número de reintentos",
       "retryHelp": "Número de reintentos en caso de fallo (0-5)."
+    },
+    "conditional": {
+      "condition": "Condición",
+      "placeholder": "obj.status = 'active' AND NOT HAS_TAG('pii')",
+      "branchHelp": "Cuando la condición es verdadera, el workflow sigue la rama Pass; cuando es falsa, la rama Fail.",
+      "fieldsHelp": "Escriba una expresión de la Compliance DSL sin MATCH ni ASSERT. Los campos de la entidad se leen como obj.<campo>; compare con =, no ==.",
+      "examplesTitle": "Ejemplos",
+      "errors": {
+        "condition_required": "Introduzca una condición.",
+        "condition_syntax_error": "No se puede interpretar la condición (línea {{line}}, columna {{column}}).",
+        "condition_trailing_input": "\"{{token}}\" inesperado después de la condición (línea {{line}}, columna {{column}}). Una las condiciones con AND u OR."
+      }
+    },
+    "script": {
+      "language": "Lenguaje",
+      "languages": {
+        "python": "Python",
+        "sql": "SQL"
+      },
+      "code": "Código",
+      "pythonPlaceholder": "if not entity.get('description'):\n    result = {'passed': False, 'message': 'Missing description'}",
+      "sqlPlaceholder": "SELECT COUNT(*) FROM ${entity_id}",
+      "timeout": "Tiempo límite (segundos)",
+      "timeoutHelp": "El paso falla cuando el script se ejecuta durante más tiempo.",
+      "variablesTitle": "Variables disponibles",
+      "pythonVariables": {
+        "entity": "Los datos de la entidad (un diccionario)",
+        "entity_type": "El tipo de la entidad",
+        "entity_id": "El ID de la entidad",
+        "entity_name": "El nombre de la entidad",
+        "user_email": "Correo del usuario que activó el workflow",
+        "step_results": "Resultados de los pasos que ya se ejecutaron, por ID de paso"
+      },
+      "pythonResultHelp": "Asigne result para elegir la rama: result = {'passed': False, 'message': '...'} sigue la rama Fail; sin result el paso se aprueba. Solo hay built-ins básicos: sin imports, archivos ni red.",
+      "sqlHelp": "Se ejecuta en el SQL warehouse definido en Configuración. Los marcadores ${variable} se sustituyen antes de ejecutar la instrucción; el paso se aprueba cuando la instrucción termina correctamente. La instrucción espera hasta 50 segundos.",
+      "errors": {
+        "script_code_required": "Introduzca el código del script.",
+        "script_timeout_invalid": "Introduzca un número entero de segundos, al menos {{minimum}}.",
+        "script_language_unsupported": "El lenguaje \"{{language}}\" no es compatible. Compatibles: {{supported}}."
+      }
     }
   },
   "approvalResponse": {

@@ -43,7 +43,8 @@
       "createdSuccess": "Workflow succesvol aangemaakt",
       "updatedSuccess": "Workflow succesvol bijgewerkt",
       "createFailed": "Kon workflow niet aanmaken: {{error}}",
-      "updateFailed": "Kon workflow niet bijwerken: {{error}}"
+      "updateFailed": "Kon workflow niet bijwerken: {{error}}",
+      "stepConfigInvalid": "Stap \"{{step}}\": {{issue}}"
     },
     "badges": {
       "default": "Standaard",
@@ -241,6 +242,46 @@
       "timeoutSeconds": "Time-out (seconden)",
       "retryCount": "Aantal Nieuwe Pogingen",
       "retryHelp": "Aantal nieuwe pogingen bij mislukking (0-5)."
+    },
+    "conditional": {
+      "condition": "Voorwaarde",
+      "placeholder": "obj.status = 'active' AND NOT HAS_TAG('pii')",
+      "branchHelp": "Als de voorwaarde waar is, volgt de workflow de Pass-tak; als ze onwaar is, de Fail-tak.",
+      "fieldsHelp": "Schrijf een Compliance DSL-expressie zonder MATCH of ASSERT. Velden van de entiteit lees je als obj.<veld>; vergelijk met =, niet ==.",
+      "examplesTitle": "Voorbeelden",
+      "errors": {
+        "condition_required": "Voer een voorwaarde in.",
+        "condition_syntax_error": "De voorwaarde kan niet worden geparsed (regel {{line}}, kolom {{column}}).",
+        "condition_trailing_input": "Onverwachte \"{{token}}\" na de voorwaarde (regel {{line}}, kolom {{column}}). Verbind voorwaarden met AND of OR."
+      }
+    },
+    "script": {
+      "language": "Taal",
+      "languages": {
+        "python": "Python",
+        "sql": "SQL"
+      },
+      "code": "Code",
+      "pythonPlaceholder": "if not entity.get('description'):\n    result = {'passed': False, 'message': 'Missing description'}",
+      "sqlPlaceholder": "SELECT COUNT(*) FROM ${entity_id}",
+      "timeout": "Time-out (seconden)",
+      "timeoutHelp": "De stap mislukt als het script langer draait.",
+      "variablesTitle": "Beschikbare variabelen",
+      "pythonVariables": {
+        "entity": "De gegevens van de entiteit (een dictionary)",
+        "entity_type": "Het type van de entiteit",
+        "entity_id": "De ID van de entiteit",
+        "entity_name": "De naam van de entiteit",
+        "user_email": "E-mail van de gebruiker die de workflow startte",
+        "step_results": "Resultaten van de stappen die al zijn uitgevoerd, per stap-ID"
+      },
+      "pythonResultHelp": "Stel result in om de tak te kiezen: result = {'passed': False, 'message': '...'} volgt de Fail-tak; zonder result slaagt de stap. Alleen basis-built-ins zijn beschikbaar: geen imports, bestanden of netwerk.",
+      "sqlHelp": "Draait op de SQL-warehouse die in Instellingen is ingesteld. ${variable}-plaatshouders worden vervangen voordat de instructie draait; de stap slaagt als de instructie slaagt. De instructie wacht maximaal 50 seconden.",
+      "errors": {
+        "script_code_required": "Voer de code van het script in.",
+        "script_timeout_invalid": "Voer een geheel aantal seconden in, minimaal {{minimum}}.",
+        "script_language_unsupported": "De taal \"{{language}}\" wordt niet ondersteund. Ondersteund: {{supported}}."
+      }
     }
   },
   "approvalResponse": {
