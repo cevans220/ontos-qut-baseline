@@ -695,6 +695,20 @@ async def get_workflow(
     return workflow
 
 
+def _invalid_workflow_detail(validation: WorkflowValidationResult) -> dict:
+    """400 detail of a workflow that failed validation.
+
+    ``errors`` keeps the English list older clients read; ``code`` and
+    ``params.issues`` let the designer show each error in the user's language.
+    """
+    return {
+        "code": "workflow_invalid",
+        "message": "; ".join(validation.errors),
+        "errors": validation.errors,
+        "params": {"issues": [issue.model_dump() for issue in validation.issues]},
+    }
+
+
 @router.post("", response_model=ProcessWorkflow)
 async def create_workflow(
     request: Request,
@@ -711,7 +725,7 @@ async def create_workflow(
     # Validate workflow
     validation = manager.validate_workflow(workflow)
     if not validation.valid:
-        raise HTTPException(status_code=400, detail={"errors": validation.errors})
+        raise HTTPException(status_code=400, detail=_invalid_workflow_detail(validation))
     
     result = manager.create_workflow(workflow, created_by=user_email)
     
@@ -759,7 +773,7 @@ async def update_workflow(
         )
         validation = manager.validate_workflow(full_workflow)
         if not validation.valid:
-            raise HTTPException(status_code=400, detail={"errors": validation.errors})
+            raise HTTPException(status_code=400, detail=_invalid_workflow_detail(validation))
     
     result = manager.update_workflow(workflow_id, workflow, updated_by=user_email)
     if not result:

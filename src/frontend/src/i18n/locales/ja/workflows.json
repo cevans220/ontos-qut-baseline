@@ -284,6 +284,16 @@
         "script_timeout_invalid": "{{minimum}} 以上の整数（秒）を入力してください。",
         "script_language_unsupported": "言語 \"{{language}}\" はサポートされていません。サポート対象: {{supported}}。"
       }
+    },
+    "validationIssues": {
+      "stepsRequired": "ワークフローには少なくとも1つのステップが必要です。",
+      "duplicateStepIds": "2つのステップのIDが同じです。",
+      "stepUnknownReference": "ステップ「{{step}}」の{{branch}}の分岐先「{{target}}」はワークフロー内にありません。",
+      "stepConfigMissing": "ステップ「{{step}}」に必須の設定がありません: {{fields}}。",
+      "branch": {
+        "on_pass": "成功時",
+        "on_fail": "失敗時"
+      }
     }
   },
   "approvalResponse": {

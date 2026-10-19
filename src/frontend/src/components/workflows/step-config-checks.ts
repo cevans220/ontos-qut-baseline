@@ -43,6 +43,53 @@ export function stepConfigIssueText(issue: StepConfigIssue, t: TFunction): strin
   });
 }
 
+/** An error of POST/PUT /api/workflows (`detail.params.issues`), see validate_workflow. */
+export interface WorkflowValidationIssue {
+  code: string;
+  message?: string | null;
+  params?: Record<string, unknown>;
+}
+
+/** The translated text of a workflow validation error (English text from the backend as fallback). */
+export function workflowValidationIssueText(issue: WorkflowValidationIssue, t: TFunction): string {
+  const params = issue.params || {};
+  const fallback = issue.message || issue.code;
+  switch (issue.code) {
+    case 'workflow_name_required':
+      return t('workflows:designer.messages.nameRequired', { defaultValue: fallback });
+    case 'workflow_steps_required':
+      return t('workflows:designer.validationIssues.stepsRequired', { defaultValue: fallback });
+    case 'duplicate_step_ids':
+      return t('workflows:designer.validationIssues.duplicateStepIds', { defaultValue: fallback });
+    case 'step_unknown_reference':
+      return t('workflows:designer.validationIssues.stepUnknownReference', {
+        step: params.step,
+        target: params.target,
+        branch: t(`workflows:designer.validationIssues.branch.${String(params.field)}`, {
+          defaultValue: String(params.field ?? ''),
+        }),
+        defaultValue: fallback,
+      });
+    case 'step_config_missing':
+      return t('workflows:designer.validationIssues.stepConfigMissing', {
+        step: params.step,
+        fields: Array.isArray(params.fields) ? params.fields.join(', ') : '',
+        defaultValue: fallback,
+      });
+    default:
+      if (!(issue.code.startsWith('condition_') || issue.code.startsWith('script_'))) {
+        // An error the designer has no text for: the backend's English text.
+        return fallback;
+      }
+      // Conditional and Script checks keep their own codes (stepConfigIssueText).
+      return t('workflows:designer.messages.stepConfigInvalid', {
+        step: params.step,
+        issue: stepConfigIssueText({ code: issue.code, params, message: null }, t),
+        defaultValue: fallback,
+      });
+  }
+}
+
 /** Issues the designer can find without the backend: a missing condition or code, a bad timeout. */
 export function localStepConfigIssue(
   step: WorkflowStepCreate,

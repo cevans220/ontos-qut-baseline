@@ -284,6 +284,16 @@
         "script_timeout_invalid": "Geben Sie eine ganze Zahl an Sekunden ein, mindestens {{minimum}}.",
         "script_language_unsupported": "Die Sprache \"{{language}}\" wird nicht unterstützt. Unterstützt: {{supported}}."
       }
+    },
+    "validationIssues": {
+      "stepsRequired": "Ein Workflow braucht mindestens einen Schritt.",
+      "duplicateStepIds": "Zwei Schritte haben dieselbe ID.",
+      "stepUnknownReference": "Schritt \"{{step}}\" verweist mit seinem {{branch}}-Zweig auf \"{{target}}\", der nicht im Workflow ist.",
+      "stepConfigMissing": "Bei Schritt \"{{step}}\" fehlen Pflichteinstellungen: {{fields}}.",
+      "branch": {
+        "on_pass": "Erfolgs",
+        "on_fail": "Fehler"
+      }
     }
   },
   "approvalResponse": {

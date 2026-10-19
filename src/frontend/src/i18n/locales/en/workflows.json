@@ -284,6 +284,16 @@
         "script_timeout_invalid": "Enter a whole number of seconds, at least {{minimum}}.",
         "script_language_unsupported": "The language \"{{language}}\" is not supported. Supported: {{supported}}."
       }
+    },
+    "validationIssues": {
+      "stepsRequired": "A workflow needs at least one step.",
+      "duplicateStepIds": "Two steps have the same ID.",
+      "stepUnknownReference": "Step \"{{step}}\" points its {{branch}} branch at \"{{target}}\", which is not in the workflow.",
+      "stepConfigMissing": "Step \"{{step}}\" is missing required settings: {{fields}}.",
+      "branch": {
+        "on_pass": "pass",
+        "on_fail": "fail"
+      }
     }
   },
   "approvalResponse": {

@@ -284,6 +284,16 @@
         "script_timeout_invalid": "Informe um número inteiro de segundos, no mínimo {{minimum}}.",
         "script_language_unsupported": "A linguagem \"{{language}}\" não é suportada. Suportadas: {{supported}}."
       }
+    },
+    "validationIssues": {
+      "stepsRequired": "Um workflow precisa de pelo menos uma etapa.",
+      "duplicateStepIds": "Duas etapas têm o mesmo ID.",
+      "stepUnknownReference": "A etapa \"{{step}}\" aponta o ramo de {{branch}} para \"{{target}}\", que não está no workflow.",
+      "stepConfigMissing": "Faltam configurações obrigatórias na etapa \"{{step}}\": {{fields}}.",
+      "branch": {
+        "on_pass": "sucesso",
+        "on_fail": "falha"
+      }
     }
   },
   "approvalResponse": {

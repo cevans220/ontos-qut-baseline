@@ -110,8 +110,10 @@ import { ConditionalStepConfig, ScriptStepConfig } from './step-config-forms';
 import {
   localStepConfigIssue,
   stepConfigIssueText,
+  workflowValidationIssueText,
   type ConditionCheckResult,
   type StepConfigIssue,
+  type WorkflowValidationIssue,
 } from './step-config-checks';
 import TemplateVarsInspector from './template-vars-inspector';
 
@@ -1373,9 +1375,18 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
 
   // Delete step
   const deleteStep = (stepId: string) => {
-    const remaining = steps.filter(s => s.step_id !== stepId);
+    // Its connections are removed with it, so no step may still point at it:
+    // on_pass / on_fail of those steps are cleared, as when an edge is deleted.
+    const unlink = (s: WorkflowStepCreate): WorkflowStepCreate => ({
+      ...s,
+      ...(s.on_pass === stepId ? { on_pass: undefined } : {}),
+      ...(s.on_fail === stepId ? { on_fail: undefined } : {}),
+    });
+    const remaining = steps.filter(s => s.step_id !== stepId).map(unlink);
     setSteps(remaining);
-    setNodes(prev => prev.filter(n => n.id !== stepId));
+    setNodes(prev => prev
+      .filter(n => n.id !== stepId)
+      .map(n => (n.data?.step ? { ...n, data: { ...n.data, step: unlink(n.data.step) } } : n)));
     // The trigger moves on to the step that is now first
     setEdges(prev => withTriggerEdge(
       prev.filter(e => e.source !== stepId && e.target !== stepId),
@@ -1476,9 +1487,21 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
       }
 
       if (response.error) {
+        const issues = response.errorCode === 'workflow_invalid' && Array.isArray(response.errorParams?.issues)
+          ? (response.errorParams.issues as WorkflowValidationIssue[])
+          : null;
+        const failedStep = issues
+          ?.map(issue => issue.params?.step)
+          .find(step => steps.some(s => s.step_id === step));
+        if (typeof failedStep === 'string') {
+          setInvalidStepId(failedStep);
+          setSelectedNodeId(failedStep);
+        }
         toast({
           title: t('workflows:designer.messages.validationError'),
-          description: response.error,
+          description: issues
+            ? issues.map(issue => workflowValidationIssueText(issue, t)).join(' ')
+            : response.error,
           variant: 'destructive',
         });
         return;

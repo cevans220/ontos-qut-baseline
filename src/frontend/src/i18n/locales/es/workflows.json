@@ -284,6 +284,16 @@
         "script_timeout_invalid": "Introduzca un número entero de segundos, al menos {{minimum}}.",
         "script_language_unsupported": "El lenguaje \"{{language}}\" no es compatible. Compatibles: {{supported}}."
       }
+    },
+    "validationIssues": {
+      "stepsRequired": "Un workflow necesita al menos un paso.",
+      "duplicateStepIds": "Dos pasos tienen el mismo ID.",
+      "stepUnknownReference": "El paso \"{{step}}\" dirige su rama de {{branch}} a \"{{target}}\", que no está en el workflow.",
+      "stepConfigMissing": "Al paso \"{{step}}\" le faltan ajustes obligatorios: {{fields}}.",
+      "branch": {
+        "on_pass": "éxito",
+        "on_fail": "fallo"
+      }
     }
   },
   "approvalResponse": {
