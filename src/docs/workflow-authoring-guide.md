@@ -274,6 +274,8 @@ This only happens after an approval step: a request workflow that never pauses d
 
 Each reason is the Fail step's `message` (or the failing step's message), so write it for the user who is refused.
 
+**A gate that errors.** A gate whose evaluation raises an error (an exception, not a Fail step) is logged and the change goes ahead (#1103). A `PUT /api/data-products/{id}` or `PUT /api/data-contracts/{id}` that changes `status` doesn't run gates at all. STATUS_PR changes both: the trigger's `on_error` decides what a gate error does (`fail_open`, the default, lets the change through with a `GATE_ERROR` audit entry; `fail_closed` refuses it with `status_change_gate_error`), `disabled_for: {domains, data_products, data_contracts}` switches a gate off for those entities (audited as `GATE_SKIPPED`), and a `PUT` with a different `status` is refused with `status_change_requires_transition`.
+
 **Don't put an approval in a gate.** A gate with an approval step pauses, which is not `succeeded`, so the change is refused with "waiting for approval", and approving later doesn't apply the change. To require an approval for a status change, use a status change request (`on_request_status_change`), which applies the change when it is approved.
 
 ## Failures, Retries and Cancellation
@@ -284,6 +286,7 @@ Each reason is the Fail step's `message` (or the failing step's message), so wri
 | `on_pass` / `on_fail` names a step that doesn't exist | Saving the workflow is refused (HTTP 400, `Step '<id>' references unknown step '<name>'`) |
 | An `on_*` workflow fails | The action that fired it is already done and stays done |
 | A gate fails or pauses | The action is refused |
+| A gate's evaluation raises an error | The action goes ahead (STATUS_PR adds `on_error: fail_closed` to refuse it) |
 | The server restarts while an execution is paused | It stays paused and can still be decided |
 
 **Retry** (admins, failed executions only, `POST /api/workflows/executions/{id}/retry` or the Retry action in Recent Executions) runs the same execution again from the first step, with the trigger payload it was started with. Its previous step results are replaced, and every step runs again: notifications are sent again and webhooks called again.
@@ -303,9 +306,9 @@ Each reason is the Fail step's `message` (or the failing step's message), so wri
 
 A step shows **Pending** when it was not on the path the execution took: in a finished execution, the steps of the branches not taken stay Pending. It is not an error.
 
-If every step of an old execution shows Pending, its workflow was saved since: saving a workflow's steps (designer, `PUT /api/workflows/{id}` with `steps`, or Reload All Defaults) re-creates the steps, and the step results of its past executions are removed with the old steps. The execution itself, its status and error remain.
+If every step of an old execution shows Pending, its workflow was saved since: saving a workflow's steps (designer, `PUT /api/workflows/{id}` with `steps`, or Reload All Defaults) re-creates the steps, and the step results of its past executions are removed with the old steps. The execution itself, its status and error remain. (Fixed by WORKFLOWS_PR: steps are updated in place, and the results of a removed step are kept and shown under "Removed steps".)
 
-What is stored for a step: its status, its error, and its result data (for example a notification's `recipients` and `message`, an approval's `approvers`, a webhook's URL). A validation step's failure message is not stored, only the rule; route the failure to a notification or a Fail step with a message to see it.
+What is stored for a step: its status, its error, and its result data (for example a notification's `recipients` and `message`, an approval's `approvers`, a webhook's URL). A validation step's failure message is not stored, only the rule; route the failure to a notification or a Fail step with a message to see it (fixed by WORKFLOWS_PR, which stores it as the step's error).
 
 The **Error** column is the execution's error: the Fail step's message, or the message of the step it ended on. Step errors that carry a code are shown in the user's language.
 
@@ -443,13 +446,14 @@ Run on "Trading Analytics Dashboard v1" (with `entity_name` in the query), the n
 As of this version:
 
 - **After an approval, `requester` and `trigger_user` resolve to the approver**, as does `${user_email}`: a notification to the requester after an approval reaches the approver instead. Until this is fixed (PR #1017), address the requester after an approval by email, or notify them before the approval step.
-- `scheduled` triggers are not run.
+- `scheduled` triggers are not run (see #941).
 - Workflow scopes are saved but not applied.
+- A gate whose evaluation errors lets the change through, and a `PUT` that changes `status` skips gates (STATUS_PR adds `on_error` and refuses that `PUT`).
 - An approval step's `require_all` and `timeout_days` are not enforced.
-- Saving a workflow's steps removes the step results of its past executions.
-- A validation step's failure message is not stored with the step.
+- Saving a workflow's steps removes the step results of its past executions (fixed by WORKFLOWS_PR).
+- A validation step's failure message is not stored with the step (fixed by WORKFLOWS_PR).
 - Reload All Defaults also resets the defaults' active flag to the shipped value.
-- After an approval, a field of the entity's latest completed request wizard replaces an approval field with the same name (`${step_results.<approval_step_id>.reason}` can be the requester's reason).
-- The `config` example of the script step in the API schema uses `return`, which fails; set `result` instead.
+- After an approval, a field of the entity's latest completed request wizard replaces an approval field with the same name (`${step_results.<approval_step_id>.reason}` can be the requester's reason) (fixed by WORKFLOWS_PR).
+- The `config` example of the script step in the API schema uses `return`, which fails; set `result` instead (fixed by WORKFLOWS_PR).
 
 See also the [Future Roadmap section of the Process Workflows Guide](/user-docs/process-workflows-guide#future-roadmap-deferred-items) for timeout expiry, escalation and crash recovery.
