@@ -6,6 +6,7 @@ settings = get_settings()
 setup_logging(level=settings.LOG_LEVEL, log_file=settings.LOG_FILE)
 logger = get_logger(__name__)
 
+import asyncio
 import mimetypes
 import os
 import time
@@ -18,6 +19,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 from fastapi import HTTPException, status
 
@@ -510,9 +512,14 @@ async def health_check():
     """Return application health state."""
     return app.state.health
 
+# Serializes retries: a second click waits for the running one instead of
+# initializing the managers a second time in parallel.
+_retry_lock = asyncio.Lock()
+
+
 @app.post("/api/health/retry", tags=["System"])
 async def retry_startup():
-    """Re-attempt database init + manager init after a maintenance-mode failure.
+    """Re-attempt what failed at startup: the database, the managers, or only the workspace.
 
     NOTE: intentionally NOT gated by ``PermissionChecker``:
       1. Any authenticated user hitting the UI during a DB outage gets
@@ -524,20 +531,61 @@ async def retry_startup():
          broken — so gating would create a chicken-and-egg failure mode.
 
     Edge authentication by the Databricks Apps platform still blocks
-    anonymous callers in prod. The operation is idempotent.
+    anonymous callers in prod.
+
+    When the managers are already running (only the workspace was unavailable),
+    a retry first checks the workspace alone and re-initializes the managers
+    only once it is reachable, stopping the old job poller first. Retries are
+    serialized and run off the event loop, so a click never blocks other
+    requests or starts a second poller.
     """
-    settings = get_settings()
-    try:
-        initialize_database()
-        app.state.health["db_ok"] = True
-        app.state.health["db_error"] = None
-        app.state.health["db_error_code"] = None
-    except Exception as e:
-        set_db_error(app.state.health)
-        logger.critical(f"Database retry failed: {e}", exc_info=True)
-        return JSONResponse(
-            {"status": "error", "detail": health_issue("database_unavailable")}, status_code=503
-        )
+    async with _retry_lock:
+        return await run_in_threadpool(_retry_startup_blocking)
+
+
+def _managers_running() -> bool:
+    """True when startup got past the database and the managers without a failure."""
+    health = app.state.health
+    if not health.get("db_ok") or getattr(app.state, "settings_manager", None) is None:
+        return False
+    codes = {d.get("code") for d in health.get("warning_details", [])}
+    return "manager_init_failed" not in codes and health.get("seed_ok", True)
+
+
+def _stop_job_polling() -> None:
+    """Stop the running managers' job poller before they are replaced."""
+    jobs_manager = getattr(app.state, "jobs_manager", None)
+    if jobs_manager is not None:
+        try:
+            jobs_manager.stop_background_polling()
+        except Exception as e:
+            logger.warning(f"Could not stop the job poller before re-initializing: {e}")
+
+
+def _retry_startup_blocking():
+    if _managers_running():
+        if app.state.health.get("ws_ok"):
+            return {"status": "ok", "health": app.state.health}
+        try:
+            if not get_workspace_client(settings=get_settings()):
+                raise RuntimeError("WorkspaceClient returned None.")
+        except Exception as e:
+            logger.warning(f"Workspace client still unavailable on retry: {e}", exc_info=True)
+            return {"status": "ok", "health": app.state.health}
+        logger.info("Workspace client reachable again; re-initializing the managers with it.")
+    elif not app.state.health.get("db_ok"):
+        try:
+            initialize_database()
+            app.state.health["db_ok"] = True
+            app.state.health["db_error"] = None
+            app.state.health["db_error_code"] = None
+        except Exception as e:
+            set_db_error(app.state.health)
+            logger.critical(f"Database retry failed: {e}", exc_info=True)
+            return JSONResponse(
+                {"status": "error", "detail": health_issue("database_unavailable")},
+                status_code=503,
+            )
 
     try:
         app.state.health["warnings"] = []  # Reset warnings before retry
@@ -545,6 +593,7 @@ async def retry_startup():
         app.state.health["seed_ok"] = True  # Reset seed health; initialize_managers will flip if it fails
         app.state.health["seed_error"] = None
         app.state.health["seed_error_code"] = None
+        _stop_job_polling()
         initialize_managers(app)  # Sets health["ws_ok"] / health["seed_ok"] internally
         _seed_default_workflows()
     except Exception as e:
