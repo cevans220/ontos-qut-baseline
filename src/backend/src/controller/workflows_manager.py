@@ -24,6 +24,7 @@ from src.models.process_workflows import (
     StepType,
     TriggerType,
     GateErrorMode,
+    GateExemptions,
     EntityType,
     ScopeType,
     WorkflowType,
@@ -153,6 +154,7 @@ class WorkflowsManager:
                     to_status=trigger_data.get('to_status'),
                     schedule=trigger_data.get('schedule'),
                     on_error=self._safe_gate_error_mode(trigger_data.get('on_error')),
+                    disabled_for=self._safe_gate_exemptions(trigger_data.get('disabled_for')),
                 )
                 
                 # Parse scope
@@ -346,6 +348,7 @@ class WorkflowsManager:
             to_status=trigger_config.get('to_status'),
             schedule=trigger_config.get('schedule'),
             on_error=self._safe_gate_error_mode(trigger_config.get('on_error')),
+            disabled_for=self._safe_gate_exemptions(trigger_config.get('disabled_for')),
         )
         
         scope = WorkflowScope(
@@ -469,12 +472,39 @@ class WorkflowsManager:
         for step in workflow.steps:
             step_errors = self._validate_step_config(step)
             errors.extend(step_errors)
+
+        errors.extend(self._validate_gate_exemptions(workflow.trigger))
         
         return WorkflowValidationResult(
             valid=len(errors) == 0,
             errors=errors,
             warnings=warnings,
         )
+
+    def _validate_gate_exemptions(self, trigger: WorkflowTrigger) -> List[str]:
+        """``disabled_for`` is for status gates only, and must name existing entities."""
+        exemptions = trigger.disabled_for
+        if exemptions is None or exemptions.is_empty():
+            return []
+        if trigger.type != TriggerType.BEFORE_STATUS_CHANGE:
+            return ["Only before_status_change workflows can be switched off per domain, "
+                    "data product or data contract (disabled_for)"]
+        from src.db_models.data_domains import DataDomain as DataDomainDb
+        from src.db_models.data_products import DataProductDb
+        from src.db_models.data_contracts import DataContractDb
+
+        errors = []
+        for label, model, ids in (
+            ('domain', DataDomainDb, exemptions.domains),
+            ('data product', DataProductDb, exemptions.data_products),
+            ('data contract', DataContractDb, exemptions.data_contracts),
+        ):
+            if not ids:
+                continue
+            found = {row[0] for row in self._db.query(model.id).filter(model.id.in_(ids)).all()}
+            for missing in [i for i in ids if i not in found]:
+                errors.append(f"disabled_for: unknown {label} '{missing}'")
+        return errors
 
     def _validate_step_config(self, step: WorkflowStepCreate) -> List[str]:
         """Validate step configuration based on type."""
@@ -1316,6 +1346,17 @@ class WorkflowsManager:
             return GateErrorMode.FAIL_OPEN
 
     @staticmethod
+    def _safe_gate_exemptions(value: Any) -> GateExemptions:
+        """Parse a gate's ``disabled_for``; an unset or unreadable value switches nothing off."""
+        if not value:
+            return GateExemptions()
+        try:
+            return GateExemptions.model_validate(value)
+        except Exception:
+            logger.warning("Unreadable gate disabled_for %r in DB — ignoring it", value)
+            return GateExemptions()
+
+    @staticmethod
     def _safe_entity_type(value: str) -> EntityType:
         """Parse an entity type string, skipping unknown values."""
         try:
@@ -1341,6 +1382,7 @@ class WorkflowsManager:
             to_status=trigger_config.get('to_status'),
             schedule=trigger_config.get('schedule'),
             on_error=self._safe_gate_error_mode(trigger_config.get('on_error')),
+            disabled_for=self._safe_gate_exemptions(trigger_config.get('disabled_for')),
         )
         
         scope = WorkflowScope(

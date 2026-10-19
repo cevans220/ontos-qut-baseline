@@ -116,6 +116,7 @@ import {
   type WorkflowValidationIssue,
 } from './step-config-checks';
 import TemplateVarsInspector from './template-vars-inspector';
+import GateExemptionsField, { EMPTY_GATE_EXEMPTIONS } from './gate-exemptions-field';
 
 import type {
   ProcessWorkflow,
@@ -127,6 +128,7 @@ import type {
   TriggerType,
   EntityType,
   GateErrorMode,
+  GateExemptions,
   StepTypeSchema,
   CompliancePolicyRef,
   HttpConnectionRef,
@@ -852,6 +854,7 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
   const [triggerFromStatus, setTriggerFromStatus] = useState('');
   const [triggerToStatus, setTriggerToStatus] = useState('');
   const [triggerOnError, setTriggerOnError] = useState<GateErrorMode>('fail_open');
+  const [triggerDisabledFor, setTriggerDisabledFor] = useState<GateExemptions>(EMPTY_GATE_EXEMPTIONS);
   const [isActive, setIsActive] = useState(true);
   const [steps, setSteps] = useState<WorkflowStepCreate[]>([]);
   const [workflowType, setWorkflowType] = useState<WorkflowTypeValue | null>(isNew ? (initialType || null) : null);
@@ -1103,6 +1106,7 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
             setTriggerFromStatus(response.data.trigger.from_status || '');
             setTriggerToStatus(response.data.trigger.to_status || '');
             setTriggerOnError(response.data.trigger.on_error || 'fail_open');
+            setTriggerDisabledFor({ ...EMPTY_GATE_EXEMPTIONS, ...(response.data.trigger.disabled_for || {}) });
             setIsActive(response.data.is_active);
             setWorkflowType((response.data.workflow_type as WorkflowTypeValue) || 'process');
             const loadedSteps = response.data.steps.map(s => ({
@@ -1492,7 +1496,9 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
           entity_types: entityTypes,
           ...(triggerFromStatus ? { from_status: triggerFromStatus } : {}),
           ...(triggerToStatus ? { to_status: triggerToStatus } : {}),
-          ...(triggerType === 'before_status_change' ? { on_error: triggerOnError } : {}),
+          ...(triggerType === 'before_status_change'
+            ? { on_error: triggerOnError, disabled_for: triggerDisabledFor }
+            : {}),
         },
         workflow_type: workflowType || 'process',
         is_active: isActive,
@@ -1836,6 +1842,9 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
                         onCheckedChange={(on) => setTriggerOnError(on ? 'fail_closed' : 'fail_open')}
                       />
                     </div>
+                  )}
+                  {triggerType === 'before_status_change' && (
+                    <GateExemptionsField value={triggerDisabledFor} onChange={setTriggerDisabledFor} />
                   )}
 
                   <div>

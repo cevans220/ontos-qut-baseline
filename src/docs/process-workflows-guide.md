@@ -400,6 +400,30 @@ and one of them is enough to refuse the transition; if that fails too, the mode 
 unknown and the transition proceeds (the error is still reported). Use `fail_closed`
 for gates that enforce a policy, such as a certification or enforcement check.
 
+#### Switching a Status Gate Off for a Domain or an Entity
+
+A status gate can be switched off for some domains, data products or data
+contracts with `disabled_for` on its trigger (Designer: *Switched off for*):
+
+```json
+"trigger": {
+  "type": "before_status_change",
+  "entity_types": ["data_product", "data_contract"],
+  "disabled_for": {"domains": ["<domain id>"], "data_products": [], "data_contracts": ["<contract id>"]}
+}
+```
+
+- The gate doesn't run for a listed product or contract, nor for a product or
+  contract assigned to a listed domain (any of its domains, not only the primary).
+- The lists only switch the gate off: there is no way to switch it back on for one
+  entity of a listed domain. Subdomains are not included; list them too.
+- Each skip is logged at info level and written to the audit log (feature
+  `process-workflows`, action `GATE_SKIPPED`, with the entity, the statuses, the
+  workflow and which domain or entity switched it off).
+- It applies to `fail_closed` gates as well, also when the gates can't be listed.
+- Saving a workflow checks the ids exist, and only `before_status_change`
+  workflows accept the setting. Who can edit workflows can change it.
+
 ### TriggerEvent Dataclass
 
 ```python

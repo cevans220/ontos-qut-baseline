@@ -106,7 +106,20 @@
       "toStatusPlaceholder": "par ex. actif",
       "descriptionPlaceholder": "Description du workflow",
       "failClosed": "Refuser la transition si cette porte ne peut pas être évaluée",
-      "failClosedHint": "Fail closed : si l'évaluation de cette porte lève une erreur (et non un échec normal), le changement de statut est refusé. Désactivé (fail open), le changement a lieu et l'erreur est journalisée et auditée."
+      "failClosedHint": "Fail closed : si l'évaluation de cette porte lève une erreur (et non un échec normal), le changement de statut est refusé. Désactivé (fail open), le changement a lieu et l'erreur est journalisée et auditée.",
+      "disabledFor": {
+        "title": "Désactivé pour",
+        "hint": "Cette porte ne s'exécute pas pour les domaines, produits de données et contrats de données listés ici (un domaine couvre ses produits et contrats). Chaque contournement est journalisé et audité.",
+        "domains": "Domaines",
+        "dataProducts": "Produits de données",
+        "dataContracts": "Contrats de données",
+        "none": "Aucun",
+        "selectedCount_one": "{{count}} sélectionné",
+        "selectedCount_other": "{{count}} sélectionnés",
+        "search": "Rechercher...",
+        "noResults": "Aucun résultat.",
+        "remove": "Retirer {{name}}"
+      }
     },
     "stepConfig": {
       "title": "Configuration de l'étape",

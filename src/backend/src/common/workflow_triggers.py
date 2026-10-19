@@ -17,6 +17,7 @@ from src.models.process_workflows import (
     WorkflowExecution,
     ExecutionStatus,
     GateErrorMode,
+    GateExemptions,
 )
 from src.common.api_errors import CodedValueError
 from src.common.logging import get_logger
@@ -101,6 +102,11 @@ class TriggerRegistry:
         if not matching_workflows:
             logger.debug(f"No workflows match trigger: {event.trigger_type.value}")
             return []
+
+        if event.trigger_type == TriggerType.BEFORE_STATUS_CHANGE:
+            matching_workflows = drop_exempted_gates(self._db, event, matching_workflows)
+            if not matching_workflows:
+                return []
         
         logger.info(f"Found {len(matching_workflows)} matching workflow(s)")
         
@@ -1176,6 +1182,97 @@ def report_gate_error(
         logger.error(f"Could not audit the gate error: {audit_err}", exc_info=True)
 
 
+def _entity_domain_ids(db: Session, event: TriggerEvent) -> List[str]:
+    """The domains the event's product or contract is assigned to (all of them, not only the primary)."""
+    if event.entity_type not in (EntityType.DATA_PRODUCT, EntityType.DATA_CONTRACT):
+        return []
+    from src.db_models.domain_associations import EntityDomainAssociationDb
+
+    rows = (
+        db.query(EntityDomainAssociationDb.domain_id)
+        .filter(
+            EntityDomainAssociationDb.entity_type == event.entity_type.value,
+            EntityDomainAssociationDb.entity_id == str(event.entity_id),
+        )
+        .all()
+    )
+    return [row[0] for row in rows]
+
+
+def gate_exemption(
+    db: Session,
+    event: TriggerEvent,
+    exemptions: Optional[GateExemptions],
+    domain_ids: Optional[List[str]] = None,
+) -> Optional[Tuple[str, str]]:
+    """Why a gate is switched off for the event's entity, as ``(kind, id)``, or None.
+
+    ``kind`` is ``data_product`` / ``data_contract`` when the entity itself is
+    listed, ``domain`` when one of its domains is. ``domain_ids`` can be passed
+    to avoid reading the entity's domains again.
+    """
+    if exemptions is None or exemptions.is_empty():
+        return None
+    entity_id = str(event.entity_id)
+    if event.entity_type == EntityType.DATA_PRODUCT and entity_id in exemptions.data_products:
+        return ('data_product', entity_id)
+    if event.entity_type == EntityType.DATA_CONTRACT and entity_id in exemptions.data_contracts:
+        return ('data_contract', entity_id)
+    if exemptions.domains:
+        if domain_ids is None:
+            domain_ids = _entity_domain_ids(db, event)
+        for domain_id in exemptions.domains:
+            if domain_id in domain_ids:
+                return ('domain', domain_id)
+    return None
+
+
+def report_gate_skipped(event: TriggerEvent, workflow: ProcessWorkflow, reason: Tuple[str, str]) -> None:
+    """Log at info level and audit a gate that was skipped because it is switched off for the entity."""
+    kind, ref = reason
+    logger.info(
+        f"before_status_change gate '{workflow.name}' skipped for {event.entity_type.value} "
+        f"'{event.entity_id}' ({event.from_status} -> {event.to_status}): switched off for "
+        f"{kind} '{ref}'"
+    )
+    try:
+        from src.controller.audit_manager import log_system_action
+        log_system_action(
+            username=event.user_email or 'system',
+            feature='process-workflows',
+            action='GATE_SKIPPED',
+            success=True,
+            details={
+                'entity_type': event.entity_type.value,
+                'entity_id': event.entity_id,
+                'from_status': event.from_status,
+                'to_status': event.to_status,
+                'workflow_id': workflow.id,
+                'workflow_name': workflow.name,
+                'disabled_for': {'kind': kind, 'id': ref},
+            },
+        )
+    except Exception as audit_err:  # The audit must never change the gate decision
+        logger.error(f"Could not audit the skipped gate: {audit_err}", exc_info=True)
+
+
+def drop_exempted_gates(
+    db: Session, event: TriggerEvent, workflows: List[ProcessWorkflow]
+) -> List[ProcessWorkflow]:
+    """The gates of ``workflows`` that apply to the event's entity; skipped ones are reported."""
+    if not any(not wf.trigger.disabled_for.is_empty() for wf in workflows):
+        return workflows
+    domain_ids = _entity_domain_ids(db, event)
+    kept = []
+    for workflow in workflows:
+        reason = gate_exemption(db, event, workflow.trigger.disabled_for, domain_ids)
+        if reason:
+            report_gate_skipped(event, workflow, reason)
+        else:
+            kept.append(workflow)
+    return kept
+
+
 def _fail_closed_gate_names(db: Session, event: TriggerEvent) -> List[str]:
     """Active ``fail_closed`` gates that would match ``event``, read directly from the table.
 
@@ -1202,6 +1299,16 @@ def _fail_closed_gate_names(db: Session, event: TriggerEvent) -> List[str]:
         if trigger.get('from_status') and trigger['from_status'] != event.from_status:
             continue
         if trigger.get('to_status') and trigger['to_status'] != event.to_status:
+            continue
+        try:
+            exemptions = GateExemptions.model_validate(trigger.get('disabled_for') or {})
+        except Exception:
+            exemptions = None
+        try:
+            exempted = gate_exemption(db, event, exemptions)
+        except Exception:  # Can't tell: the gate stays on
+            exempted = None
+        if exempted:
             continue
         names.append(row.name)
     return names
