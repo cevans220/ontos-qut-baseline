@@ -8,12 +8,16 @@
 # opens a "do not merge" mirror PR, where CI runs with OIDC on the protected
 # runners.
 #
-# SECURITY: the mirrored code runs with this repository's CI credentials.
-# Review the fork PR first, then pass the commit you reviewed so that nothing
-# pushed after your review is mirrored.
+# SECURITY: the mirrored code runs with this repository's CI credentials
+# (the JFrog OIDC token of every job, and LOCKFILE_BOT_TOKEN in the lockfile
+# job) on the protected runners. Review the fork PR first, then pass the full
+# 40-character SHA of the commit you reviewed so that nothing pushed after
+# your review is mirrored. The script refuses PRs that change CI or
+# dependency files (see SENSITIVE_PATHS) unless --allow-sensitive-paths is
+# given after reviewing those files too.
 #
 # Usage:
-#   scripts/fork-sync-pr.sh <PR_NUMBER> <REVIEWED_SHA>
+#   scripts/fork-sync-pr.sh [--allow-sensitive-paths] <PR_NUMBER> <REVIEWED_SHA>
 #
 # Requires push access to databrickslabs/ontos and an authenticated gh CLI.
 # Run it again with a new SHA after the fork PR changes; the mirror branch is
@@ -25,18 +29,45 @@ set -euo pipefail
 
 UPSTREAM_REPO="databrickslabs/ontos"
 
-if [ $# -ne 2 ]; then
-  echo "Usage: $0 <PR_NUMBER> <REVIEWED_SHA>" >&2
+# Files that control what CI runs or installs, or that handle its
+# credentials: workflows and actions, CI scripts, and dependency manifests
+# and lockfiles. Bash glob patterns matched against each changed path.
+SENSITIVE_PATHS=(
+  ".github/*"
+  "scripts/*"
+  "src/scripts/*"
+  ".pre-commit-config.yaml"
+  "pyproject.toml" "*/pyproject.toml"
+  "hatch.toml" "*/hatch.toml"
+  "setup.py" "*/setup.py" "setup.cfg" "*/setup.cfg"
+  "requirements*" "*/requirements*"
+  "package.json" "*/package.json"
+  "package-lock.json" "*/package-lock.json"
+  ".npmrc" "*/.npmrc"
+  "*.lock" "pnpm-lock.yaml" "*/pnpm-lock.yaml"
+)
+
+usage() {
+  echo "Usage: $0 [--allow-sensitive-paths] <PR_NUMBER> <REVIEWED_SHA>" >&2
   exit 2
+}
+
+ALLOW_SENSITIVE=false
+if [ "${1:-}" = "--allow-sensitive-paths" ]; then
+  ALLOW_SENSITIVE=true
+  shift
 fi
+[ $# -eq 2 ] || usage
 PR_NUMBER="$1"
 REVIEWED_SHA="$2"
 if ! [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
   echo "Error: PR_NUMBER must be a number, got '${PR_NUMBER}'." >&2
   exit 2
 fi
-if ! [[ "$REVIEWED_SHA" =~ ^[0-9a-f]{7,40}$ ]]; then
-  echo "Error: REVIEWED_SHA must be 7-40 hex characters, got '${REVIEWED_SHA}'." >&2
+# A short SHA could be matched by a different commit crafted to share its
+# prefix: require the full SHA.
+if ! [[ "$REVIEWED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "Error: REVIEWED_SHA must be the full 40-character commit SHA, got '${REVIEWED_SHA}'." >&2
   exit 2
 fi
 SYNC_BRANCH="fork-test/pr-${PR_NUMBER}"
@@ -47,7 +78,10 @@ command -v gh >/dev/null || { echo "Error: gh CLI is required." >&2; exit 1; }
 REMOTE=""
 for r in $(git remote); do
   case "$(git remote get-url "$r")" in
-    *"${UPSTREAM_REPO}"|*"${UPSTREAM_REPO}.git") REMOTE="$r"; break ;;
+    "https://github.com/${UPSTREAM_REPO}" | "https://github.com/${UPSTREAM_REPO}.git" | \
+      "git@github.com:${UPSTREAM_REPO}" | "git@github.com:${UPSTREAM_REPO}.git" | \
+      "ssh://git@github.com/${UPSTREAM_REPO}" | "ssh://git@github.com/${UPSTREAM_REPO}.git")
+      REMOTE="$r"; break ;;
   esac
 done
 if [ -z "$REMOTE" ]; then
@@ -65,7 +99,7 @@ if [ "$IS_FORK" != "true" ]; then
   exit 1
 fi
 # Refuse anything pushed to the fork after the review.
-if [[ "$HEAD_SHA" != "$REVIEWED_SHA"* ]]; then
+if [ "$HEAD_SHA" != "$REVIEWED_SHA" ]; then
   echo "Error: PR #${PR_NUMBER} head is ${HEAD_SHA}, not the reviewed ${REVIEWED_SHA}." >&2
   echo "Review the new commits, then run again with the new SHA." >&2
   exit 1
@@ -77,6 +111,29 @@ FETCHED_SHA=$(git rev-parse FETCH_HEAD)
 if [ "$FETCHED_SHA" != "$HEAD_SHA" ]; then
   echo "Error: fetched ${FETCHED_SHA}, expected ${HEAD_SHA}; the PR changed meanwhile." >&2
   exit 1
+fi
+
+# Refuse changes to CI or dependency files unless explicitly allowed.
+git fetch --no-tags "$REMOTE" "refs/heads/${BASE_REF}"
+MERGE_BASE=$(git merge-base FETCH_HEAD "$HEAD_SHA")
+SENSITIVE_CHANGES=()
+while IFS= read -r path; do
+  for pattern in "${SENSITIVE_PATHS[@]}"; do
+    # shellcheck disable=SC2053 # glob match on purpose
+    if [[ "$path" == $pattern ]]; then
+      SENSITIVE_CHANGES+=("$path")
+      break
+    fi
+  done
+done < <(git diff --name-only "$MERGE_BASE" "$HEAD_SHA")
+if [ ${#SENSITIVE_CHANGES[@]} -gt 0 ]; then
+  echo "PR #${PR_NUMBER} changes CI or dependency files:" >&2
+  printf '  %s\n' "${SENSITIVE_CHANGES[@]}" >&2
+  if [ "$ALLOW_SENSITIVE" != "true" ]; then
+    echo "Error: these run with the CI credentials. Review them, then run again with --allow-sensitive-paths." >&2
+    exit 1
+  fi
+  echo "Continuing: --allow-sensitive-paths was given." >&2
 fi
 
 echo "Mirroring PR #${PR_NUMBER} (${HEAD_SHA}) to ${REMOTE}/${SYNC_BRANCH}..."

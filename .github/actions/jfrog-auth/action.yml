@@ -17,7 +17,7 @@ runs:
         # an explanation instead of an "unbound variable" error.
         if [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
           if [ "${{ github.event.pull_request.head.repo.fork }}" = "true" ]; then
-            MSG="CI cannot install dependencies for pull requests from forks: GitHub issues no OIDC token to them, so JFrog auth is impossible. After reviewing the code, a maintainer can run CI with: scripts/fork-sync-pr.sh ${{ github.event.pull_request.number }} <reviewed-sha> (see CONTRIBUTING.md)."
+            MSG="CI cannot install dependencies for pull requests from forks: GitHub issues no OIDC token to them, so JFrog auth is impossible. After reviewing the code, a maintainer can run CI with: scripts/fork-sync-pr.sh ${{ github.event.pull_request.number }} <full reviewed SHA> (see CONTRIBUTING.md)."
           else
             MSG="No GitHub OIDC token available. Grant the job 'permissions: id-token: write'."
           fi

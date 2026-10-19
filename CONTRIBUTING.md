@@ -923,12 +923,25 @@ auth step before running any code. This is expected and is not a test failure.
 
 To run CI for a fork PR, a maintainer with push access:
 
-1. Reviews the PR. The mirrored code runs with this repository's CI credentials.
-2. Runs `scripts/fork-sync-pr.sh <PR_NUMBER> <REVIEWED_SHA>`, passing the head commit that was
-   reviewed. The script pushes that commit to `fork-test/pr-<N>` and opens a `do-not-merge` mirror
-   PR where CI runs normally. It refuses to run if the fork PR has new commits since the review.
-3. Re-runs the script with the new SHA after each update to the fork PR, and closes the mirror PR
+1. Reviews the whole PR. The mirrored code runs on the protected runners with this repository's
+   CI credentials: every job can request the JFrog OIDC token (`id-token: write`), and the lockfile
+   job also has `LOCKFILE_BOT_TOKEN` and write access to the repository contents and pull requests.
+   Test code, `conftest.py` files and build scripts run with those credentials too.
+2. Runs `scripts/fork-sync-pr.sh <PR_NUMBER> <REVIEWED_SHA>`, passing the full 40-character SHA of
+   the head commit that was reviewed (for example
+   `scripts/fork-sync-pr.sh 978 3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d`). The script pushes
+   that commit to `fork-test/pr-<N>` and opens a `do-not-merge` mirror PR where CI runs normally.
+   It refuses to run if the fork PR has new commits since the review.
+3. If the PR changes CI or dependency files (`.github/`, `scripts/`, `src/scripts/`,
+   `.pre-commit-config.yaml`, `pyproject.toml`, `requirements*`, `package.json`,
+   `package-lock.json`, `.npmrc`, lockfiles), the script lists them and stops. Those files decide
+   what runs with the credentials, so review them line by line, then run the script again with
+   `--allow-sensitive-paths`.
+4. Re-runs the script with the new SHA after each update to the fork PR, and closes the mirror PR
    (deleting its branch) once the original PR is merged or closed.
+
+The `do-not-merge` check fails while a PR has the `do-not-merge` label, so a mirror PR can't be
+merged by mistake once that check is required in the `development` ruleset.
 
 Contributors from forks: run the backend and frontend checks from
 [Pre-commit Checks](#pre-commit-checks) locally and mention the results in the PR.
