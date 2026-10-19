@@ -304,6 +304,8 @@ def initialize_managers(app: FastAPI):
         app.state.business_owners_manager = BusinessOwnersManager()
         from src.controller.delivery_methods_manager import DeliveryMethodsManager
         app.state.delivery_methods_manager = DeliveryMethodsManager()
+        from src.controller.estate_manager import EstateManager
+        app.state.estate_manager = EstateManager()
         logger.info("Reference data managers initialized (Assets, Business Roles, Business Owners, Delivery Methods).")
 
         notifications_manager = getattr(app.state, 'notifications_manager', None)

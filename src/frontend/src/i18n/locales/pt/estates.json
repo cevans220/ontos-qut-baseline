@@ -13,7 +13,10 @@
     "deletingEstate": "Erro ao Excluir Estate",
     "triggeringSync": "Erro ao Iniciar Sincronização",
     "validationError": "Erro de Validação",
-    "validationMessage": "Preencha todos os campos obrigatórios: Nome, Descrição, URL do Workspace, Nome do Metastore, Tipo de Nuvem e Tipo de Conexão."
+    "validationMessage": "Preencha todos os campos obrigatórios: Nome, Descrição, URL do Workspace, Nome do Metastore, Tipo de Nuvem e Tipo de Conexão.",
+    "codes": {
+      "estate_name_conflict": "Já existe um estate chamado \"{{name}}\"."
+    }
   },
   "toast": {
     "estateCreated": "Estate criado com sucesso",
@@ -121,15 +124,12 @@
       "noEstateData": "Os dados do estate não estão disponíveis para adicionar uma política."
     },
     "policies": {
-      "title": "Políticas de Compartilhamento",
       "add": "Adicionar Política",
-      "sectionDescription": "Defina regras para compartilhar produtos de dados ou termos de modelos semânticos específicos com este estate. Os recursos compartilhados ficarão acessíveis por meio do tipo de conexão configurado.",
       "resourceTypeLabel": "Tipo de Recurso:",
       "rulesLabel": "Regras ({{count}}):",
       "filterBy": "Filtrar por",
       "whereValue": "onde o valor",
       "noRules": "Nenhuma regra definida para esta política.",
-      "emptyTitle": "Nenhuma política de compartilhamento definida para este estate.",
       "emptyHint": "Clique em \"Adicionar Política\" para começar a compartilhar recursos.",
       "editPolicyAlert": "Editar política: {{name}}",
       "deletePolicyAlert": "Excluir política: {{name}}",
@@ -137,7 +137,17 @@
       "addedDescription": "A política de compartilhamento \"{{name}}\" foi adicionada com sucesso.",
       "addErrorTitle": "Erro ao Adicionar Política",
       "addErrorDescription": "Não foi possível salvar a nova política de compartilhamento. Tente novamente.",
-      "saveFailedNoData": "Falha ao salvar a política. O servidor não retornou dados."
+      "saveFailedNoData": "Falha ao salvar a política. O servidor não retornou dados.",
+      "export": {
+        "title": "Políticas de Exportação",
+        "sectionDescription": "O que esta instância compartilha com este estate.",
+        "emptyTitle": "Nenhuma política de exportação definida para este estate."
+      },
+      "import": {
+        "title": "Políticas de Importação",
+        "sectionDescription": "O que esta instância aceita deste estate.",
+        "emptyTitle": "Nenhuma política de importação definida para este estate."
+      }
     },
     "overview": {
       "title": "Visão Geral do Estate",
@@ -192,5 +202,12 @@
       "submittedDescription": "A política de compartilhamento \"{{name}}\" está sendo processada.",
       "addErrorDescription": "Falha ao adicionar a política de compartilhamento. Verifique o console para detalhes."
     }
+  },
+  "resourceTypes": {
+    "data_product": "Produto de Dados",
+    "data_contract": "Contrato de Dados",
+    "business_term": "Termo de Negócio",
+    "data_domain": "Domínio de Dados",
+    "concept": "Conceito"
   }
 }

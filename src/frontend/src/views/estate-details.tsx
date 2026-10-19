@@ -12,48 +12,14 @@ import useBreadcrumbStore from '@/stores/breadcrumb-store';
 import { DetailViewSkeleton } from '@/components/common/list-view-skeleton';
 import AddSharingPolicyDialog from '@/components/estates/add-sharing-policy-dialog';
 
-// --- TypeScript Interfaces (Consider moving to a shared types/estate.ts file later) ---
-type CloudType = 'aws' | 'azure' | 'gcp';
-type SyncStatus = 'pending' | 'running' | 'success' | 'failed';
-type ConnectionType = 'delta_share' | 'database';
-export type SharingResourceType = 'data_product' | 'business_glossary';
-export type SharingRuleOperator = 'equals' | 'contains' | 'starts_with' | 'regex';
+import {
+  Estate, SharingPolicy, SharingPolicyDirection, withPolicy,
+} from '@/types/estate';
 
-export interface SharingRule {
-  filter_type: string;
-  operator: SharingRuleOperator;
-  filter_value: string;
-}
-
-export interface SharingPolicy {
-  id?: string;
-  name: string;
-  description?: string;
-  resource_type: SharingResourceType;
-  rules: SharingRule[];
-  is_enabled: boolean;
-  created_at: string; // ISO datetime string
-  updated_at: string; // ISO datetime string
-}
-
-export interface Estate {
-  id: string;
-  name: string;
-  description: string;
-  workspace_url: string;
-  cloud_type: CloudType;
-  metastore_name: string;
-  connection_type: ConnectionType;
-  sharing_policies: SharingPolicy[];
-  is_enabled: boolean;
-  sync_schedule: string;
-  last_sync_time?: string; // ISO datetime string
-  last_sync_status?: SyncStatus;
-  last_sync_error?: string;
-  created_at: string; // ISO datetime string
-  updated_at: string; // ISO datetime string
-}
-// --- End TypeScript Interfaces ---
+// Re-exported for the components that import them from this view.
+export type {
+  Estate, SharingPolicy, SharingRule, SharingResourceType, SharingRuleOperator,
+} from '@/types/estate';
 
 export default function EstateDetailsView() {
   const { t } = useTranslation(['estates', 'common']);
@@ -70,6 +36,7 @@ export default function EstateDetailsView() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isAddPolicyDialogOpen, setIsAddPolicyDialogOpen] = useState(false); // State for Add Policy Dialog
+  const [policyDirection, setPolicyDirection] = useState<SharingPolicyDirection>('export');
 
   useEffect(() => {
     // Set static breadcrumb for Estate Manager parent
@@ -143,11 +110,7 @@ export default function EstateDetailsView() {
     // (Assuming backend handles ID generation for policies within an estate update)
     // If not, generate a UUID client-side: import { v4 as uuidv4 } from 'uuid'; newPolicy.id = uuidv4();
 
-    const updatedPolicies = [...estate.sharing_policies, newPolicy];
-    const updatedEstate: Estate = {
-      ...estate,
-      sharing_policies: updatedPolicies,
-    };
+    const updatedEstate: Estate = withPolicy(estate, policyDirection, newPolicy);
 
     try {
       // Optimistically update UI first
@@ -285,23 +248,26 @@ export default function EstateDetailsView() {
 
       <Separator />
 
-      {/* Sharing Policies Section */}
-      <Card>
+      {/* Sharing Policies: what this instance exports to the estate, and what it imports from it */}
+      {(['export', 'import'] as SharingPolicyDirection[]).map((direction) => {
+        const policies = (direction === 'export' ? estate.export_policies : estate.import_policies) || [];
+        return (
+      <Card key={direction} data-testid={`estate-${direction}-policies`}>
         <CardHeader>
           <div className="flex justify-between items-center">
-            <CardTitle className="text-xl flex items-center"><ShieldCheck className="mr-2 h-6 w-6 text-primary"/> {t('estates:details.policies.title')}</CardTitle>
-            <Button variant="outline" size="sm" onClick={() => setIsAddPolicyDialogOpen(true)}>
+            <CardTitle className="text-xl flex items-center"><ShieldCheck className="mr-2 h-6 w-6 text-primary"/> {t(`estates:details.policies.${direction}.title`)}</CardTitle>
+            <Button variant="outline" size="sm" onClick={() => { setPolicyDirection(direction); setIsAddPolicyDialogOpen(true); }}>
                 <PlusCircle className="mr-2 h-4 w-4" /> {t('estates:details.policies.add')}
             </Button>
           </div>
           <CardDescription>
-            {t('estates:details.policies.sectionDescription')}
+            {t(`estates:details.policies.${direction}.sectionDescription`)}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {estate.sharing_policies.length > 0 ? (
+          {policies.length > 0 ? (
             <div className="space-y-4">
-              {estate.sharing_policies.map((policy, index) => (
+              {policies.map((policy, index) => (
                 <Card key={policy.id || index} className="bg-muted/30 dark:bg-muted/50">
                   <CardHeader className="pb-2">
                     <div className="flex justify-between items-start">
@@ -321,7 +287,7 @@ export default function EstateDetailsView() {
                     {policy.description && <CardDescription className="pt-1">{policy.description}</CardDescription>}
                   </CardHeader>
                   <CardContent>
-                    <p className="text-sm font-semibold mb-1">{t('estates:details.policies.resourceTypeLabel')} <Badge variant="outline" className="capitalize">{policy.resource_type.replace('_', ' ')}</Badge></p>
+                    <p className="text-sm font-semibold mb-1">{t('estates:details.policies.resourceTypeLabel')} <Badge variant="outline">{t(`estates:resourceTypes.${policy.resource_type}`, { defaultValue: policy.resource_type })}</Badge></p>
                     <p className="text-sm font-semibold mb-1">{t('estates:details.policies.rulesLabel', { count: policy.rules.length })}</p>
                     {policy.rules.length > 0 ? (
                         <ul className="list-disc list-inside pl-2 space-y-1 text-sm text-muted-foreground">
@@ -341,19 +307,21 @@ export default function EstateDetailsView() {
           ) : (
             <div className="text-center text-muted-foreground py-8">
               <ListFilter className="mx-auto h-12 w-12 text-gray-400 mb-2" />
-              <p className="font-semibold">{t('estates:details.policies.emptyTitle')}</p>
+              <p className="font-semibold">{t(`estates:details.policies.${direction}.emptyTitle`)}</p>
               <p className="text-sm">{t('estates:details.policies.emptyHint')}</p>
             </div>
           )}
         </CardContent>
       </Card>
+        );
+      })}
 
       {/* Add Sharing Policy Dialog */}
       {isAddPolicyDialogOpen && (
         <AddSharingPolicyDialog
           isOpen={isAddPolicyDialogOpen}
           onOpenChange={setIsAddPolicyDialogOpen}
-          currentPolicies={estate.sharing_policies} // Pass current policies for validation if needed (e.g., unique names)
+          currentPolicies={policyDirection === 'export' ? estate.export_policies : estate.import_policies} // Pass current policies for validation if needed (e.g., unique names)
           onSaveSuccess={handlePolicyAdded} // Pass the handler
           estateId={estate.id} // Pass estateId if the dialog needs to make its own calls or for context
         />

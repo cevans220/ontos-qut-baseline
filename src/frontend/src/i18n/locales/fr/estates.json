@@ -13,7 +13,10 @@
     "deletingEstate": "Erreur lors de la Suppression de l'Estate",
     "triggeringSync": "Erreur lors du Déclenchement de la Synchronisation",
     "validationError": "Erreur de Validation",
-    "validationMessage": "Veuillez remplir tous les champs requis : Nom, Description, URL du Workspace, Nom du Metastore, Type de Cloud et Type de Connexion."
+    "validationMessage": "Veuillez remplir tous les champs requis : Nom, Description, URL du Workspace, Nom du Metastore, Type de Cloud et Type de Connexion.",
+    "codes": {
+      "estate_name_conflict": "Un estate nommé « {{name}} » existe déjà."
+    }
   },
   "toast": {
     "estateCreated": "Estate créé avec succès",
@@ -121,15 +124,12 @@
       "noEstateData": "Les données de l'estate ne sont pas disponibles pour ajouter une politique."
     },
     "policies": {
-      "title": "Politiques de partage",
       "add": "Ajouter une politique",
-      "sectionDescription": "Définissez des règles pour partager des produits de données ou des termes de modèle sémantique spécifiques avec cet estate. Les ressources partagées seront accessibles via le type de connexion configuré.",
       "resourceTypeLabel": "Type de ressource :",
       "rulesLabel": "Règles ({{count}}) :",
       "filterBy": "Filtrer par",
       "whereValue": "où la valeur",
       "noRules": "Aucune règle définie pour cette politique.",
-      "emptyTitle": "Aucune politique de partage définie pour cet estate.",
       "emptyHint": "Cliquez sur « Ajouter une politique » pour commencer à partager des ressources.",
       "editPolicyAlert": "Modifier la politique : {{name}}",
       "deletePolicyAlert": "Supprimer la politique : {{name}}",
@@ -137,7 +137,17 @@
       "addedDescription": "La politique de partage « {{name}} » a été ajoutée avec succès.",
       "addErrorTitle": "Erreur lors de l'ajout de la politique",
       "addErrorDescription": "Impossible d'enregistrer la nouvelle politique de partage. Veuillez réessayer.",
-      "saveFailedNoData": "Échec de l'enregistrement de la politique. Le serveur n'a renvoyé aucune donnée."
+      "saveFailedNoData": "Échec de l'enregistrement de la politique. Le serveur n'a renvoyé aucune donnée.",
+      "export": {
+        "title": "Politiques d'export",
+        "sectionDescription": "Ce que cette instance partage avec cet estate.",
+        "emptyTitle": "Aucune politique d'export définie pour cet estate."
+      },
+      "import": {
+        "title": "Politiques d'import",
+        "sectionDescription": "Ce que cette instance accepte de cet estate.",
+        "emptyTitle": "Aucune politique d'import définie pour cet estate."
+      }
     },
     "overview": {
       "title": "Aperçu de l'Estate",
@@ -192,5 +202,12 @@
       "submittedDescription": "La politique de partage « {{name}} » est en cours de traitement.",
       "addErrorDescription": "Échec de l'ajout de la politique de partage. Consultez la console pour plus de détails."
     }
+  },
+  "resourceTypes": {
+    "data_product": "Produit de données",
+    "data_contract": "Contrat de données",
+    "business_term": "Terme métier",
+    "data_domain": "Domaine de données",
+    "concept": "Concept"
   }
 }
