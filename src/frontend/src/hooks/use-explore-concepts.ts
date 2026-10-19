@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { create } from 'zustand';
 import type {
   OntologyConcept,
   KnowledgeCollection,
@@ -34,6 +35,27 @@ function flattenCollectionsTree(colls: KnowledgeCollection[]): KnowledgeCollecti
   };
   colls.forEach(visit);
   return out;
+}
+
+// Session-only (in-memory, NOT persisted) Explore toggle: include the built-in
+// system ontologies (bundled Ontos / ODCS / Databricks ontologies, ...) in the
+// concept listing. Default OFF so Explore shows the user's own schemes. Lives in
+// a module-level store so it survives navigating to a concept and back, but
+// resets on reload.
+interface ExploreSessionState {
+  showSystemSources: boolean;
+  setShowSystemSources: (enabled: boolean) => void;
+}
+
+export const useExploreSessionStore = create<ExploreSessionState>((set) => ({
+  showSystemSources: false,
+  setShowSystemSources: (enabled) => set({ showSystemSources: enabled }),
+}));
+
+// Query string for the grouped endpoints. The backend excludes system sources
+// unless include_system=true.
+export function systemSourcesQuery(includeSystem: boolean): string {
+  return includeSystem ? '?include_system=true' : '';
 }
 
 // ---------------------------------------------------------------------------
@@ -72,6 +94,7 @@ export function useExploreConcepts(): UseExploreConceptsResult {
 
   const showProperties = useGlossaryPreferencesStore((s) => s.showProperties);
   const hiddenSources = useGlossaryPreferencesStore((s) => s.hiddenSources);
+  const showSystemSources = useExploreSessionStore((s) => s.showSystemSources);
 
   // Extract unique source contexts (unaffected by filter — for the panel).
   // Include both concept-derived sources AND all editable collection sources
@@ -139,7 +162,7 @@ export function useExploreConcepts(): UseExploreConceptsResult {
     try {
       const [collectionsRes, conceptsRes, statsRes] = await Promise.all([
         fetch('/api/knowledge/collections?hierarchical=true'),
-        fetch('/api/semantic-models/concepts-grouped'),
+        fetch(`/api/semantic-models/concepts-grouped${systemSourcesQuery(showSystemSources)}`),
         fetch('/api/semantic-models/stats'),
       ]);
 
@@ -160,7 +183,7 @@ export function useExploreConcepts(): UseExploreConceptsResult {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [showSystemSources]);
 
   // Quiet refetch: refreshes data without showing the skeleton loader. Used for
   // mutations (rename, delete) where the list should stay visible and just update
@@ -169,7 +192,7 @@ export function useExploreConcepts(): UseExploreConceptsResult {
     try {
       const [collectionsRes, conceptsRes, statsRes] = await Promise.all([
         fetch('/api/knowledge/collections?hierarchical=true'),
-        fetch('/api/semantic-models/concepts-grouped'),
+        fetch(`/api/semantic-models/concepts-grouped${systemSourcesQuery(showSystemSources)}`),
         fetch('/api/semantic-models/stats'),
       ]);
 
@@ -188,11 +211,11 @@ export function useExploreConcepts(): UseExploreConceptsResult {
     } catch (error) {
       console.error('Failed to quietly refetch explore concepts:', error);
     }
-  }, []);
+  }, [showSystemSources]);
 
   const fetchProperties = useCallback(async () => {
     try {
-      const response = await fetch('/api/semantic-models/properties-grouped');
+      const response = await fetch(`/api/semantic-models/properties-grouped${systemSourcesQuery(showSystemSources)}`);
       if (!response.ok) throw new Error('Failed to fetch properties');
       const data = await response.json();
 
@@ -209,7 +232,7 @@ export function useExploreConcepts(): UseExploreConceptsResult {
     } catch (err) {
       console.error('Failed to fetch properties:', err);
     }
-  }, []);
+  }, [showSystemSources]);
 
   useEffect(() => {
     if (showProperties) {

@@ -2933,6 +2933,10 @@ class SemanticModelsManager(SearchableAsset):
 
                 logger.debug(f"Processing {len(unique_concept_iris)} unique concepts in context {context_name}")
 
+                # Once per context: governed (editable) schemes default a
+                # missing ontos:status to "draft" for display.
+                context_editable = self._is_editable_collection_context(context_name)
+
                 # Second pass: process each unique concept
                 for concept_iri in unique_concept_iris:
                     concept_uri = URIRef(concept_iri)
@@ -3075,7 +3079,11 @@ class SemanticModelsManager(SearchableAsset):
                     # Governance status (ONTOS.status). Needed so the Explore
                     # list can render the Status column; without it every row
                     # showed a blank status. Falls back to the created default.
-                    status_val = self._get_literal(context, concept_uri, ONTOS.status)
+                    status_val = self._display_status(
+                        self._get_literal(context, concept_uri, ONTOS.status),
+                        concept_type,
+                        context_editable,
+                    )
 
                     # Per-concept guard: constructing a single OntologyConcept must
                     # NEVER be able to blank the whole context. A bad value in one
@@ -3395,6 +3403,35 @@ class SemanticModelsManager(SearchableAsset):
         all_concepts = self.get_concepts_by_taxonomy()
         stats = self._compute_stats(all_concepts, taxonomies)
         return stats
+
+    def get_system_source_names(self) -> set:
+        """Source-context names (the ``concepts-grouped`` bucket keys) of the
+        built-in sources the app ships with, as opposed to user-authored ones.
+
+        A source is "system" when it is either:
+        - a bundled taxonomy file in ``data/taxonomies/`` (synced at startup into
+          ``urn:taxonomy:<file stem>`` with ``created_by='system@startup'``), or
+        - a semantic model row created at startup (``created_by='system@startup'``).
+
+        Matching on the shipped file stems (not on the ``urn:taxonomy:`` prefix)
+        matters: user-created taxonomy collections share that prefix.
+        """
+        names: set = set()
+        taxonomy_dir = self._data_dir / "taxonomies"
+        try:
+            if taxonomy_dir.is_dir():
+                for f in taxonomy_dir.glob("*.ttl"):
+                    if f.is_file():
+                        names.add(f.stem)
+        except OSError:
+            logger.debug("Could not list bundled taxonomy files", exc_info=True)
+        try:
+            for m in semantic_models_repo.get_multi(self._db, skip=0, limit=10_000):
+                if (m.created_by or "") == "system@startup":
+                    names.add(_sanitize_context_name(m.name))
+        except Exception as e:
+            logger.debug(f"Could not load semantic models for system-source detection: {e}")
+        return names
 
     def get_grouped_concepts(self) -> Dict[str, List[OntologyConcept]]:
         """Return all concepts grouped by their source context name.
@@ -4267,6 +4304,32 @@ class SemanticModelsManager(SearchableAsset):
         
         return self.get_concept(concept_iri)
 
+    def _is_editable_collection_context(self, context_name: str) -> bool:
+        """True when ``context_name`` is a governed, collection-backed scheme
+        (a KnowledgeCollection in ``urn:meta:sources`` with isEditable=true).
+        Bundled/system ontologies and file taxonomies are not editable."""
+        try:
+            meta_context = self._graph.get_context(URIRef("urn:meta:sources"))
+            raw = self._get_literal(meta_context, URIRef(str(context_name)), ONTOS.isEditable)
+        except Exception:
+            return False
+        return (raw or "").strip().lower() in {"true", "1"}
+
+    @staticmethod
+    def _display_status(
+        status: Optional[str], concept_type: Optional[str], editable: bool
+    ) -> Optional[str]:
+        """Display default for ``ontos:status``. Concepts saved before new
+        entries were stamped Draft carry no status; in an editable scheme they
+        behave as drafts (submit/edit/delete already treat missing as draft),
+        so report "draft". Properties and read-only sources keep None. Read
+        path only: nothing is written."""
+        if status:
+            return status
+        if editable and (concept_type or "concept") in ("concept", "class", "individual", "term"):
+            return "draft"
+        return None
+
     def _extract_concept_metadata(self, context, concept_uri) -> Dict[str, Any]:
         """Extract SKOS annotations, property domain/range, ONTOS governance and
         lifecycle fields, provenance, and owners for a concept in a context.
@@ -4299,8 +4362,14 @@ class SemanticModelsManager(SearchableAsset):
         domain_val = str(domains[0]) if domains else None
         range_val = str(ranges[0]) if ranges else None
 
-        # Governance + lifecycle
-        status = self._get_literal(context, concept_uri, ONTOS.status)
+        # Governance + lifecycle. Missing status in an editable scheme is
+        # reported as "draft" (display default only, see _display_status).
+        detected_type, _ = self._detect_concept_type(context, concept_uri)
+        status = self._display_status(
+            self._get_literal(context, concept_uri, ONTOS.status),
+            detected_type,
+            self._is_editable_collection_context(str(context.identifier)),
+        )
         version = self._get_literal(context, concept_uri, ONTOS.version)
         created_at = self._get_literal(context, concept_uri, ONTOS.createdAt)
         created_by = self._get_uri(context, concept_uri, ONTOS.createdBy)

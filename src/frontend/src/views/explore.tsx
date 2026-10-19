@@ -43,7 +43,7 @@ import { useKnowledgeGraphStore } from '@/stores/knowledge-graph-store';
 import { usePermissions } from '@/stores/permissions-store';
 import { FeatureAccessLevel } from '@/types/feature-access-levels';
 import { useToast } from '@/hooks/use-toast';
-import { useExploreConcepts } from '@/hooks/use-explore-concepts';
+import { useExploreConcepts, useExploreSessionStore } from '@/hooks/use-explore-concepts';
 import {
   ConceptsTab,
   GraphTab,
@@ -99,6 +99,11 @@ export default function ExploreView() {
     filteredConcepts,
     refetch,
   } = useExploreConcepts();
+
+  // Session-only "Show system ontologies" toggle (default OFF). The hook reads
+  // the same store and refetches with include_system=true when it is on.
+  const showSystemSources = useExploreSessionStore((s) => s.showSystemSources);
+  const setShowSystemSources = useExploreSessionStore((s) => s.setShowSystemSources);
 
   // View-mode: List | Tree | Graph. Kept in the URL (?view=) so links are
   // shareable and refresh-safe; defaults to List.
@@ -396,6 +401,8 @@ export default function ExploreView() {
             onSetGroupByDimension={setGroupByDimension}
             showProperties={showProperties}
             onSetShowProperties={setShowProperties}
+            showSystemSources={showSystemSources}
+            onSetShowSystemSources={setShowSystemSources}
             selectedLanguage={selectedLanguage}
             onSetSelectedLanguage={setSelectedLanguage}
             isFilterExpanded={isFilterExpanded}

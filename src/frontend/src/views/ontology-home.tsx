@@ -106,7 +106,7 @@ export default function OntologyHomeView() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/semantic-models/concepts-grouped');
+      const res = await fetch('/api/semantic-models/concepts-grouped?include_system=true');
       if (res.ok) {
         const data = await res.json();
         setGroupedConcepts(data.grouped_concepts || {});
@@ -121,7 +121,7 @@ export default function OntologyHomeView() {
   // Fetch properties when toggle is enabled
   const fetchProperties = useCallback(async () => {
     try {
-      const response = await fetch('/api/semantic-models/properties-grouped');
+      const response = await fetch('/api/semantic-models/properties-grouped?include_system=true');
       if (!response.ok) throw new Error('Failed to fetch properties');
       const data = await response.json();
 

@@ -137,15 +137,19 @@ describe('DefineView', () => {
     expect(importDialogOpen).toBe(true);
   });
 
-  it('"What gets written" popover lists the RDF mapping', async () => {
+  it('legend shows an advanced-only vocabulary line under each rung', () => {
     renderDefine();
-    fireEvent.click(screen.getByRole('button', { name: 'What gets written' }));
-    await waitFor(() => expect(screen.getByText('owl:NamedIndividual')).toBeInTheDocument());
-    expect(screen.getByText('skos:ConceptScheme + ontos:KnowledgeCollection')).toBeInTheDocument();
-    expect(screen.getByText('owl:Class')).toBeInTheDocument();
-    expect(screen.getByText('rdfs:subClassOf')).toBeInTheDocument();
-    // The old "Under the hood" block is folded into the popover.
-    expect(screen.queryByText(/Under the hood/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'What gets written' })).not.toBeInTheDocument();
+    const glossary = screen.getByText(/skos:prefLabel \/ skos:altLabel \/ skos:definition/);
+    const taxonomy = screen.getByText(/skos:broader \/ skos:narrower \(skos:related/);
+    const ontology = screen.getByText(/OWL \+ RDFS\. owl:Class/);
+    const scheme = screen.getByText('Every scheme is a skos:ConceptScheme.');
+    for (const el of [glossary, taxonomy, ontology, scheme]) {
+      expect(el).toHaveClass('adv-only');
+    }
+    // Truthful about authored classes: parents are written as skos:broader.
+    expect(ontology.textContent).toMatch(/classes authored in Ontos currently link parents with skos:broader/);
+    expect(document.querySelectorAll('.adv-only').length).toBeGreaterThanOrEqual(4);
   });
 
   it('shows in-progress generator runs from the runs endpoint', async () => {

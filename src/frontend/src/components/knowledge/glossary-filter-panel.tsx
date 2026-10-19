@@ -50,6 +50,7 @@ import {
   List,
   ListTree,
   Share2,
+  Library,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { systemRdfNamespaceDisplayLabel } from '@/lib/system-rdf-namespace-labels';
@@ -84,6 +85,9 @@ interface GlossaryFilterPanelProps {
   onSetGroupByDimension: (dimension: GroupByDimension) => void;
   showProperties: boolean;
   onSetShowProperties: (enabled: boolean) => void;
+  // Include built-in system ontologies (optional; toggle hidden when omitted)
+  showSystemSources?: boolean;
+  onSetShowSystemSources?: (enabled: boolean) => void;
   // Language selection
   selectedLanguage: string;
   onSetSelectedLanguage: (lang: string) => void;
@@ -110,6 +114,8 @@ export const GlossaryFilterPanel: React.FC<GlossaryFilterPanelProps> = ({
   onSetGroupByDimension,
   showProperties,
   onSetShowProperties,
+  showSystemSources = false,
+  onSetShowSystemSources,
   selectedLanguage,
   onSetSelectedLanguage,
   isFilterExpanded,
@@ -213,7 +219,10 @@ export const GlossaryFilterPanel: React.FC<GlossaryFilterPanelProps> = ({
     return getAvailableLanguages(filteredConcepts);
   }, [filteredConcepts]);
 
-  if (availableSources.length === 0) {
+  // Keep the panel when the system toggle is wired: with system ontologies
+  // hidden, a fresh workspace may have no sources yet, and the toggle is the
+  // only way to bring them back.
+  if (availableSources.length === 0 && !onSetShowSystemSources) {
     return null;
   }
 
@@ -459,6 +468,21 @@ export const GlossaryFilterPanel: React.FC<GlossaryFilterPanelProps> = ({
                 onCheckedChange={onSetShowProperties}
               />
             </div>
+
+            {/* Show built-in system ontologies (Ontos / ODCS / Databricks, ...) */}
+            {onSetShowSystemSources && (
+              <div className="flex items-center gap-2">
+                <Label htmlFor="show-system-sources" className="text-sm flex items-center gap-2 cursor-pointer">
+                  <Library className="h-4 w-4" />
+                  {t('semantic-models:filters.showSystemSources', 'Show system ontologies')}
+                </Label>
+                <Switch
+                  id="show-system-sources"
+                  checked={showSystemSources}
+                  onCheckedChange={onSetShowSystemSources}
+                />
+              </div>
+            )}
 
             {/* Label Language Selector */}
             {availableLanguages.length > 0 && (

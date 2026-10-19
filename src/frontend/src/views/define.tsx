@@ -12,7 +12,6 @@ import {
   ListTree,
   Share2,
   Layers,
-  Info,
 } from 'lucide-react';
 import { usePagination, PaginationControls } from '@/components/common/paginated-list';
 import { Button } from '@/components/ui/button';
@@ -24,7 +23,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ImportConceptsDialog, CollectionEditorDialog } from '@/components/knowledge';
 import type {
   KnowledgeCollection,
@@ -75,73 +73,35 @@ function relativeTime(iso?: string | null): string {
 // The three output "rungs" — a glossary -> taxonomy -> ontology maturity ladder.
 // Defined once, rendered both in the top legend and (via BuildsRow) inside every
 // path card, so the same icon vocabulary is taught once and reused everywhere.
+// `vocab` is the advanced-only "what gets written" line shown under each rung in
+// the legend. Mirrors the backend's _resolve_concept_rdf_types / create_concept.
+// Note: parents picked in the concept editor are written as skos:broader for
+// every entry type (classes included); rdfs:subClassOf comes from imported or
+// generated ontologies.
 const RUNGS = [
-  { key: 'glossary', label: 'Glossary', Icon: List,     blurb: 'agreed terms + definitions' },
-  { key: 'taxonomy', label: 'Taxonomy', Icon: ListTree, blurb: 'terms in a broader/narrower hierarchy' },
-  { key: 'ontology', label: 'Ontology', Icon: Share2,   blurb: 'typed relationships a machine can reason over' },
-] as const;
-
-// What each kind of entry is written as in RDF. Mirrors the backend's
-// _resolve_concept_rdf_types (concept/term/class/property/individual) and
-// create_collection (scheme). Shown once in the legend's info popover.
-const RDF_MAPPING = [
-  { kind: 'Concept / term', type: 'skos:Concept', relations: 'skos:broader / skos:narrower' },
-  { kind: 'Class', type: 'owl:Class', relations: 'rdfs:subClassOf' },
   {
-    kind: 'Property',
-    type: 'owl:ObjectProperty / owl:DatatypeProperty / owl:AnnotationProperty',
-    relations: 'rdfs:domain / rdfs:range',
+    key: 'glossary',
+    label: 'Glossary',
+    Icon: List,
+    blurb: 'agreed terms + definitions',
+    vocab: 'SKOS. skos:Concept with skos:prefLabel / skos:altLabel / skos:definition; flat (no hierarchy required).',
   },
-  { kind: 'Individual', type: 'owl:NamedIndividual', relations: '' },
-  { kind: 'Concept scheme', type: 'skos:ConceptScheme + ontos:KnowledgeCollection', relations: '' },
+  {
+    key: 'taxonomy',
+    label: 'Taxonomy',
+    Icon: ListTree,
+    blurb: 'terms in a broader/narrower hierarchy',
+    vocab: 'SKOS. skos:Concept arranged with skos:broader / skos:narrower (skos:related for cross-links).',
+  },
+  {
+    key: 'ontology',
+    label: 'Ontology',
+    Icon: Share2,
+    blurb: 'typed relationships a machine can reason over',
+    vocab:
+      'OWL + RDFS. owl:Class, owl:ObjectProperty / owl:DatatypeProperty with rdfs:domain / rdfs:range, owl:NamedIndividual. Imported/generated ontologies use rdfs:subClassOf; classes authored in Ontos currently link parents with skos:broader. Labels/definitions still use SKOS.',
+  },
 ] as const;
-
-function WhatGetsWrittenPopover() {
-  const { t } = useTranslation(['semantic-models']);
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          className="ml-auto inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
-          aria-label={t('semantic-models:define.whatGetsWritten.title', 'What gets written')}
-        >
-          <Info className="h-3.5 w-3.5" />
-          <span>{t('semantic-models:define.whatGetsWritten.title', 'What gets written')}</span>
-        </button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-[460px] text-xs">
-        <p className="font-medium text-foreground mb-2">
-          {t('semantic-models:define.whatGetsWritten.title', 'What gets written')}
-        </p>
-        <table className="w-full border-collapse">
-          <thead>
-            <tr className="text-left text-muted-foreground">
-              <th className="font-medium pb-1 pr-2">{t('semantic-models:define.whatGetsWritten.entry', 'Entry')}</th>
-              <th className="font-medium pb-1 pr-2">{t('semantic-models:define.whatGetsWritten.type', 'rdf:type')}</th>
-              <th className="font-medium pb-1">{t('semantic-models:define.whatGetsWritten.relations', 'Hierarchy / links')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {RDF_MAPPING.map((row) => (
-              <tr key={row.kind} className="border-t align-top">
-                <td className="py-1 pr-2 whitespace-nowrap">{row.kind}</td>
-                <td className="py-1 pr-2 font-mono text-[11px]">{row.type}</td>
-                <td className="py-1 font-mono text-[11px]">{row.relations || '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <p className="mt-2 text-muted-foreground leading-relaxed">
-          {t(
-            'semantic-models:define.whatGetsWritten.note',
-            'Maturity runs glossary → taxonomy → ontology: flat terms, then a skos:broader/narrower hierarchy, then formal owl:Class and OWL properties linked by rdfs:subClassOf and rdfs:domain/range. Start light, harden where you need it. (Parents picked in the concept editor are written as skos:broader for every entry type; rdfs:subClassOf comes from generated or imported ontologies.)',
-          )}
-        </p>
-      </PopoverContent>
-    </Popover>
-  );
-}
 
 type RungKey = (typeof RUNGS)[number]['key'];
 // Per-path production: 'yes' = this path builds that rung, 'file' = depends on the
@@ -321,19 +281,25 @@ export default function DefineView() {
           card below (the "Builds" row), lit for what that path produces. Teach the
           vocabulary once here, then show it per card. Glossary -> taxonomy ->
           ontology is a maturity progression: start simple, harden where needed. */}
-      <div className="mb-6 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border bg-muted/30 px-3.5 py-2.5 text-xs">
+      <div className="mb-6 flex flex-wrap items-start gap-x-5 gap-y-2 rounded-lg border bg-muted/30 px-3.5 py-2.5 text-xs">
         <span className="font-medium text-foreground">What you can build:</span>
         {RUNGS.map((r, i) => (
-          <div key={r.key} className="flex items-center gap-2">
+          <div key={r.key} className="flex items-start gap-2 max-w-[340px]">
             {i > 0 && <span className="text-muted-foreground/40 -ml-3 mr-1">→</span>}
             <r.Icon className="h-4 w-4 text-foreground shrink-0" />
-            <span>
+            <div>
               <span className="font-medium text-foreground">{r.label}</span>
               <span className="text-muted-foreground"> — {r.blurb}</span>
-            </span>
+              {/* Advanced view only: the RDF vocabulary this rung is written in. */}
+              <p className="adv-only mt-0.5 font-mono text-[10px] leading-snug text-muted-foreground/80">
+                {r.vocab}
+              </p>
+            </div>
           </div>
         ))}
-        <WhatGetsWrittenPopover />
+        <p className="adv-only basis-full font-mono text-[10px] text-muted-foreground/80">
+          Every scheme is a skos:ConceptScheme.
+        </p>
       </div>
 
       {/* Path cards */}

@@ -199,9 +199,15 @@ export const useGlossaryPreferencesStore = create<GlossaryPreferencesState>()(
       // has the boolean flags, so derive the lens from them. Legacy
       // `groupBySource` was source_context (scheme) grouping, so it maps to
       // 'scheme' (NOT 'source' — 'source' now means the originating file).
-      version: 1,
+      // v2 stops persisting `conceptListSearch` (session-only), and drops any
+      // value stored by earlier versions so Explore no longer re-opens with a
+      // stale search pre-filled.
+      version: 2,
       migrate: (persisted: any, version: number) => {
         if (!persisted) return persisted;
+        if (version < 2) {
+          delete persisted.conceptListSearch;
+        }
         if (version < 1 && persisted.groupByDimension === undefined) {
           persisted.groupByDimension = persisted.groupBySource
             ? 'scheme'
@@ -226,11 +232,10 @@ export const useGlossaryPreferencesStore = create<GlossaryPreferencesState>()(
         groupByFile: state.groupByFile,
         isFilterExpanded: state.isFilterExpanded,
         expandedConceptGroups: state.expandedConceptGroups,
-        // Scroll position is intentionally NOT persisted across reloads --
-        // it is only kept across in-app navigation while the store stays
-        // in memory. Persisting it would scroll users to stale offsets
-        // after a refresh when the underlying data changed.
-        conceptListSearch: state.conceptListSearch,
+        // Scroll position and the Explore search text (`conceptListSearch`)
+        // are intentionally NOT persisted across reloads -- they are only kept
+        // across in-app navigation while the store stays in memory. Persisting
+        // them would restore stale offsets / stale search text after a refresh.
       }),
     }
   )

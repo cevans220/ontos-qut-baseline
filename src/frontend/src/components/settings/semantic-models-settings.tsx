@@ -68,11 +68,6 @@ function semanticModelSerializationLabel(m: SemanticModel, tr: (key: string) => 
   return tr('rdfSources.serializationUnknown');
 }
 
-/** Built-in sources seeded/managed by the app (created_by `system@...`, e.g. `system@startup`). */
-export function isSystemSemanticModel(m: SemanticModel): boolean {
-  return (m.created_by || '').startsWith('system@');
-}
-
 export default function SemanticModelsSettings() {
   const { t } = useTranslation(['semantic-models', 'settings', 'common']);
   const { hasPermission, isLoading: permissionsLoading } = usePermissions();
@@ -94,8 +89,6 @@ export default function SemanticModelsSettings() {
   const [isRefreshingGraph, setIsRefreshingGraph] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [listSearch, setListSearch] = useState('');
-  // Built-in (system@...) ontologies are hidden unless explicitly requested.
-  const [showSystem, setShowSystem] = useState(false);
   const [titleDialogOpen, setTitleDialogOpen] = useState(false);
   const [titleEditModel, setTitleEditModel] = useState<SemanticModel | null>(null);
   const [titleCandidates, setTitleCandidates] = useState<TitleCandidateRow[]>([]);
@@ -105,8 +98,8 @@ export default function SemanticModelsSettings() {
   const [titleSaving, setTitleSaving] = useState(false);
 
   const filteredItems = useMemo(() => 
-    items.filter(m => !SYSTEM_RDF_NAMESPACE_KEY_SET.has(m.name) && (showSystem || !isSystemSemanticModel(m))),
-    [items, showSystem]
+    items.filter(m => !SYSTEM_RDF_NAMESPACE_KEY_SET.has(m.name)),
+    [items]
   );
 
   const tableData = useMemo(() => {
@@ -548,16 +541,6 @@ export default function SemanticModelsSettings() {
         storageKey="rdf-sources-sort"
         toolbarActions={
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 mr-2">
-              <Switch
-                id="show-system-ontologies"
-                checked={showSystem}
-                onCheckedChange={setShowSystem}
-              />
-              <Label htmlFor="show-system-ontologies" className="text-sm font-normal whitespace-nowrap">
-                {t('settings:semanticModels.actions.showSystemOntologies', 'Show system ontologies')}
-              </Label>
-            </div>
             <Button 
               variant="default"
               className="h-9"

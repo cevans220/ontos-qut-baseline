@@ -727,20 +727,31 @@ async def list_property_suggestions(
 
 @router.get('/semantic-models/concepts-grouped')
 async def get_concepts_grouped(
+    include_system: bool = Query(False, description="Include built-in (bundled) ontologies such as the Ontos/ODCS/Databricks ontologies"),
     manager: SemanticModelsManager = Depends(get_semantic_models_manager),
     _: bool = Depends(PermissionChecker('semantic-models', FeatureAccessLevel.READ_ONLY))
 ) -> dict:
-    """Get all concepts grouped by taxonomy source"""
+    """Get all concepts grouped by taxonomy source.
+
+    Built-in system sources (see ``SemanticModelsManager.get_system_source_names``)
+    are excluded unless ``include_system=true``.
+    """
     try:
         logger.info("Retrieving concepts grouped by taxonomy")
         grouped = manager.get_grouped_concepts()
-        
+        system_sources = manager.get_system_source_names()
+
         # Convert to serializable format
         result = {}
         for source, concepts in grouped.items():
+            if not include_system and source in system_sources:
+                continue
             result[source] = [concept.model_dump() for concept in concepts]
-        
-        return {'grouped_concepts': result}
+
+        return {
+            'grouped_concepts': result,
+            'system_sources': sorted(s for s in system_sources if s in grouped),
+        }
     except Exception as e:
         logger.error("Error retrieving grouped concepts", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to retrieve grouped concepts")
@@ -748,17 +759,22 @@ async def get_concepts_grouped(
 
 @router.get('/semantic-models/properties-grouped')
 async def get_properties_grouped(
+    include_system: bool = Query(False, description="Include built-in (bundled) ontologies"),
     manager: SemanticModelsManager = Depends(get_semantic_models_manager),
     _: bool = Depends(PermissionChecker('semantic-models', FeatureAccessLevel.READ_ONLY))
 ) -> dict:
     """Get all RDF/OWL properties grouped by taxonomy source.
     
     Returns properties with concept_type='property' for tree compatibility.
+    Built-in system sources are excluded unless ``include_system=true``.
     """
     try:
         logger.info("Retrieving properties grouped by taxonomy")
         grouped = manager.get_properties_grouped()
-        
+        if not include_system:
+            system_sources = manager.get_system_source_names()
+            grouped = {k: v for k, v in grouped.items() if k not in system_sources}
+
         return {'grouped_properties': grouped}
     except Exception as e:
         logger.error("Error retrieving grouped properties", exc_info=True)

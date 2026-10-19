@@ -74,7 +74,9 @@ const FILTERED: OntologyConcept[] = [
   { iri: 'urn:b', label: 'B', concept_type: 'concept' } as unknown as OntologyConcept,
 ];
 
-vi.mock('@/hooks/use-explore-concepts', () => ({
+vi.mock('@/hooks/use-explore-concepts', async () => ({
+  // Keep the real session store / query helper; only the data hook is stubbed.
+  ...(await vi.importActual<typeof import('@/hooks/use-explore-concepts')>('@/hooks/use-explore-concepts')),
   useExploreConcepts: () => ({
     isLoading: false,
     collections: [],
@@ -105,19 +107,35 @@ vi.mock('@/components/knowledge', () => ({
     graphTabConcepts = concepts;
     return <div data-testid="graph-tab">{concepts.length} nodes</div>;
   },
-  GlossaryFilterPanel: () => <div data-testid="filter-panel" />,
+  GlossaryFilterPanel: ({
+    showSystemSources,
+    onSetShowSystemSources,
+  }: {
+    showSystemSources?: boolean;
+    onSetShowSystemSources?: (enabled: boolean) => void;
+  }) => (
+    <div data-testid="filter-panel">
+      <button
+        data-testid="system-toggle"
+        data-checked={String(!!showSystemSources)}
+        onClick={() => onSetShowSystemSources?.(!showSystemSources)}
+      />
+    </div>
+  ),
   CollectionEditorDialog: () => null,
   ConceptEditorDialog: () => null,
   ImportConceptsDialog: () => null,
 }));
 
 import ExploreView from './explore';
+import { useExploreSessionStore, systemSourcesQuery } from '@/hooks/use-explore-concepts';
 
 beforeEach(() => {
   conceptsTabConcepts = null;
   conceptsTabViewMode = null;
   graphTabConcepts = null;
   availableSourcesMock = [];
+  useExploreSessionStore.setState({ showSystemSources: false });
   setHiddenSourcesSpy.mockClear();
   setStaticSegmentsSpy.mockClear();
   global.fetch = vi.fn(async () => ({
@@ -211,6 +229,21 @@ describe('Explore unified surface', () => {
     expect(setHiddenSourcesSpy.mock.calls[0][0]).not.toContain('e2e-author');
     // The param is consumed so the effect cannot re-fire on it.
     await waitFor(() => expect(observe().search).not.toContain('source='));
+  });
+
+  it('wires the "Show system ontologies" toggle: default OFF, session store flips on click', async () => {
+    renderExplore();
+    const toggle = screen.getByTestId('system-toggle');
+    expect(toggle).toHaveAttribute('data-checked', 'false');
+    expect(useExploreSessionStore.getState().showSystemSources).toBe(false);
+    fireEvent.click(toggle);
+    await waitFor(() => expect(screen.getByTestId('system-toggle')).toHaveAttribute('data-checked', 'true'));
+    expect(useExploreSessionStore.getState().showSystemSources).toBe(true);
+  });
+
+  it('system-sources query helper only opts in when the toggle is on', () => {
+    expect(systemSourcesQuery(false)).toBe('');
+    expect(systemSourcesQuery(true)).toBe('?include_system=true');
   });
 
   it('redirects legacy ?concept=IRI to /concepts/browser/:iri', async () => {

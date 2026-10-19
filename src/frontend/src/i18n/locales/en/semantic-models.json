@@ -51,6 +51,7 @@
     "none": "None",
     "groupBySource": "Group by Source",
     "showProperties": "Show Properties",
+    "showSystemSources": "Show system ontologies",
     "groupByDomain": "Group by Domain",
     "groupByNone": "None",
     "groupByScheme": "Scheme",

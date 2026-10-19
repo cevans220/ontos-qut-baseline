@@ -158,4 +158,26 @@ describe('glossary preferences store', () => {
       expect(migrate({ groupByDimension: 'scheme' }, 1).groupByDimension).toBe('scheme');
     });
   });
+
+  describe('conceptListSearch is session-only', () => {
+    const options = useGlossaryPreferencesStore.persist.getOptions();
+
+    it('is not included in the persisted slice', () => {
+      act(() => useGlossaryPreferencesStore.getState().setConceptListSearch('Assetype'));
+      const persisted = options.partialize!(useGlossaryPreferencesStore.getState()) as Record<string, unknown>;
+      expect(persisted).not.toHaveProperty('conceptListSearch');
+      // Still kept in memory for in-app navigation.
+      expect(useGlossaryPreferencesStore.getState().conceptListSearch).toBe('Assetype');
+    });
+
+    it('bumps the persist version and clears a stale stored search on migrate', () => {
+      expect(options.version).toBe(2);
+      const migrated = options.migrate!(
+        { groupByDimension: 'scheme', groupByFile: false, conceptListSearch: 'Assetype' },
+        1,
+      ) as Record<string, unknown>;
+      expect(migrated).not.toHaveProperty('conceptListSearch');
+      expect(migrated.groupByDimension).toBe('scheme');
+    });
+  });
 });
