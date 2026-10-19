@@ -401,7 +401,13 @@ jobs:
     # Skip on PRs that intentionally carry a divergent migration branch.
     # The label is the documented escape hatch for the rare case where two
     # heads are deliberate and a merge revision is planned in the PR itself.
-    if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'alembic-branch')
+    # It also runs in the merge queue: queued PRs are built together, so two
+    # PRs that each add a migration on the same parent pass on their own and
+    # would land with two heads (the app can't start then). The label doesn't
+    # apply there: the queued tree must end with a single head either way.
+    if: >-
+      github.event_name == 'merge_group' ||
+      (github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'alembic-branch'))
 
     steps:
       - name: Checkout code
@@ -422,12 +428,15 @@ jobs:
           hatch -e dev run pip install --require-hashes -r backend/requirements.txt
 
       - name: Fetch PR base ref
+        if: github.event_name == 'pull_request'
         run: git fetch --no-tags origin "${{ github.event.pull_request.base.ref }}"
 
       - name: Enforce single alembic head + base-ancestry
         working-directory: ./src
         env:
-          BASE_REF: origin/${{ github.event.pull_request.base.ref }}
+          # In the merge queue the base is the commit the queued batch sits on
+          # (an ancestor of the checked-out queue commit, so no extra fetch).
+          BASE_REF: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || format('origin/{0}', github.event.pull_request.base.ref) }}
         run: |
           hatch -e dev run python ../scripts/check-alembic-heads.py
 
