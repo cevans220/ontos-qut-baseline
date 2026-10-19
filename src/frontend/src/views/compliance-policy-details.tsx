@@ -19,6 +19,8 @@ import { useToast } from '@/hooks/use-toast';
 import useBreadcrumbStore from '@/stores/breadcrumb-store';
 import { CommentSidebar } from '@/components/comments';
 import EntityMetadataPanel from '@/components/metadata/entity-metadata-panel';
+import { formatRuleWarning, type RuleWarning } from '@/lib/compliance-rule-warnings';
+import { complianceRunErrorText } from '@/lib/compliance-run-error';
 
 type Policy = {
   id: string; // UUID
@@ -32,6 +34,7 @@ type Policy = {
   created_at?: string;
   updated_at?: string;
   examples?: { pass?: any[]; fail?: any[] } | null;
+  warnings?: RuleWarning[]; // returned by update when the rule cannot work as written
 };
 
 type Run = {
@@ -44,6 +47,8 @@ type Run = {
   failure_count: number;
   score: number;
   error_message?: string;
+  error_code?: string | null;
+  error_params?: Record<string, unknown> | null;
 };
 
 type Result = {
@@ -155,6 +160,15 @@ export default function CompliancePolicyDetails() {
     setLoading(true);
     try {
       const res = await post<Run>(`/api/compliance/policies/${policyId}/runs`, { mode: 'inline' });
+      if (res.error) {
+        // e.g. 403 when the rule changes tags and the user can't write tags
+        toast({
+          variant: 'destructive',
+          title: t('compliance:errors.runningPolicy'),
+          description: res.error,
+        });
+        return;
+      }
       if (res.data) {
         await fetchRuns(policyId);
       }
@@ -189,10 +203,16 @@ export default function CompliancePolicyDetails() {
       
       setPolicy(response.data);
       setDynamicTitle(response.data.name);
-      toast({
-        title: t('common:toast.success'),
-        description: t('compliance:toast.policySaved', { name: response.data.name })
-      });
+      const warnings = response.data.warnings ?? [];
+      toast(warnings.length
+        ? {
+            title: t('compliance:toast.policySavedWithWarnings', { name: response.data.name }),
+            description: warnings.map((w) => formatRuleWarning(t, w)).join(' '),
+          }
+        : {
+            title: t('common:toast.success'),
+            description: t('compliance:toast.policySaved', { name: response.data.name })
+          });
       
       setIsEditDialogOpen(false);
     } catch (err) {
@@ -314,6 +334,9 @@ export default function CompliancePolicyDetails() {
             <CardDescription>
               {t('compliance:policyDetails.runSummary.lastRunStarted', { date: new Date(activeRun.started_at).toLocaleString() })} • {t('compliance:policyDetails.runSummary.statusLabel')} <span className="font-medium">{activeRun.status}</span>
             </CardDescription>
+            {activeRun.status === 'failed' && activeRun.error_message && (
+              <div className="text-sm text-destructive">{t('compliance:policyDetails.runSummary.errorLabel')} {complianceRunErrorText(t, activeRun)}</div>
+            )}
           </CardHeader>
           <CardContent>
             <div className="grid md:grid-cols-3 gap-4 mb-4">

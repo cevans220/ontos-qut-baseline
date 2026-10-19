@@ -271,6 +271,9 @@
       "processFailedRetry": "Genehmigung konnte nicht verarbeitet werden. Bitte versuchen Sie es erneut.",
       "entityApproved": "{{name}} wurde genehmigt.",
       "entityRejected": "{{name}} wurde abgelehnt."
+    },
+    "errors": {
+      "own_owner_approval": "Diese Genehmigung ist Sache der Eigentümer; Sie können Ihre eigene Anfrage nicht genehmigen."
     }
   },
   "approvalWizard": {
@@ -363,6 +366,9 @@
     "triggeredBy": "Ausgelöst von: {{user}}",
     "workflowSteps": "Workflow-Schritte",
     "loadDefinitionFailed": "Workflow-Definition konnte nicht geladen werden",
+    "stepErrors": {
+      "rule_entity_load_failed": "{{entityType}} {{entityId}} konnte nicht geladen werden, um die Regel auszuwerten"
+    },
     "states": {
       "pending": "Ausstehend",
       "running": "Wird ausgeführt",
@@ -370,6 +376,14 @@
       "failed": "Fehlgeschlagen",
       "skipped": "Übersprungen",
       "waiting": "Wartet"
+    },
+    "executionStates": {
+      "pending": "Ausstehend",
+      "running": "Läuft",
+      "paused": "Pausiert",
+      "succeeded": "Erfolgreich",
+      "failed": "Fehlgeschlagen",
+      "cancelled": "Abgebrochen"
     },
     "summary": {
       "entity": "Entität",

@@ -271,6 +271,9 @@
       "processFailedRetry": "No se pudo procesar la aprobación. Inténtalo de nuevo.",
       "entityApproved": "{{name}} se ha aprobado.",
       "entityRejected": "{{name}} se ha rechazado."
+    },
+    "errors": {
+      "own_owner_approval": "Esta aprobación corresponde a los propietarios; no puedes aprobar tu propia solicitud."
     }
   },
   "approvalWizard": {
@@ -363,6 +366,9 @@
     "triggeredBy": "Activado por: {{user}}",
     "workflowSteps": "Pasos del flujo de trabajo",
     "loadDefinitionFailed": "No se pudo cargar la definición del flujo de trabajo",
+    "stepErrors": {
+      "rule_entity_load_failed": "No se pudo cargar {{entityType}} {{entityId}} para evaluar la regla"
+    },
     "states": {
       "pending": "Pendiente",
       "running": "En ejecución",
@@ -370,6 +376,14 @@
       "failed": "Fallido",
       "skipped": "Omitido",
       "waiting": "En espera"
+    },
+    "executionStates": {
+      "pending": "Pendiente",
+      "running": "En ejecución",
+      "paused": "En pausa",
+      "succeeded": "Completada",
+      "failed": "Fallida",
+      "cancelled": "Cancelada"
     },
     "summary": {
       "entity": "Entidad",

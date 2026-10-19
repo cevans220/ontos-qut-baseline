@@ -31,6 +31,7 @@ import { Badge } from '@/components/ui/badge';
 import { useApi } from '@/hooks/use-api';
 import { useToast } from '@/hooks/use-toast';
 import { useUserStore } from '@/stores/user-store';
+import { useDefaultWorkflowText } from '@/lib/workflow-default-texts';
 
 /** Lightweight markdown to HTML — handles headers, bold, lists, paragraphs, and inline links. */
 function simpleMarkdown(text: string): string {
@@ -292,6 +293,20 @@ export interface ApprovalWizardDialogProps {
     pdfStoragePath: string | null,
     wizardFields?: Record<string, unknown>,
   ) => void;
+  /**
+   * Fired as soon as the session completes, before the user closes the wizard
+   * (same arguments as ``onComplete``). Use it when the caller must act on
+   * completion, e.g. submit the request the wizard collected input for:
+   * ``onComplete`` only fires on close, so leaving the page on the completion
+   * screen (reload, browser back) would lose the request. When set, the
+   * wizard doesn't show its own "completed" toast; the caller reports the
+   * outcome. Never fired in preview mode.
+   */
+  onSessionComplete?: (
+    agreementId: string | null,
+    pdfStoragePath: string | null,
+    wizardFields?: Record<string, unknown>,
+  ) => void;
   /** Called when no workflow is available so the caller can proceed directly. */
   onNoWorkflow?: () => void;
   /**
@@ -316,12 +331,15 @@ export default function ApprovalWizardDialog({
   onBehalfOf,
   autoStartWithPreselected,
   onComplete,
+  onSessionComplete,
   onNoWorkflow,
   previewMode = false,
 }: ApprovalWizardDialogProps) {
   const { get, post } = useApi();
   const { toast } = useToast();
   const { t } = useTranslation(['workflows', 'common']);
+  // Shipped default texts in the user's language (as configured once edited)
+  const defaultText = useDefaultWorkflowText();
   const [workflows, setWorkflows] = useState<ApprovalWorkflowRef[]>([]);
   const [, setSelectedWorkflowId] = useState<string | null>(preselectedWorkflowId ?? null);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -699,9 +717,14 @@ export default function ApprovalWizardDialog({
       if (data.complete) {
         setCompleteResult({ agreement_id: data.agreement_id ?? null, pdf_storage_path: data.pdf_storage_path ?? null, pdf_url: data.pdf_url ?? null });
         setCurrentStep(null);
-        toast({ title: t('workflows:approvalWizard.messages.completed'), description: t('workflows:approvalWizard.messages.completedDesc') });
+        if (onSessionComplete && !previewMode) {
+          // The caller acts now (e.g. submits the request) and reports the outcome
+          onSessionComplete(data.agreement_id ?? null, data.pdf_storage_path ?? null, { ...collectedFieldsRef.current });
+        } else {
+          toast({ title: t('workflows:approvalWizard.messages.completed'), description: t('workflows:approvalWizard.messages.completedDesc') });
+        }
         // Defer onComplete — let user see the completion screen and download PDF first.
-        // onComplete fires when they click Close (see handleCloseAfterComplete below).
+        // onComplete fires when they close the wizard (see handleDialogOpenChange below).
       } else {
         const nextStep = data.current_step ?? null;
         setCurrentStep(nextStep);
@@ -727,7 +750,7 @@ export default function ApprovalWizardDialog({
     } finally {
       setLoading(false);
     }
-  }, [sessionId, currentStep, payload, stepValidation, post, toast, onComplete, onOpenChange, previewMode, workflows, t]);
+  }, [sessionId, currentStep, payload, stepValidation, post, toast, onComplete, onSessionComplete, onOpenChange, previewMode, workflows, t]);
 
   /** Auto-advance non-visual steps (persist_agreement, generate_pdf, deliver). */
   useEffect(() => {
@@ -819,7 +842,7 @@ export default function ApprovalWizardDialog({
           <DialogDescription>
             {previewMode ? (
               t('workflows:approvalWizard.dryRunDescription')
-            ) : !sessionId ? t('workflows:approvalWizard.chooseWorkflow') : currentStep ? t('workflows:approvalWizard.stepPrefix', { name: currentStep.name }) : completeResult ? t('workflows:approvalWizard.completedShort') : t('workflows:approvalWizard.loadingEllipsis')}
+            ) : !sessionId ? t('workflows:approvalWizard.chooseWorkflow') : currentStep ? t('workflows:approvalWizard.stepPrefix', { name: defaultText(currentStep.name) }) : completeResult ? t('workflows:approvalWizard.completedShort') : t('workflows:approvalWizard.loadingEllipsis')}
           </DialogDescription>
         </DialogHeader>
 
@@ -841,7 +864,7 @@ export default function ApprovalWizardDialog({
               ))}
             </div>
             <span className="text-xs text-muted-foreground ml-1">
-              {t('workflows:approvalWizard.progressStep', { number: currentStepIndex + 1, name: stepNames[currentStepIndex] ?? currentStep?.name ?? '' })}
+              {t('workflows:approvalWizard.progressStep', { number: currentStepIndex + 1, name: defaultText(stepNames[currentStepIndex] ?? currentStep?.name) ?? '' })}
             </span>
           </div>
         )}
@@ -935,11 +958,11 @@ export default function ApprovalWizardDialog({
             {/* Step header (title + description) — shown for all visual step types */}
             {(currentStep.config?.title as string) && (
               <div className="space-y-1">
-                <Label className="text-base">{(currentStep.config.title as string)}</Label>
+                <Label className="text-base">{defaultText(currentStep.config.title as string)}</Label>
                 {(currentStep.config?.description as string) && (
                   <p
                     className="text-sm text-muted-foreground"
-                    dangerouslySetInnerHTML={{ __html: simpleMarkdown((currentStep.config.description as string)) }}
+                    dangerouslySetInnerHTML={{ __html: simpleMarkdown(defaultText(currentStep.config.description as string) ?? '') }}
                   />
                 )}
               </div>
@@ -957,13 +980,13 @@ export default function ApprovalWizardDialog({
               <div className="space-y-2">
                 {(requiredFields as UserActionField[]).map((f) => (
                   <div key={f.id} className="space-y-1">
-                    <Label htmlFor={f.id}>{f.label}{f.required ? ' *' : ''}</Label>
+                    <Label htmlFor={f.id}>{defaultText(f.label)}{f.required ? ' *' : ''}</Label>
                     {f.type === 'text' ? (
                       <Textarea
                         id={f.id}
                         value={payload[f.id] ?? ''}
                         onChange={(e) => setPayload((p) => ({ ...p, [f.id]: e.target.value }))}
-                        placeholder={f.label}
+                        placeholder={defaultText(f.label)}
                         rows={2}
                         disabled={loading}
                       />
@@ -980,7 +1003,7 @@ export default function ApprovalWizardDialog({
                         id={f.id}
                         value={payload[f.id] ?? ''}
                         onChange={(e) => setPayload((p) => ({ ...p, [f.id]: e.target.value }))}
-                        placeholder={f.label}
+                        placeholder={defaultText(f.label)}
                         disabled={loading}
                       />
                     )}

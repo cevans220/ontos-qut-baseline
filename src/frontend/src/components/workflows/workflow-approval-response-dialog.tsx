@@ -25,6 +25,7 @@ import { useApi } from '@/hooks/use-api';
 import { useToast } from '@/hooks/use-toast';
 import { getUnderlyingEntityDetailPath } from '@/lib/entity-detail-path';
 import { useKnowledgeGraphStore } from '@/stores/knowledge-graph-store';
+import { useDefaultWorkflowText } from '@/lib/workflow-default-texts';
 
 /** Built from GET /api/workflows/for-trigger/for_approval_response (first step used for dialog). */
 interface DefaultResponseWorkflowStep {
@@ -311,7 +312,9 @@ export default function WorkflowApprovalResponseDialog({
       if (response.error) {
         toast({
           title: t('common:toast.error'),
-          description: response.error || t('workflows:approvalResponse.messages.processFailed'),
+          description: response.errorCode
+            ? t(`workflows:approvalResponse.errors.${response.errorCode}`, { defaultValue: response.error })
+            : response.error || t('workflows:approvalResponse.messages.processFailed'),
           variant: 'destructive',
         });
         return;
@@ -343,9 +346,12 @@ export default function WorkflowApprovalResponseDialog({
     }
   };
 
-  const title = config.title ?? stepConfig?.step_name ?? t('workflows:approvalResponse.titleFallback');
+  // Shipped default texts in the user's language (as configured once edited)
+  const defaultText = useDefaultWorkflowText();
+  const title =
+    defaultText(config.title ?? stepConfig?.step_name) ?? t('workflows:approvalResponse.titleFallback');
   const description =
-    config.description ?? t('workflows:approvalResponse.descriptionFallback');
+    defaultText(config.description) ?? t('workflows:approvalResponse.descriptionFallback');
 
   const detailRows = payload ? buildDetailRows(payload, () => onOpenChange(false), t) : [];
 
@@ -420,7 +426,7 @@ export default function WorkflowApprovalResponseDialog({
             )}
             <div className="space-y-2">
               <Label htmlFor="approval-reason">
-                {reasonField?.label ?? t('workflows:approvalResponse.reasonLabel')}
+                {defaultText(reasonField?.label) ?? t('workflows:approvalResponse.reasonLabel')}
                 {isReasonRequired && ' *'}
               </Label>
               <Textarea

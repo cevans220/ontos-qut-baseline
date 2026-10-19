@@ -77,7 +77,7 @@ async def _create_comment_impl(
             is_admin=is_admin
         )
         success = True
-        details["comment_id"] = result.id
+        details["comment_id"] = str(result.id)
         return result
     except ValueError as e:
         details["exception"] = {"type": "ValueError", "message": str(e)}
@@ -638,6 +638,7 @@ async def delete_comment(
 @router.get("/comments/{comment_id}/permissions")
 async def check_comment_permissions(
     comment_id: str,
+    request: Request,
     db: DBSessionDep,
     current_user: CurrentUserDep,
     manager: CommentsManager = Depends(get_comments_manager),
