@@ -257,7 +257,14 @@
       "notConfigured": "Not Configured"
     },
     "viewChangesButton": "View Changes",
-    "volumePath": "Volume Path"
+    "volumePath": "Volume Path",
+    "workingCopy": "Working copy",
+    "workingCopyNote": "The volume isn't mounted here, so the working copy is on the app's local disk and each exported file is also written to the volume. After the app restarts, clone the repository again: pushed commits are kept in the remote.",
+    "volumeSyncWarningTitle": "Export not written to the volume",
+    "errors": {
+      "git_volume_invalid": "The volume setting \"{{value}}\" doesn't name a Unity Catalog volume. Use /Volumes/<catalog>/<schema>/<volume>, <catalog>.<schema>.<volume>, or a volume name with the catalog and schema set in the general settings.",
+      "git_volume_sync_failed": "{{path}} couldn't be written to the volume. The change is in the repository and is pushed as usual; check that the app can write to the volume (WRITE VOLUME)."
+    }
   },
   "nav": {
     "groups": {

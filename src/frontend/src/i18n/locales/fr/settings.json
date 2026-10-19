@@ -250,7 +250,14 @@
       "notConfigured": "Non configuré"
     },
     "viewChangesButton": "Voir les modifications",
-    "volumePath": "Chemin du volume"
+    "volumePath": "Chemin du volume",
+    "workingCopy": "Copie de travail",
+    "workingCopyNote": "Le volume n'est pas monté ici : la copie de travail est sur le disque local de l'app et chaque fichier exporté est aussi écrit dans le volume. Après un redémarrage de l'app, clonez à nouveau le dépôt : les commits poussés sont conservés sur le dépôt distant.",
+    "volumeSyncWarningTitle": "Export non écrit dans le volume",
+    "errors": {
+      "git_volume_invalid": "Le paramètre de volume « {{value}} » ne désigne pas un volume Unity Catalog. Utilisez /Volumes/<catalog>/<schema>/<volume>, <catalog>.<schema>.<volume> ou un nom de volume avec le catalogue et le schéma définis dans les paramètres généraux.",
+      "git_volume_sync_failed": "Impossible d'écrire {{path}} dans le volume. La modification est dans le dépôt et est poussée comme d'habitude ; vérifiez que l'app peut écrire dans le volume (WRITE VOLUME)."
+    }
   },
   "nav": {
     "groups": {

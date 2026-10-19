@@ -40,7 +40,15 @@ interface GitStatus {
   }>;
   error_message?: string;
   current_commit?: string;
+  error_code?: string | null;
+  error_params?: Record<string, unknown> | null;
+  working_copy_path?: string | null;
+  volume_sync_error_code?: string | null;
+  volume_sync_error_params?: Record<string, unknown> | null;
 }
+
+/** A clone error as the backend sends it: a string, or `{code, message, params}`. */
+type GitErrorDetail = string | { code?: string; message?: string; params?: Record<string, unknown> };
 
 interface GitSettings {
   gitRepoUrl: string;
@@ -68,6 +76,22 @@ export default function GitSettings() {
   const [isPulling, setIsPulling] = useState(false);
   const [isPushing, setIsPushing] = useState(false);
   const [showDiffModal, setShowDiffModal] = useState(false);
+
+  // Text of a coded Git error in the UI language; the English message otherwise
+  const gitErrorText = (
+    code: string | null | undefined,
+    params: Record<string, unknown> | null | undefined,
+    fallback: string,
+  ): string =>
+    code
+      ? t(`settings:git.errors.${code}`, { ...(params || {}), defaultValue: fallback })
+      : fallback;
+
+  const detailText = (detail: GitErrorDetail | undefined, fallback: string): string => {
+    if (!detail) return fallback;
+    if (typeof detail === 'string') return detail;
+    return gitErrorText(detail.code, detail.params, detail.message || fallback);
+  };
 
   // Fetch Git status
   const fetchStatus = useCallback(async () => {
@@ -159,7 +183,7 @@ export default function GitSettings() {
         });
         await fetchStatus();
       } else {
-        throw new Error(data.detail || 'Failed to clone repository');
+        throw new Error(detailText(data.detail, 'Failed to clone repository'));
       }
     } catch (error: any) {
       toast({
@@ -295,7 +319,25 @@ export default function GitSettings() {
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
               <AlertTitle>{t('settings:git.errorTitle', 'Error')}</AlertTitle>
-              <AlertDescription>{status.error_message}</AlertDescription>
+              <AlertDescription>
+                {gitErrorText(status.error_code, status.error_params, status.error_message)}
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {status?.clone_status === 'cloned' && status.volume_sync_error_code && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>
+                {t('settings:git.volumeSyncWarningTitle', 'Export not written to the volume')}
+              </AlertTitle>
+              <AlertDescription>
+                {gitErrorText(
+                  status.volume_sync_error_code,
+                  status.volume_sync_error_params,
+                  String(status.volume_sync_error_params?.path ?? ''),
+                )}
+              </AlertDescription>
             </Alert>
           )}
 
@@ -394,7 +436,24 @@ export default function GitSettings() {
                     {status.volume_path || 'N/A'}
                   </code>
                 </div>
+                {status.working_copy_path && (
+                  <div className="flex items-center gap-2 text-muted-foreground col-span-2">
+                    <FolderGit2 className="h-4 w-4" />
+                    <span>{t('settings:git.workingCopy', 'Working copy')}: </span>
+                    <code className="text-foreground text-xs truncate">
+                      {status.working_copy_path}
+                    </code>
+                  </div>
+                )}
               </div>
+              {status.working_copy_path && (
+                <p className="text-xs text-muted-foreground">
+                  {t(
+                    'settings:git.workingCopyNote',
+                    "The volume isn't mounted here, so the working copy is on the app's local disk and each exported file is also written to the volume. After the app restarts, clone the repository again: pushed commits are kept in the remote.",
+                  )}
+                </p>
+              )}
             </div>
           )}
         <div className="flex justify-between pt-4">

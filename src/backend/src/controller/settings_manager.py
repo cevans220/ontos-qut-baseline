@@ -1671,7 +1671,11 @@ class SettingsManager:
             logger.info(f"Updated UI_FAVICON_URL")
 
         # Reinitialize Git service if any Git settings were changed
-        git_settings_changed = any(key in settings for key in ['git_repo_url', 'git_branch', 'git_username', 'git_password'])
+        # The export location comes from the volume settings, so they count too
+        git_settings_changed = any(key in settings for key in [
+            'git_repo_url', 'git_branch', 'git_username', 'git_password',
+            'databricks_catalog', 'databricks_schema', 'databricks_volume',
+        ])
         if git_settings_changed:
             try:
                 from src.common.git import reinitialize_git_service

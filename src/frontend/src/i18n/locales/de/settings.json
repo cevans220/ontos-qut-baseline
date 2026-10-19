@@ -250,7 +250,14 @@
       "notConfigured": "Nicht konfiguriert"
     },
     "viewChangesButton": "Änderungen anzeigen",
-    "volumePath": "Volume-Pfad"
+    "volumePath": "Volume-Pfad",
+    "workingCopy": "Arbeitskopie",
+    "workingCopyNote": "Das Volume ist hier nicht eingehängt. Die Arbeitskopie liegt daher auf der lokalen Festplatte der App, und jede exportierte Datei wird zusätzlich in das Volume geschrieben. Klonen Sie das Repository nach einem Neustart der App erneut: Gepushte Commits bleiben im Remote erhalten.",
+    "volumeSyncWarningTitle": "Export nicht in das Volume geschrieben",
+    "errors": {
+      "git_volume_invalid": "Die Volume-Einstellung „{{value}}“ bezeichnet kein Unity-Catalog-Volume. Verwenden Sie /Volumes/<catalog>/<schema>/<volume>, <catalog>.<schema>.<volume> oder einen Volume-Namen mit Katalog und Schema aus den allgemeinen Einstellungen.",
+      "git_volume_sync_failed": "{{path}} konnte nicht in das Volume geschrieben werden. Die Änderung ist im Repository und wird wie gewohnt gepusht; prüfen Sie, ob die App in das Volume schreiben darf (WRITE VOLUME)."
+    }
   },
   "nav": {
     "groups": {

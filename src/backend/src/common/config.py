@@ -79,6 +79,10 @@ class Settings(BaseSettings):
     GIT_BRANCH: str = Field('main', env='GIT_BRANCH')
     GIT_USERNAME: Optional[str] = Field(None, env='GIT_USERNAME')
     GIT_PASSWORD: Optional[str] = Field(None, env='GIT_PASSWORD')
+    # Local directory for the Git working copy when DATABRICKS_VOLUME is a Unity
+    # Catalog volume that isn't mounted on this machine (Databricks Apps). The
+    # exported files are also written to {volume}/git-export/ through the Files API.
+    GIT_WORK_DIR: Optional[str] = Field(None, env='GIT_WORK_DIR')
 
     # Job settings
     # Track the Databricks job cluster ID (string). Do not scan clusters.

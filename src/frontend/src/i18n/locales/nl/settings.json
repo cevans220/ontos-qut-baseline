@@ -250,7 +250,14 @@
       "notConfigured": "Niet Geconfigureerd"
     },
     "viewChangesButton": "Wijzigingen Bekijken",
-    "volumePath": "Volumepad"
+    "volumePath": "Volumepad",
+    "workingCopy": "Werkkopie",
+    "workingCopyNote": "Het volume is hier niet gekoppeld. De werkkopie staat daarom op de lokale schijf van de app en elk geëxporteerd bestand wordt ook naar het volume geschreven. Kloon de repository opnieuw nadat de app opnieuw is gestart: gepushte commits blijven in de remote bewaard.",
+    "volumeSyncWarningTitle": "Export niet naar het volume geschreven",
+    "errors": {
+      "git_volume_invalid": "De volume-instelling \"{{value}}\" verwijst niet naar een Unity Catalog-volume. Gebruik /Volumes/<catalog>/<schema>/<volume>, <catalog>.<schema>.<volume> of een volumenaam met de catalogus en het schema uit de algemene instellingen.",
+      "git_volume_sync_failed": "{{path}} kon niet naar het volume worden geschreven. De wijziging staat in de repository en wordt zoals gewoonlijk gepusht; controleer of de app naar het volume mag schrijven (WRITE VOLUME)."
+    }
   },
   "nav": {
     "groups": {

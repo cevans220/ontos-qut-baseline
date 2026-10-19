@@ -250,7 +250,14 @@
       "notConfigured": "未設定"
     },
     "viewChangesButton": "変更を表示",
-    "volumePath": "ボリュームパス"
+    "volumePath": "ボリュームパス",
+    "workingCopy": "作業コピー",
+    "workingCopyNote": "このボリュームはここにマウントされていないため、作業コピーはアプリのローカルディスクに置かれ、エクスポートされた各ファイルはボリュームにも書き込まれます。アプリの再起動後はリポジトリをもう一度クローンしてください。プッシュ済みのコミットはリモートに残ります。",
+    "volumeSyncWarningTitle": "ボリュームに書き込まれなかったエクスポート",
+    "errors": {
+      "git_volume_invalid": "ボリューム設定「{{value}}」は Unity Catalog のボリュームを指していません。/Volumes/<catalog>/<schema>/<volume>、<catalog>.<schema>.<volume>、または一般設定でカタログとスキーマを指定したうえでボリューム名を使用してください。",
+      "git_volume_sync_failed": "{{path}} をボリュームに書き込めませんでした。変更はリポジトリにあり、通常どおりプッシュされます。アプリがボリュームに書き込めること（WRITE VOLUME）を確認してください。"
+    }
   },
   "nav": {
     "groups": {
