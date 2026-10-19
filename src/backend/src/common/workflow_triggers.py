@@ -147,6 +147,9 @@ class TriggerRegistry:
                 logger.exception(f"Failed to execute workflow '{workflow.name}': {e}")
                 if errors is not None:
                     errors.append((workflow, e))
+                    # A database error aborts the transaction: recover so the
+                    # next gates and the caller's status write can still run
+                    _recover_session_after_gate_error(self._db)
         
         return executions
 
@@ -1273,6 +1276,27 @@ def drop_exempted_gates(
     return kept
 
 
+def _recover_session_after_gate_error(db: Session) -> None:
+    """Make ``db`` usable again after a gate error, if the error broke its transaction.
+
+    A database error while the gates are listed or run (a failed query, a
+    dropped connection) leaves the transaction aborted: every later statement
+    on the session fails, so neither the fallback lookup of the gates' mode
+    nor the status write could run. The gate runs commit their executions as
+    they go, so rolling back only drops what that failed run had not committed.
+    """
+    from sqlalchemy import text
+
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception:
+        logger.error(
+            "The gate error left the database session in a failed transaction; rolling it back",
+            exc_info=True,
+        )
+        db.rollback()
+
+
 def _fail_closed_gate_names(db: Session, event: TriggerEvent) -> List[str]:
     """Active ``fail_closed`` gates that would match ``event``, read directly from the table.
 
@@ -1334,6 +1358,8 @@ def run_status_gates(
     - When the gates can't even be listed, the ``fail_closed`` ones are read
       straight from the workflows table; if that fails too, the mode is
       unknown and the transition proceeds (the error is still reported).
+    - A database error that aborted the session's transaction is rolled back
+      first, so the lookup and the status write can still run.
     """
     event = TriggerEvent(
         trigger_type=TriggerType.BEFORE_STATUS_CHANGE,
@@ -1359,6 +1385,7 @@ def run_status_gates(
         raise
     except Exception as e:
         report_gate_error(event, e)
+        _recover_session_after_gate_error(db)
         try:
             closed = _fail_closed_gate_names(db, event)
         except Exception as lookup_err:
