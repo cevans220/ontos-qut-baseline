@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 from databricks.sdk.service.catalog import TableType
 
-from src.common.metric_views import parse_metric_view_definition
+from src.common.metric_views import MAX_DEFINITION_LENGTH, parse_metric_view_definition
 from src.connectors.base import ListAssetsOptions
 from src.connectors.databricks import DatabricksConnector
 from src.controller.catalog_commander_manager import CatalogCommanderManager
@@ -141,6 +141,48 @@ def test_a_missing_or_unreadable_definition_gives_none(definition):
     assert parse_metric_view_definition(definition) is None
 
 
+def _nested_joins(depth):
+    lines, indent = ["source: main.sales.orders", "joins:"], "  "
+    for i in range(depth):
+        lines += [f"{indent}- name: j{i}", f"{indent}  source: main.sales.t{i}",
+                  f"{indent}  joins:"]
+        indent += "    "
+    return "\n".join(lines + [f"{indent}[]"]) + "\n"
+
+
+def test_a_definition_nested_too_deeply_for_the_yaml_parser_gives_none():
+    # yaml.safe_load raises RecursionError (not a YAMLError) from about 600 levels
+    deep = "source: main.sales.orders\nfilter: " + "[" * 5000 + "]" * 5000 + "\n"
+
+    assert parse_metric_view_definition(deep) is None
+    assert parse_metric_view_definition(_nested_joins(1000)) is None
+
+
+def test_deeply_nested_joins_are_flattened_in_order():
+    joins = parse_metric_view_definition(_nested_joins(100))['joins']
+
+    assert [j['name'] for j in joins] == [f"j{i}" for i in range(100)]
+
+
+def test_joins_repeated_through_yaml_aliases_are_listed_once():
+    spec = parse_metric_view_definition(
+        "source: main.sales.orders\n"
+        "joins: &all\n"
+        "  - name: customers\n"
+        "    source: main.sales.customers\n"
+        "    joins: *all\n"
+    )
+
+    assert [j['name'] for j in spec['joins']] == ['customers']
+
+
+def test_a_definition_over_the_size_limit_gives_none():
+    padding = "# " + "x" * MAX_DEFINITION_LENGTH + "\n"
+
+    assert parse_metric_view_definition(SPEC + padding) is None
+    assert parse_metric_view_definition(SPEC)['source'] == 'main.sales.orders'
+
+
 # --- Connector ---------------------------------------------------------------
 
 
@@ -260,6 +302,17 @@ def test_a_reviewed_metric_view_shows_its_dimensions_and_measures():
     assert result['definition'] == SPEC
     assert [d['name'] for d in result['metric_view']['dimensions']] == ['Order Month', 'Region']
     assert [m['name'] for m in result['metric_view']['measures']] == ['Total Revenue']
+
+
+def test_a_reviewed_metric_view_nested_too_deeply_still_returns_its_yaml():
+    deep = "source: main.sales.orders\nfilter: " + "[" * 5000 + "]" * 5000 + "\n"
+    manager = _review_manager()
+    manager._ws_client.tables.get.side_effect = lambda full_name: _table(
+        "deep_metrics", TableType.METRIC_VIEW, deep)
+
+    result = asyncio.run(manager.get_metric_view_definition('main.sales.deep_metrics'))
+
+    assert result == {'definition': deep, 'metric_view': None}
 
 
 # --- Schema import -----------------------------------------------------------

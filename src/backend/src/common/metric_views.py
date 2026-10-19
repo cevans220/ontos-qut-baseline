@@ -25,6 +25,11 @@ logger = get_logger(__name__)
 # Optional keys a dimension or measure may carry besides name and expr
 _FIELD_EXTRAS = ('display_name', 'comment', 'format', 'synonyms')
 
+# Definitions longer than this aren't parsed (the raw YAML is still shown)
+MAX_DEFINITION_LENGTH = 256 * 1024
+# Joins listed at most; YAML aliases can repeat a list of joins many times
+MAX_JOINS = 1000
+
 
 def _fields(entries: Any) -> List[Dict[str, Any]]:
     """Dimensions or measures as ``{name, expr, ...}`` dicts; entries without a name are skipped."""
@@ -41,20 +46,34 @@ def _fields(entries: Any) -> List[Dict[str, Any]]:
 
 
 def _joins(entries: Any) -> List[Dict[str, Any]]:
-    """Joins as ``{name, source, on, using}``, nested joins flattened after their parent."""
+    """Joins as ``{name, source, on, using}``, nested joins flattened after their parent.
+
+    Walked with a stack rather than recursion, so deep nesting can't exhaust the
+    call stack; a list of joins seen before (a YAML alias, possibly to itself)
+    isn't walked again.
+    """
     joins: List[Dict[str, Any]] = []
-    for join in entries if isinstance(entries, list) else []:
-        if not isinstance(join, dict):
+    seen = set()
+    stack = [entries]
+    while stack and len(joins) < MAX_JOINS:
+        entry = stack.pop()
+        if isinstance(entry, list):
+            if id(entry) in seen:
+                continue
+            seen.add(id(entry))
+            stack.extend(reversed(entry))
             continue
-        using = join.get('using')
+        if not isinstance(entry, dict):
+            continue
+        using = entry.get('using')
         joins.append({
-            'name': join.get('name'),
-            'source': join.get('source'),
+            'name': entry.get('name'),
+            'source': entry.get('source'),
             # YAML 1.1 reads a bare `on:` key as the boolean True
-            'on': join.get('on', join.get(True)),
+            'on': entry.get('on', entry.get(True)),
             'using': [str(c) for c in using] if isinstance(using, list) else None,
         })
-        joins.extend(_joins(join.get('joins')))
+        stack.append(entry.get('joins'))
     return joins
 
 
@@ -74,15 +93,24 @@ def parse_metric_view_definition(definition: Optional[str]) -> Optional[Dict[str
 
     Returns ``{version, source, filter, joins, dimensions, measures,
     materialization}`` (joins as ``{name, source, on, using}``), or None when the
-    definition is missing or isn't a YAML mapping. ``fields`` is read as a
+    definition is missing, longer than ``MAX_DEFINITION_LENGTH``, nested too
+    deeply for the YAML parser, or isn't a YAML mapping. ``fields`` is read as a
     synonym of ``dimensions`` (the term the current metric view docs use).
     """
     if not definition or not definition.strip():
+        return None
+    if len(definition) > MAX_DEFINITION_LENGTH:
+        logger.warning("Metric view definition not parsed: %d characters (limit %d)",
+                       len(definition), MAX_DEFINITION_LENGTH)
         return None
     try:
         spec = yaml.safe_load(definition)
     except yaml.YAMLError as e:
         logger.warning("Metric view definition is not valid YAML: %s", e)
+        return None
+    except RecursionError:
+        # PyYAML composes nested nodes recursively: a few hundred levels exhaust the stack
+        logger.warning("Metric view definition not parsed: nested too deeply")
         return None
     if not isinstance(spec, dict):
         return None
