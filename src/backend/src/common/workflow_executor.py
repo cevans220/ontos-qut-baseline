@@ -2977,14 +2977,23 @@ class WorkflowExecutor:
         success_count = db_execution.success_count
         failure_count = db_execution.failure_count
         
-        # Count the approval step
-        if step_result:
-            success_count += 1
-        else:
+        # Count the approval step. The pause already counted it as passed (the
+        # pending approval's result passes), so an approval keeps that count and
+        # a rejection moves it to the failures.
+        if not step_result:
+            success_count = max(success_count - 1, 0)
             failure_count += 1
         
         final_status = ExecutionStatus.RUNNING
         error_message = None
+        
+        # The approval was the last step for this decision: the execution ends here.
+        if not next_step_id:
+            if step_result:
+                final_status = ExecutionStatus.SUCCEEDED
+            else:
+                final_status = ExecutionStatus.FAILED
+                error_message = (result_data or {}).get('reason', 'Request denied')
         
         while next_step_id:
             step = steps_by_id.get(next_step_id)
