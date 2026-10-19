@@ -126,3 +126,16 @@ async def test_a_tool_exception_reaches_neither_the_llm_nor_mcp_clients(caplog):
     assert "error id" in result.error
     logged = "\n".join(r.getMessage() for r in caplog.records)
     assert SECRET in logged
+
+
+@pytest.mark.asyncio
+async def test_an_error_whose_text_names_a_validation_error_isnt_quoted(db_session):
+    # Before: "ValidationError" anywhere in the text added `Details: <text>` to the reply.
+    manager = _manager(db_session)
+    error = RuntimeError(f"1 validation error for ToolArgs (ValidationError): input {SECRET}")
+    with patch.object(manager, "_process_with_llm", AsyncMock(side_effect=error)):
+        response = await manager.chat("q", user_id="u@example.com")
+
+    assert SECRET not in response.message.content
+    assert "Details" not in response.message.content
+    assert all(SECRET not in text for text in _stored_contents(manager, response.session_id))
