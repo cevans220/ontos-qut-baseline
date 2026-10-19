@@ -63,6 +63,7 @@ import type { DataProduct } from '@/types/data-product'
 import type { DataProfilingRun } from '@/types/data-contract'
 import { useCopilotContext } from '@/hooks/use-copilot-context'
 import { useApi } from '@/hooks/use-api'
+import { contractReviewDecisionErrorText } from '@/lib/contract-review-decision-error'
 import CertificationBadge from '@/components/common/certification-badge'
 import PublicationScopeBadge from '@/components/common/publication-scope-badge'
 import { DirectCertifyDialog, DirectPublishDialog } from '@/components/common/direct-lifecycle-dialogs'
@@ -1523,8 +1524,10 @@ export default function DataContractDetails() {
   const handleApprove = async () => {
     if (!contractId) return;
     try {
-      const res = await fetch(`/api/data-contracts/${contractId}/approve`, { method: 'POST' });
-      if (!res.ok) throw new Error(t('data-contracts:detailsView.errors.approveFailedStatus', 'Approve failed ({{status}})', { status: res.status }));
+      const response = await post(`/api/data-contracts/${contractId}/approve`, {});
+      if (response.error) {
+        throw new Error(contractReviewDecisionErrorText(response, t, t('data-contracts:detailsView.errors.approveFailed', 'Approve failed')));
+      }
       await fetchDetails();
       toast({ title: t('data-contracts:detailsView.toast.approvedTitle', 'Approved'), description: t('data-contracts:detailsView.toast.contractApproved', 'Contract approved.') });
     } catch (e: any) {
@@ -1535,8 +1538,10 @@ export default function DataContractDetails() {
   const handleReject = async () => {
     if (!contractId) return;
     try {
-      const res = await fetch(`/api/data-contracts/${contractId}/reject`, { method: 'POST' });
-      if (!res.ok) throw new Error(t('data-contracts:detailsView.errors.rejectFailedStatus', 'Reject failed ({{status}})', { status: res.status }));
+      const response = await post(`/api/data-contracts/${contractId}/reject`, {});
+      if (response.error) {
+        throw new Error(contractReviewDecisionErrorText(response, t, t('data-contracts:detailsView.errors.rejectFailed', 'Reject failed')));
+      }
       await fetchDetails();
       toast({ title: t('data-contracts:detailsView.toast.rejectedTitle', 'Rejected'), description: t('data-contracts:detailsView.toast.contractRejected', 'Contract rejected.') });
     } catch (e: any) {

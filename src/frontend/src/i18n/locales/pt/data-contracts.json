@@ -496,10 +496,9 @@
       "deleteSchemaAuthDefFailed": "Falha ao excluir definição autoritativa de esquema",
       "createPropertyAuthDefFailed": "Falha ao criar definição autoritativa de propriedade",
       "updatePropertyAuthDefFailed": "Falha ao atualizar definição autoritativa de propriedade",
-      "approveFailedStatus": "Falha ao aprovar ({{status}})",
       "approveFailed": "Falha ao aprovar",
-      "rejectFailedStatus": "Falha ao rejeitar ({{status}})",
       "rejectFailed": "Falha ao rejeitar",
+      "invalidTransition": "O contrato agora está com o status {{fromStatus}} e não pode mais ser aprovado nem rejeitado. Recarregue a página para ver o status atual.",
       "startProfilingFailed": "Falha ao iniciar perfilamento"
     }
   },

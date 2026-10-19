@@ -496,10 +496,9 @@
       "deleteSchemaAuthDefFailed": "Verbindliche Schemadefinition konnte nicht gelöscht werden",
       "createPropertyAuthDefFailed": "Verbindliche Eigenschaftsdefinition konnte nicht erstellt werden",
       "updatePropertyAuthDefFailed": "Verbindliche Eigenschaftsdefinition konnte nicht aktualisiert werden",
-      "approveFailedStatus": "Genehmigung fehlgeschlagen ({{status}})",
       "approveFailed": "Genehmigung fehlgeschlagen",
-      "rejectFailedStatus": "Ablehnung fehlgeschlagen ({{status}})",
       "rejectFailed": "Ablehnung fehlgeschlagen",
+      "invalidTransition": "Der Vertrag ist jetzt {{fromStatus}} und kann nicht mehr genehmigt oder abgelehnt werden. Laden Sie die Seite neu, um den aktuellen Status zu sehen.",
       "startProfilingFailed": "Profilierung konnte nicht gestartet werden"
     }
   },

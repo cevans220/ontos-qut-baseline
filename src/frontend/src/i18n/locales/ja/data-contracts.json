@@ -496,10 +496,9 @@
       "deleteSchemaAuthDefFailed": "スキーマの正式な定義の削除に失敗しました",
       "createPropertyAuthDefFailed": "プロパティの正式な定義の作成に失敗しました",
       "updatePropertyAuthDefFailed": "プロパティの正式な定義の更新に失敗しました",
-      "approveFailedStatus": "承認に失敗しました（{{status}}）",
       "approveFailed": "承認に失敗しました",
-      "rejectFailedStatus": "却下に失敗しました（{{status}}）",
       "rejectFailed": "却下に失敗しました",
+      "invalidTransition": "契約は現在{{fromStatus}}のため、承認も却下もできません。ページを再読み込みして現在のステータスを確認してください。",
       "startProfilingFailed": "プロファイリングの開始に失敗しました"
     }
   },
