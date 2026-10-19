@@ -60,9 +60,15 @@ export function localStepConfigIssue(
     if (typeof code !== 'string' || !code.trim()) {
       return { code: 'script_code_required' };
     }
+    // Only Python scripts use the timeout; the form hides the field for SQL.
     const timeout = config.timeout_seconds;
-    const { minimumTimeout } = scriptSchema(schema);
-    if (timeout !== undefined && (!Number.isInteger(timeout) || (timeout as number) < minimumTimeout)) {
+    const { minimumTimeout, defaultLanguage } = scriptSchema(schema);
+    const language = typeof config.language === 'string' ? config.language : defaultLanguage;
+    if (
+      language !== 'sql'
+      && timeout !== undefined
+      && (!Number.isInteger(timeout) || (timeout as number) < minimumTimeout)
+    ) {
       return { code: 'script_timeout_invalid', params: { minimum: minimumTimeout } };
     }
   }

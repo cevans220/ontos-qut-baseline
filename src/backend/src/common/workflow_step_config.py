@@ -8,6 +8,11 @@ from typing import Any, Dict, List, Optional
 
 SCRIPT_LANGUAGES = ('python', 'sql')
 
+# Longest condition the designer and a save accept. The DSL parser is
+# recursive, so a deeply nested condition could exhaust the stack before the
+# parser reports anything; the length cap keeps the check cheap and bounded.
+MAX_CONDITION_LENGTH = 10_000
+
 
 def _issue(code: str, message: str, **params: Any) -> Dict[str, Any]:
     return {'code': code, 'params': params, 'message': message}
@@ -25,11 +30,20 @@ def check_condition(condition: Optional[str]) -> Optional[Dict[str, Any]]:
     if not condition or not condition.strip():
         return _issue('condition_required', "Conditional step requires 'condition' in config")
 
+    if len(condition) > MAX_CONDITION_LENGTH:
+        return _issue(
+            'condition_too_long',
+            f"The condition is longer than {MAX_CONDITION_LENGTH} characters",
+            maximum=MAX_CONDITION_LENGTH,
+        )
+
     lexer = Lexer(condition)
     try:
         tokens = lexer.tokenize()
     except ValueError as e:
         return _issue('condition_syntax_error', str(e), line=lexer.line, column=lexer.column)
+    except RecursionError:
+        return _issue('condition_too_complex', "The condition is nested too deeply to check")
 
     parser = Parser(tokens)
     try:
@@ -37,6 +51,8 @@ def check_condition(condition: Optional[str]) -> Optional[Dict[str, Any]]:
     except ValueError as e:
         token = parser.current()
         return _issue('condition_syntax_error', str(e), line=token.line, column=token.column)
+    except RecursionError:
+        return _issue('condition_too_complex', "The condition is nested too deeply to check")
 
     token = parser.current()
     if token.type != TokenType.EOF:
@@ -67,7 +83,11 @@ def check_script_config(config: Dict[str, Any]) -> List[Dict[str, Any]]:
             supported=supported,
         ))
 
+    # Only Python scripts use the timeout: the SQL handler waits on the
+    # warehouse with its own limit, and the designer hides the field for SQL.
     timeout = config.get('timeout_seconds', 60)
+    if language == 'sql':
+        return issues
     if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout < 1:
         issues.append(_issue(
             'script_timeout_invalid',

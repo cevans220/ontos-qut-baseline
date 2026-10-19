@@ -252,7 +252,9 @@
       "errors": {
         "condition_required": "Inserisci una condizione.",
         "condition_syntax_error": "La condizione non può essere interpretata (riga {{line}}, colonna {{column}}).",
-        "condition_trailing_input": "\"{{token}}\" inatteso dopo la condizione (riga {{line}}, colonna {{column}}). Unisci le condizioni con AND o OR."
+        "condition_trailing_input": "\"{{token}}\" inatteso dopo la condizione (riga {{line}}, colonna {{column}}). Unisci le condizioni con AND o OR.",
+        "condition_too_long": "La condizione supera i {{maximum}} caratteri. Accorciala o dividila in più passaggi.",
+        "condition_too_complex": "La condizione è troppo annidata per essere verificata. Rimuovi alcune parentesi o dividila in più passaggi."
       }
     },
     "script": {

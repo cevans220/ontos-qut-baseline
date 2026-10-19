@@ -106,7 +106,6 @@ import {
   GrantPermissionsNode,
   OnBehalfOfNode,
 } from './workflow-nodes';
-import TemplateVarsInspector from './template-vars-inspector';
 import { ConditionalStepConfig, ScriptStepConfig } from './step-config-forms';
 import {
   localStepConfigIssue,
@@ -114,6 +113,7 @@ import {
   type ConditionCheckResult,
   type StepConfigIssue,
 } from './step-config-checks';
+import TemplateVarsInspector from './template-vars-inspector';
 
 import type {
   ProcessWorkflow,

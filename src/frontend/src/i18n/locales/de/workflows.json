@@ -252,7 +252,9 @@
       "errors": {
         "condition_required": "Geben Sie eine Bedingung ein.",
         "condition_syntax_error": "Die Bedingung kann nicht geparst werden (Zeile {{line}}, Spalte {{column}}).",
-        "condition_trailing_input": "Unerwartetes \"{{token}}\" nach der Bedingung (Zeile {{line}}, Spalte {{column}}). Verknüpfen Sie Bedingungen mit AND oder OR."
+        "condition_trailing_input": "Unerwartetes \"{{token}}\" nach der Bedingung (Zeile {{line}}, Spalte {{column}}). Verknüpfen Sie Bedingungen mit AND oder OR.",
+        "condition_too_long": "Die Bedingung ist länger als {{maximum}} Zeichen. Kürzen Sie sie oder teilen Sie sie auf mehrere Schritte auf.",
+        "condition_too_complex": "Die Bedingung ist zu tief verschachtelt, um sie zu prüfen. Entfernen Sie einige Klammern oder teilen Sie sie auf mehrere Schritte auf."
       }
     },
     "script": {

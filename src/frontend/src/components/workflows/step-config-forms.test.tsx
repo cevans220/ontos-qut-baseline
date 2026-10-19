@@ -172,6 +172,23 @@ describe('step config checks', () => {
     expect(localStepConfigIssue(step('validation', {}))).toBeNull();
   });
 
+  it('does not check the timeout of a SQL script, which has no timeout field', () => {
+    expect(
+      localStepConfigIssue(step('script', { code: 'SELECT 1', language: 'sql', timeout_seconds: 0 }), SCRIPT_SCHEMA),
+    ).toBeNull();
+    expect(
+      localStepConfigIssue(step('script', { code: 'x = 1', language: 'python', timeout_seconds: 0 }), SCRIPT_SCHEMA)
+        ?.code,
+    ).toBe('script_timeout_invalid');
+  });
+
+  it('translates the too long and too complex condition codes', async () => {
+    await i18n.changeLanguage('pt');
+    expect(stepConfigIssueText({ code: 'condition_too_long', params: { maximum: 10000 } }, i18n.t)).toContain('10000');
+    expect(stepConfigIssueText({ code: 'condition_too_complex' }, i18n.t)).toContain('aninhamento');
+    await i18n.changeLanguage('en');
+  });
+
   it('falls back to the English text for an unknown code', () => {
     expect(stepConfigIssueText({ code: 'condition_new_kind', message: 'Something new' }, i18n.t)).toBe(
       'Something new',

@@ -252,7 +252,9 @@
       "errors": {
         "condition_required": "Voer een voorwaarde in.",
         "condition_syntax_error": "De voorwaarde kan niet worden geparsed (regel {{line}}, kolom {{column}}).",
-        "condition_trailing_input": "Onverwachte \"{{token}}\" na de voorwaarde (regel {{line}}, kolom {{column}}). Verbind voorwaarden met AND of OR."
+        "condition_trailing_input": "Onverwachte \"{{token}}\" na de voorwaarde (regel {{line}}, kolom {{column}}). Verbind voorwaarden met AND of OR.",
+        "condition_too_long": "De voorwaarde is langer dan {{maximum}} tekens. Maak haar korter of verdeel haar over meerdere stappen.",
+        "condition_too_complex": "De voorwaarde is te diep genest om te controleren. Verwijder enkele haakjes of verdeel haar over meerdere stappen."
       }
     },
     "script": {

@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.common.workflow_executor import WorkflowExecutor
-from src.common.workflow_step_config import check_condition, check_script_config
+from src.common.workflow_step_config import MAX_CONDITION_LENGTH, check_condition, check_script_config
 from src.controller.workflows_manager import WorkflowsManager
 from src.models.process_workflows import (
     ProcessWorkflowCreate,
@@ -79,11 +79,43 @@ def test_a_full_rule_is_not_a_condition():
     assert check_condition("ASSERT obj.status = 'active'")['code'] == 'condition_syntax_error'
 
 
+def _nested(depth):
+    return '(' * depth + "obj.status = 'active'" + ')' * depth
+
+
+def test_a_deeply_nested_condition_is_reported_not_raised():
+    # The parser is recursive: ~400 levels used to raise RecursionError (a 500).
+    condition = _nested(1000)
+    assert len(condition) <= MAX_CONDITION_LENGTH
+
+    assert check_condition(condition)['code'] == 'condition_too_complex'
+
+
+def test_moderate_nesting_still_parses():
+    assert check_condition(_nested(50)) is None
+
+
+def test_an_oversized_condition_is_too_long():
+    condition = "obj.status = 'active' OR " * 500 + "obj.status = 'draft'"
+    assert len(condition) > MAX_CONDITION_LENGTH
+
+    issue = check_condition(condition)
+
+    assert issue['code'] == 'condition_too_long'
+    assert issue['params'] == {'maximum': MAX_CONDITION_LENGTH}
+
+
 # --- Script checks ------------------------------------------------------------
 
 def test_a_complete_script_config_has_no_issue():
     assert check_script_config({'language': 'sql', 'code': 'SELECT 1', 'timeout_seconds': 30}) == []
     assert check_script_config({'code': "result = {'passed': True}"}) == []
+
+
+@pytest.mark.parametrize('timeout', [0, '60', True])
+def test_a_sql_script_timeout_is_not_checked(timeout):
+    # The SQL handler ignores timeout_seconds and the designer hides the field.
+    assert check_script_config({'language': 'sql', 'code': 'SELECT 1', 'timeout_seconds': timeout}) == []
 
 
 @pytest.mark.parametrize('config, code', [
@@ -120,6 +152,13 @@ def test_the_route_treats_a_non_string_condition_as_missing():
     assert _route(42)['code'] == 'condition_required'
 
 
+def test_the_route_answers_a_deeply_nested_condition():
+    result = _route(_nested(1000))
+
+    assert result['valid'] is False
+    assert result['code'] == 'condition_too_complex'
+
+
 # --- Save, reload and run -----------------------------------------------------
 
 def _workflow(condition, script_config=None):
@@ -148,6 +187,13 @@ def test_validation_rejects_a_condition_that_does_not_parse(db_session):
 
     assert not result.valid
     assert any("Step 'check'" in e and 'column 11' in e for e in result.errors)
+
+
+def test_validation_rejects_a_deeply_nested_condition(db_session):
+    result = WorkflowsManager(db_session).validate_workflow(_workflow(_nested(1000)))
+
+    assert not result.valid
+    assert any("Step 'check'" in e and 'nested too deeply' in e for e in result.errors)
 
 
 def test_validation_rejects_an_invalid_script_timeout(db_session):

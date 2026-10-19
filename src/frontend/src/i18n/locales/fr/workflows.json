@@ -252,7 +252,9 @@
       "errors": {
         "condition_required": "Saisissez une condition.",
         "condition_syntax_error": "La condition ne peut pas être analysée (ligne {{line}}, colonne {{column}}).",
-        "condition_trailing_input": "\"{{token}}\" inattendu après la condition (ligne {{line}}, colonne {{column}}). Reliez les conditions avec AND ou OR."
+        "condition_trailing_input": "\"{{token}}\" inattendu après la condition (ligne {{line}}, colonne {{column}}). Reliez les conditions avec AND ou OR.",
+        "condition_too_long": "La condition dépasse {{maximum}} caractères. Raccourcissez-la ou répartissez-la sur plusieurs étapes.",
+        "condition_too_complex": "La condition est trop imbriquée pour être vérifiée. Retirez des parenthèses ou répartissez-la sur plusieurs étapes."
       }
     },
     "script": {

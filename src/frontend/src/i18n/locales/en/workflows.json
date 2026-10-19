@@ -252,7 +252,9 @@
       "errors": {
         "condition_required": "Enter a condition.",
         "condition_syntax_error": "The condition doesn't parse (line {{line}}, column {{column}}).",
-        "condition_trailing_input": "Unexpected \"{{token}}\" after the condition (line {{line}}, column {{column}}). Join conditions with AND or OR."
+        "condition_trailing_input": "Unexpected \"{{token}}\" after the condition (line {{line}}, column {{column}}). Join conditions with AND or OR.",
+        "condition_too_long": "The condition is longer than {{maximum}} characters. Shorten it or split it into several steps.",
+        "condition_too_complex": "The condition is nested too deeply to check. Remove some parentheses or split it into several steps."
       }
     },
     "script": {

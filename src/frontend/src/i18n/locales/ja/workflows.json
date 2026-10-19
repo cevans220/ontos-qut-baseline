@@ -252,7 +252,9 @@
       "errors": {
         "condition_required": "条件を入力してください。",
         "condition_syntax_error": "条件を解析できません（{{line}} 行 {{column}} 列）。",
-        "condition_trailing_input": "条件の後に予期しない \"{{token}}\" があります（{{line}} 行 {{column}} 列）。条件は AND または OR でつなぎます。"
+        "condition_trailing_input": "条件の後に予期しない \"{{token}}\" があります（{{line}} 行 {{column}} 列）。条件は AND または OR でつなぎます。",
+        "condition_too_long": "条件が {{maximum}} 文字を超えています。短くするか、複数のステップに分けてください。",
+        "condition_too_complex": "条件の入れ子が深すぎるためチェックできません。括弧を減らすか、複数のステップに分けてください。"
       }
     },
     "script": {

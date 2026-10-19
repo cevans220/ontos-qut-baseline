@@ -252,7 +252,9 @@
       "errors": {
         "condition_required": "Informe uma condição.",
         "condition_syntax_error": "A condição não pôde ser interpretada (linha {{line}}, coluna {{column}}).",
-        "condition_trailing_input": "\"{{token}}\" inesperado depois da condição (linha {{line}}, coluna {{column}}). Una condições com AND ou OR."
+        "condition_trailing_input": "\"{{token}}\" inesperado depois da condição (linha {{line}}, coluna {{column}}). Una condições com AND ou OR.",
+        "condition_too_long": "A condição tem mais de {{maximum}} caracteres. Encurte-a ou divida-a em várias etapas.",
+        "condition_too_complex": "A condição tem aninhamento profundo demais para ser verificada. Remova alguns parênteses ou divida-a em várias etapas."
       }
     },
     "script": {
