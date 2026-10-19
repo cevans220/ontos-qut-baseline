@@ -196,6 +196,9 @@ def initialize_managers(app: FastAPI):
 
         # --- Initialize DB Session --- 
         db_session = session_factory()
+        # Kept on app.state so a later re-initialization (POST /api/health/retry)
+        # can close the session of the managers it replaces.
+        app.state.manager_db_session = db_session
 
         # --- Define Data Directory --- 
         data_dir = Path(__file__).parent.parent / "data"

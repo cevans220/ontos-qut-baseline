@@ -184,3 +184,65 @@ def test_a_database_outage_still_runs_the_full_startup():
     finally:
         for name, value in saved.items():
             setattr(state, name, value)
+
+
+class _FakeSession:
+    def __init__(self):
+        self.rolled_back = False
+        self.closed = False
+
+    def rollback(self):
+        self.rolled_back = True
+
+    def close(self):
+        self.closed = True
+
+
+def test_a_recovery_retry_closes_the_replaced_managers_session(running_app_without_workspace):
+    old_session = _FakeSession()
+    new_session = _FakeSession()
+    running_app_without_workspace.manager_db_session = old_session
+
+    def initialize_with_a_new_session(app):
+        _fake_initialize_managers(app)
+        app.state.manager_db_session = new_session
+
+    try:
+        with patch.object(app_module, "get_workspace_client", return_value=object()), patch.object(
+            app_module, "initialize_managers", side_effect=initialize_with_a_new_session
+        ), patch.object(app_module, "_seed_default_workflows"), patch.object(
+            app_module, "initialize_database"
+        ):
+            response = TestClient(app_module.app).post("/api/health/retry")
+
+        assert response.status_code == 200
+        # Before the fix the old session stayed open ("idle in transaction").
+        assert old_session.rolled_back and old_session.closed
+        assert not new_session.closed
+    finally:
+        running_app_without_workspace.manager_db_session = None
+
+
+def test_a_partial_re_initialization_keeps_the_old_session(running_app_without_workspace):
+    old_session = _FakeSession()
+    running_app_without_workspace.manager_db_session = old_session
+
+    def failing_initialize(app):
+        app.state.manager_db_session = _FakeSession()
+        app.state.health["ws_ok"] = True
+        app.state.health["warning_details"].append(
+            {"code": "manager_init_failed", "message": "", "params": {}}
+        )
+
+    try:
+        with patch.object(app_module, "get_workspace_client", return_value=object()), patch.object(
+            app_module, "initialize_managers", side_effect=failing_initialize
+        ), patch.object(app_module, "_seed_default_workflows"), patch.object(
+            app_module, "initialize_database"
+        ):
+            TestClient(app_module.app).post("/api/health/retry")
+
+        # Some old managers may still use it.
+        assert not old_session.closed
+    finally:
+        running_app_without_workspace.manager_db_session = None

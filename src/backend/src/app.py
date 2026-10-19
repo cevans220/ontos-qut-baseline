@@ -562,6 +562,25 @@ def _stop_job_polling() -> None:
             logger.warning(f"Could not stop the job poller before re-initializing: {e}")
 
 
+def _close_replaced_manager_session(old_session) -> None:
+    """Close the DB session of managers a re-initialization just replaced.
+
+    ``initialize_managers`` opens a long-lived session for the manager
+    singletons. When the retry rebuilds them, the previous session would stay
+    open (``idle in transaction``, holding its locks) until the process exits.
+    """
+    if old_session is None or old_session is getattr(app.state, "manager_db_session", None):
+        return
+    try:
+        old_session.rollback()
+    except Exception as e:
+        logger.warning(f"Could not roll back the replaced managers' DB session: {e}")
+    try:
+        old_session.close()
+    except Exception as e:
+        logger.warning(f"Could not close the replaced managers' DB session: {e}")
+
+
 def _retry_startup_blocking():
     if _managers_running():
         if app.state.health.get("ws_ok"):
@@ -593,8 +612,13 @@ def _retry_startup_blocking():
         app.state.health["seed_ok"] = True  # Reset seed health; initialize_managers will flip if it fails
         app.state.health["seed_error"] = None
         app.state.health["seed_error_code"] = None
+        old_manager_session = getattr(app.state, "manager_db_session", None)
         _stop_job_polling()
         initialize_managers(app)  # Sets health["ws_ok"] / health["seed_ok"] internally
+        if _managers_running():
+            # Only when every manager was rebuilt: after a partial failure some
+            # of the old managers may still be using the old session.
+            _close_replaced_manager_session(old_manager_session)
         _seed_default_workflows()
     except Exception as e:
         add_health_warning(app.state.health, "manager_init_failed")
