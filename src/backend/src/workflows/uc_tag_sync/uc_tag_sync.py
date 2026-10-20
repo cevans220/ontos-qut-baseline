@@ -479,18 +479,175 @@ def build_asset_tag_infos(rows: List[Dict[str, Any]], default_catalog: Optional[
     return out
 
 
-def merge_dataset_tag_infos(contract_datasets: List[DatasetTagInfo], asset_datasets: List[DatasetTagInfo]) -> List[DatasetTagInfo]:
-    """Merge contract-based and asset-based DatasetTagInfo lists, deduplicating by FQN.
+# Direct physical links ---------------------------------------------------------
+#
+# Concepts can be linked straight to Unity Catalog objects (``entity_type`` =
+# ``uc_catalog`` | ``uc_schema`` | ``uc_table`` | ``uc_column``) without a contract or
+# asset wrapper. ``entity_id`` is the UC fully-qualified name.
+
+DIRECT_UC_ENTITY_TYPES = ("uc_catalog", "uc_schema", "uc_table", "uc_column")
+
+
+@dataclass
+class ColumnTagInfo:
+    """Semantic links attached directly to one UC column."""
+    table_fqn: str
+    column: str
+    semantic_links: List[SemanticLink] = field(default_factory=list)
+
+    @property
+    def fqn(self) -> str:
+        return f"{self.table_fqn}.{self.column}"
+
+
+@dataclass
+class DirectLinkInfos:
+    """Result of converting direct UC link rows, grouped by UC object level."""
+    tables: List[DatasetTagInfo] = field(default_factory=list)
+    columns: List[ColumnTagInfo] = field(default_factory=list)
+    # fqn ("catalog.schema" / "catalog") -> semantic links
+    schemas: Dict[str, List[SemanticLink]] = field(default_factory=dict)
+    catalogs: Dict[str, List[SemanticLink]] = field(default_factory=dict)
+
+
+def read_direct_uc_links(engine: Engine, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Read semantic links attached directly to UC catalogs, schemas, tables and columns."""
+    sql = (
+        """
+        SELECT esl.entity_type AS entity_type,
+               esl.entity_id   AS entity_id,
+               esl.iri         AS iri,
+               esl.label       AS label
+        FROM entity_semantic_links esl
+        WHERE esl.entity_type IN ('uc_catalog', 'uc_schema', 'uc_table', 'uc_column')
+        ORDER BY esl.entity_type, esl.entity_id, esl.iri
+        """
+        + (" LIMIT :limit" if limit else "")
+    )
+    params = {"limit": int(limit)} if limit else {}
+    with engine.connect() as conn:
+        rows = [dict(r._mapping) for r in conn.execute(text(sql), params)]
+    return rows
+
+
+def _normalize_uc_name(name: Any) -> str:
+    # UC object names are case-insensitive and stored lower-case; normalizing keeps two
+    # spellings of one table from becoming two reconcile targets (which would flap).
+    return ".".join(p.strip().strip("`") for p in str(name or "").strip().split(".")).lower()
+
+
+def _add_link(links: List[SemanticLink], iri: Any, label: Any) -> None:
+    if not iri:
+        return
+    iri = str(iri)
+    if any(link.iri == iri for link in links):
+        return
+    links.append(SemanticLink(iri=iri, label=str(label) if label else None, slug=slugify_iri(iri)))
+
+
+def build_direct_link_infos(
+    rows: List[Dict[str, Any]], default_catalog: Optional[str], default_schema: Optional[str]
+) -> DirectLinkInfos:
+    """Convert direct UC link rows into table datasets, column links and parent-level links.
+
+    Rows whose ``entity_id`` cannot be resolved to a fully-qualified UC name are skipped.
+    """
+    tables: Dict[str, DatasetTagInfo] = {}
+    columns: Dict[Tuple[str, str], ColumnTagInfo] = {}
+    out = DirectLinkInfos()
+    catalog_default = default_catalog.lower() if default_catalog else None
+    schema_default = default_schema.lower() if default_schema else None
+
+    for r in rows:
+        etype = r.get("entity_type")
+        name = _normalize_uc_name(r.get("entity_id"))
+        if not name:
+            continue
+        iri, label = r.get("iri"), r.get("label")
+
+        if etype == "uc_catalog":
+            if "." in name:
+                continue
+            _add_link(out.catalogs.setdefault(name, []), iri, label)
+        elif etype == "uc_schema":
+            if len(name.split(".")) == 1 and default_catalog:
+                name = f"{default_catalog.lower()}.{name}"
+            if len(name.split(".")) != 2:
+                continue
+            _add_link(out.schemas.setdefault(name, []), iri, label)
+        elif etype == "uc_table":
+            qualified = qualify_uc_name(name, catalog_default, schema_default)
+            if not qualified or len(qualified.split(".")) != 3:
+                continue
+            ds = tables.get(qualified)
+            if ds is None:
+                cat, sch, tbl = qualified.split(".")
+                ds = tables[qualified] = DatasetTagInfo(
+                    fqn=qualified, catalog=cat, schema=sch, table=tbl,
+                    contract_id=None, contract_name=None,
+                    contract_version=None, contract_status=None,
+                    product_id=None, product_name=None, product_version=None, product_status=None,
+                    domain_id=None, domain_name=None, semantic_links=[],
+                )
+            _add_link(ds.semantic_links, iri, label)
+        elif etype == "uc_column":
+            table_part, _, column = name.rpartition(".")
+            qualified = qualify_uc_name(table_part, catalog_default, schema_default)
+            if not qualified or not column or len(qualified.split(".")) != 3:
+                continue
+            col = columns.setdefault(
+                (qualified, column), ColumnTagInfo(table_fqn=qualified, column=column)
+            )
+            _add_link(col.semantic_links, iri, label)
+
+    out.tables = list(tables.values())
+    out.columns = list(columns.values())
+    return out
+
+
+def build_desired_for_links(
+    links: List[SemanticLink], tag_sync_configs: List[Dict[str, Any]]
+) -> Dict[str, Optional[str]]:
+    """Build desired ``semantic_assignment`` tags for an object that only has semantic links.
+
+    Used for columns and for directly-linked schemas/catalogs, where contract, product,
+    domain and asset metadata do not exist. Uses the same key/value formatting as tables.
+    """
+    desired: Dict[str, Optional[str]] = {}
+    for config in tag_sync_configs:
+        if config.get("entity_type") != "semantic_assignment" or not config.get("enabled", True):
+            continue
+        for link in links:
+            variables = {"LINK.IRI": link.iri, "LINK.LABEL": link.label, "LINK.SLUG": link.slug}
+            key = format_tag_string(config.get("tag_key_format", ""), variables)
+            value = format_tag_string(config.get("tag_value_format", ""), variables)
+            if key and value:
+                desired[sanitize_tag_key(key)] = value
+    return desired
+
+
+
+def merge_dataset_tag_infos(
+    contract_datasets: List[DatasetTagInfo],
+    asset_datasets: List[DatasetTagInfo],
+    direct_datasets: Optional[List[DatasetTagInfo]] = None,
+) -> List[DatasetTagInfo]:
+    """Merge contract-, asset- and direct-link DatasetTagInfo lists, deduplicating by FQN.
 
     When both sources provide an entry for the same FQN, fields from the richer
     source win per-field, and semantic links are unioned.
     """
     by_fqn: Dict[str, DatasetTagInfo] = {}
 
-    for d in contract_datasets:
-        by_fqn[d.fqn] = d
+    # UC names are case-insensitive: key (and parent aggregation) on lower case so the
+    # same table reached through differently-cased sources is reconciled once.
+    for d in list(contract_datasets) + list(asset_datasets) + list(direct_datasets or []):
+        d.fqn, d.catalog, d.schema, d.table = (
+            d.fqn.lower(), d.catalog.lower(), d.schema.lower(), d.table.lower()
+        )
 
-    for d in asset_datasets:
+    # Contracts first, so their fields win when another source has the same FQN
+    for d in list(contract_datasets) + list(asset_datasets) + list(direct_datasets or []):
         existing = by_fqn.get(d.fqn)
         if existing is None:
             by_fqn[d.fqn] = d
@@ -620,8 +777,9 @@ def ensure_tag_key(ws: WorkspaceClient, key: str) -> None:
 def get_existing_prefixed_tags(spark: SparkSession, object_type: str, object_name: str, prefix: str) -> Dict[str, Optional[str]]:
     """Read existing tags via information_schema views.
 
-    object_type: CATALOG | SCHEMA | TABLE
-    object_name: fully-qualified UC name (catalog.schema.table for TABLE, etc.)
+    object_type: CATALOG | SCHEMA | TABLE | COLUMN
+    object_name: fully-qualified UC name (catalog.schema.table for TABLE,
+                 catalog.schema.table.column for COLUMN, etc.)
     """
     parts = object_name.split(".")
     catalog = parts[0]
@@ -647,6 +805,16 @@ def get_existing_prefixed_tags(spark: SparkSession, object_type: str, object_nam
             f"FROM `{catalog}`.information_schema.table_tags "
             f"WHERE catalog_name = '{catalog}' AND schema_name = '{schema}' AND table_name = '{table}'"
         )
+    elif object_type == "COLUMN":
+        schema = parts[1] if len(parts) > 1 else ""
+        table = parts[2] if len(parts) > 2 else ""
+        column = parts[3] if len(parts) > 3 else ""
+        q = (
+            f"SELECT tag_name, tag_value "
+            f"FROM `{catalog}`.information_schema.column_tags "
+            f"WHERE catalog_name = '{catalog}' AND schema_name = '{schema}' "
+            f"AND table_name = '{table}' AND column_name = '{column}'"
+        )
     else:
         return {}
 
@@ -659,14 +827,25 @@ def get_existing_prefixed_tags(spark: SparkSession, object_type: str, object_nam
     return existing
 
 
+def alter_target(object_type: str, object_name: str) -> str:
+    """Return the ``ALTER`` target clause for a UC object.
+
+    Columns are altered through their table: ``TABLE c.s.t ALTER COLUMN `col```.
+    """
+    if object_type == "COLUMN":
+        table_fqn, _, column = object_name.rpartition(".")
+        return f"TABLE {table_fqn} ALTER COLUMN `{column.replace('`', '``')}`"
+    return f"{object_type} {object_name}"
+
+
 def assign_tag(spark: SparkSession, object_type: str, object_name: str, key: str, value: Optional[str]) -> None:
     v = value if value is not None else ""
     escaped = v.replace("'", "''")
-    spark.sql(f"ALTER {object_type} {object_name} SET TAGS ('{key}' = '{escaped}')")
+    spark.sql(f"ALTER {alter_target(object_type, object_name)} SET TAGS ('{key}' = '{escaped}')")
 
 
 def unassign_tag(spark: SparkSession, object_type: str, object_name: str, key: str) -> None:
-    spark.sql(f"ALTER {object_type} {object_name} UNSET TAGS ('{key}')")
+    spark.sql(f"ALTER {alter_target(object_type, object_name)} UNSET TAGS ('{key}')")
 
 
 def reconcile_tags(ws: WorkspaceClient, spark: SparkSession, object_type: str, object_name: str, desired: Dict[str, Optional[str]], prefix: str, dry_run: bool = False) -> Tuple[int, int, List[str]]:
@@ -704,7 +883,12 @@ def reconcile_tags(ws: WorkspaceClient, spark: SparkSession, object_type: str, o
     return (updated, removed, errors)
 
 
-def aggregate_parent_desired(dataset_items: List[DatasetTagInfo], tag_sync_configs: List[Dict[str, Any]]) -> Tuple[Dict[str, Dict[str, Optional[str]]], Dict[str, Dict[str, Optional[str]]]]:
+def aggregate_parent_desired(
+    dataset_items: List[DatasetTagInfo],
+    tag_sync_configs: List[Dict[str, Any]],
+    direct_schema_desired: Optional[Dict[str, Dict[str, Optional[str]]]] = None,
+    direct_catalog_desired: Optional[Dict[str, Dict[str, Optional[str]]]] = None,
+) -> Tuple[Dict[str, Dict[str, Optional[str]]], Dict[str, Dict[str, Optional[str]]]]:
     """Aggregate tags for parent schema and catalog levels.
 
     For now, we aggregate all dataset tags to their parent levels.
@@ -713,6 +897,9 @@ def aggregate_parent_desired(dataset_items: List[DatasetTagInfo], tag_sync_confi
     Args:
         dataset_items: List of dataset tag infos
         tag_sync_configs: Tag sync configuration
+        direct_schema_desired: Optional tags from concepts linked directly to schemas
+            (schema FQN -> tag dict); merged with the aggregated values
+        direct_catalog_desired: Same, for catalogs (catalog name -> tag dict)
 
     Returns:
         Tuple of (schema_tags, catalog_tags) where each is a dict mapping FQN to tag dict
@@ -736,6 +923,17 @@ def aggregate_parent_desired(dataset_items: List[DatasetTagInfo], tag_sync_confi
                 # Add to catalog level
                 catalog_vals = catalog_to_tags.setdefault(d.catalog, {})
                 catalog_vals.setdefault(tag_key, set()).add(tag_value)
+
+    # Fold in tags from concepts linked directly to a schema/catalog. They share the
+    # aggregated tag keys, so values are unioned and the comma-joined result stays stable.
+    for fqn, tags in (direct_schema_desired or {}).items():
+        for tag_key, tag_value in tags.items():
+            if tag_value:
+                schema_to_tags.setdefault(fqn, {}).setdefault(tag_key, set()).add(tag_value)
+    for fqn, tags in (direct_catalog_desired or {}).items():
+        for tag_key, tag_value in tags.items():
+            if tag_value:
+                catalog_to_tags.setdefault(fqn, {}).setdefault(tag_key, set()).add(tag_value)
 
     # Collapse sets to comma-separated strings
     def collapse(map_in: Dict[str, Dict[str, set]]) -> Dict[str, Dict[str, Optional[str]]]:
@@ -949,7 +1147,15 @@ def main() -> None:
     asset_datasets = build_asset_tag_infos(asset_rows, default_catalog, default_schema)
     print(f"  Found {len(asset_datasets)} datasets from assets")
 
-    datasets = merge_dataset_tag_infos(contract_datasets, asset_datasets)
+    print("Reading direct UC links (catalog/schema/table/column)...")
+    direct_rows = read_direct_uc_links(engine, limit=limit)
+    direct = build_direct_link_infos(direct_rows, default_catalog, default_schema)
+    print(
+        f"  Found {len(direct.tables)} tables, {len(direct.columns)} columns, "
+        f"{len(direct.schemas)} schemas, {len(direct.catalogs)} catalogs from direct links"
+    )
+
+    datasets = merge_dataset_tag_infos(contract_datasets, asset_datasets, direct.tables)
 
     updated_total = removed_total = 0
     all_errors: List[str] = []
@@ -969,7 +1175,28 @@ def main() -> None:
             print(f"Dataset {d.fqn}: updated={u} removed={r}")
 
     # Aggregate parent desired values
-    schema_desired, catalog_desired = aggregate_parent_desired(datasets, tag_sync_configs)
+    schema_desired, catalog_desired = aggregate_parent_desired(
+        datasets,
+        tag_sync_configs,
+        direct_schema_desired={
+            f: build_desired_for_links(l, tag_sync_configs) for f, l in direct.schemas.items()
+        },
+        direct_catalog_desired={
+            f: build_desired_for_links(l, tag_sync_configs) for f, l in direct.catalogs.items()
+        },
+    )
+
+    # Column-level (concepts linked directly to a UC column)
+    for col in direct.columns:
+        desired = build_desired_for_links(col.semantic_links, tag_sync_configs)
+        if not desired:
+            continue
+        u, r, errs = reconcile_tags(ws, spark, "COLUMN", col.fqn, desired, prefix, dry_run=dry_run)
+        updated_total += u
+        removed_total += r
+        all_errors.extend(errs)
+        if verbose:
+            print(f"Column {col.fqn}: updated={u} removed={r}")
 
     # Schema-level
     for schema_fqn, desired in schema_desired.items():
