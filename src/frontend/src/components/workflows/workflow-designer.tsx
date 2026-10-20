@@ -145,6 +145,7 @@ import { PrincipalPicker } from '@/components/common/principal-picker';
 import { WorkflowCanvasSkeleton } from '@/components/common/list-view-skeleton';
 import {
   joinRoleAndPrincipals,
+  roleSelectValue,
   splitRoleAndPrincipals,
 } from '@/lib/workflow-principals';
 
@@ -2146,7 +2147,7 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
                     <>
                       {(() => {
                         const raw = (selectedStep.config as { recipients?: string })?.recipients || '';
-                        const split = splitRoleAndPrincipals(raw);
+                        const split = splitRoleAndPrincipals(raw, availableRoles);
                         const customOn =
                           (selectedStep.config as { recipients_custom?: boolean })?.recipients_custom
                             ?? split.principals.length > 0;
@@ -2185,7 +2186,7 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
                           <>
                             <div>
                               <Label>{t('workflows:designer.notification.recipientsRole')}</Label>
-                              <Select value={split.roleToken} onValueChange={setRole}>
+                              <Select value={roleSelectValue(split.roleToken, availableRoles)} onValueChange={setRole}>
                                 <SelectTrigger>
                                   <SelectValue placeholder={t('workflows:designer.notification.recipientsPlaceholder')} />
                                 </SelectTrigger>
@@ -2320,7 +2321,7 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
                     <>
                       {(() => {
                         const raw = (selectedStep.config as { approvers?: string })?.approvers || '';
-                        const split = splitRoleAndPrincipals(raw);
+                        const split = splitRoleAndPrincipals(raw, availableRoles);
                         const customOn =
                           (selectedStep.config as { approvers_custom?: boolean })?.approvers_custom
                             ?? split.principals.length > 0;
@@ -2355,7 +2356,7 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
                           <>
                             <div>
                               <Label>{t('workflows:designer.approval.approversRole')}</Label>
-                              <Select value={split.roleToken} onValueChange={setRole}>
+                              <Select value={roleSelectValue(split.roleToken, approverRoles)} onValueChange={setRole}>
                                 <SelectTrigger>
                                   <SelectValue placeholder={t('workflows:designer.approval.selectRole')} />
                                 </SelectTrigger>

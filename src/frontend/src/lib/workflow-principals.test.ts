@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   joinRoleAndPrincipals,
+  roleSelectValue,
   splitRoleAndPrincipals,
 } from './workflow-principals';
 
@@ -122,5 +123,52 @@ describe('splitRoleAndPrincipals', () => {
       roleToken: 'requester',
       principals: ['owner', 'alice@x.com'],
     });
+  });
+});
+
+describe('shipped role names', () => {
+  const roles = [
+    { id: 'r-steward', name: 'DataSteward' },
+    { id: 'r-sec', name: 'Security Officer' },
+  ];
+
+  it('treats a role name as the role token, not a custom principal', () => {
+    expect(splitRoleAndPrincipals('DataSteward', roles)).toEqual({
+      roleToken: 'DataSteward',
+      principals: [],
+    });
+    expect(splitRoleAndPrincipals('datasteward,alice@x.com', roles)).toEqual({
+      roleToken: 'datasteward',
+      principals: ['alice@x.com'],
+    });
+  });
+
+  it('leaves owner tokens as principals, as before', () => {
+    for (const tok of ['DomainOwner', 'ContractApprover']) {
+      expect(splitRoleAndPrincipals(tok, roles)).toEqual({ roleToken: '', principals: [tok] });
+    }
+  });
+
+  it('keeps the stored value when re-joined without edits', () => {
+    for (const stored of ['DomainOwner', 'DataSteward']) {
+      const split = splitRoleAndPrincipals(stored, roles);
+      expect(joinRoleAndPrincipals(split.roleToken, split.principals)).toBe(stored);
+    }
+    // The select shows the role option but the token itself stays the name.
+    expect(splitRoleAndPrincipals('DataSteward', roles).roleToken).toBe('DataSteward');
+  });
+
+  it('still treats unknown names as principals', () => {
+    expect(splitRoleAndPrincipals('Producers', roles)).toEqual({
+      roleToken: '',
+      principals: ['Producers'],
+    });
+  });
+
+  it('maps a role name to its select option, and leaves other tokens alone', () => {
+    expect(roleSelectValue('DataSteward', roles)).toBe('r-steward');
+    expect(roleSelectValue('requester', roles)).toBe('requester');
+    expect(roleSelectValue('', roles)).toBe('');
+    expect(roleSelectValue('DataSteward', undefined)).toBe('DataSteward');
   });
 });
