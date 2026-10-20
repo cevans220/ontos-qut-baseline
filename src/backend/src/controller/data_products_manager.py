@@ -1491,7 +1491,7 @@ class DataProductsManager(DeliveryMixin, SearchableAsset):
         # Find requester from change log
         requester_email = None
         try:
-            recent_changes = change_log_manager.get_changes_for_entity(db, "data_product", product_id)
+            recent_changes = change_log_manager.get_changes_for_entity(db, "data_product", product_id, action="status_change_requested", limit=1)
             for change in recent_changes:
                 if change.action == "status_change_requested":
                     requester_email = change.details.get("requester_email")
