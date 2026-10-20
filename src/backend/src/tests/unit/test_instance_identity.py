@@ -144,3 +144,46 @@ class TestManagerReadUpdate:
         with pytest.raises(ValueError):
             manager.update_settings({"ontos_instance_name": bad})
         assert settings.ONTOS_INSTANCE_NAME == "app"
+
+
+class TestCodedErrors:
+    """Invalid values raise coded errors that the PUT answers as {code, message, params}."""
+
+    @pytest.fixture
+    def client(self, db_session, tmp_path):
+        from fastapi import FastAPI, HTTPException
+        from fastapi.testclient import TestClient
+        from starlette.exceptions import HTTPException as StarletteHTTPException
+
+        from src.common.api_errors import coded_http_exception_handler
+
+        manager = SettingsManager(
+            db=db_session, settings=make_settings(tmp_path), workspace_client=None
+        )
+        app = FastAPI()
+        app.add_exception_handler(StarletteHTTPException, coded_http_exception_handler)
+
+        @app.put("/api/settings")
+        def put(payload: dict):  # mirrors the real route's ValueError handling
+            try:
+                manager.update_settings(payload)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            return {}
+
+        return TestClient(app)
+
+    def test_invalid_id_detail_has_code_and_params(self, client):
+        r = client.put("/api/settings", json={"ontos_instance_id": "bad id!"})
+        assert r.status_code == 400
+        detail = r.json()["detail"]
+        assert detail["code"] == "instance_id_invalid"
+        assert detail["params"] == {"max_length": 128}
+        assert "ontos_instance_id" in detail["message"]
+
+    def test_invalid_name_detail_has_code_and_params(self, client):
+        r = client.put("/api/settings", json={"ontos_instance_name": "x" * 129})
+        assert r.status_code == 400
+        detail = r.json()["detail"]
+        assert detail["code"] == "instance_name_invalid"
+        assert detail["params"] == {"max_length": 128}

@@ -33,6 +33,12 @@ interface AppSettings {
 const INSTANCE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const INSTANCE_NAME_MAX_LENGTH = 128;
 
+// Backend error codes (CodedValueError) -> the same i18n keys as the inline validation
+const SERVER_ERROR_KEYS: Record<string, string> = {
+  instance_id_invalid: 'settings:general.instanceIdentity.id.invalid',
+  instance_name_invalid: 'settings:general.instanceIdentity.name.tooLong',
+};
+
 export default function GeneralSettings() {
   const { t } = useTranslation(['settings', 'common']);
   const { hasPermission } = usePermissions();
@@ -141,6 +147,20 @@ export default function GeneralSettings() {
           title: t('settings:general.messages.saveSuccess', 'Settings saved successfully'),
         });
       } else {
+        // Structured error ({code, message, params}): show it translated when we know the code.
+        const body = await response.json().catch(() => null);
+        const code = body?.detail && typeof body.detail === 'object' ? body.detail.code : null;
+        const translationKey = code ? SERVER_ERROR_KEYS[code] : undefined;
+        if (translationKey) {
+          toast({
+            title: t('settings:general.messages.saveError', 'Failed to save settings'),
+            description: String(
+              t(translationKey, { ...(body.detail.params ?? {}), defaultValue: body.detail.message })
+            ),
+            variant: 'destructive',
+          });
+          return;
+        }
         throw new Error('Failed to save settings');
       }
     } catch (error) {

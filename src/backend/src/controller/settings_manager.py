@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from sqlalchemy import func
 
+from src.common.api_errors import CodedValueError
 from src.common.config import Settings
 from src.common.sanitization import (
     APP_SHORT_NAME_MAX_LEN,
@@ -154,7 +155,20 @@ DEFAULT_ROLE_PERMISSIONS = {
 INSTANCE_ID_SETTING_KEY = "ONTOS_INSTANCE_ID"
 INSTANCE_NAME_SETTING_KEY = "ONTOS_INSTANCE_NAME"
 INSTANCE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+INSTANCE_ID_MAX_LENGTH = 128
 INSTANCE_NAME_MAX_LENGTH = 128
+
+
+class InstanceIdInvalidError(CodedValueError):
+    """The instance id is not 1-``max_length`` allowed characters (UI shows it translated)."""
+
+    code = 'instance_id_invalid'
+
+
+class InstanceNameInvalidError(CodedValueError):
+    """The instance name is longer than ``max_length`` or has control characters."""
+
+    code = 'instance_name_invalid'
 
 
 class SettingsManager:
@@ -217,9 +231,10 @@ class SettingsManager:
             raw = settings.get('ontos_instance_id')
             value = raw.strip() if isinstance(raw, str) else ''
             if value and not INSTANCE_ID_PATTERN.match(value):
-                raise ValueError(
+                raise InstanceIdInvalidError(
                     "ontos_instance_id must be 1-128 characters: letters, digits, '.', '_', ':' or '-', "
-                    "starting with a letter or digit"
+                    "starting with a letter or digit",
+                    max_length=INSTANCE_ID_MAX_LENGTH,
                 )
             if value:
                 app_settings_repo.set(self._db, INSTANCE_ID_SETTING_KEY, value)
@@ -233,9 +248,10 @@ class SettingsManager:
             raw = settings.get('ontos_instance_name')
             value = raw.strip() if isinstance(raw, str) else ''
             if len(value) > INSTANCE_NAME_MAX_LENGTH or any(ord(c) < 32 for c in value):
-                raise ValueError(
+                raise InstanceNameInvalidError(
                     f"ontos_instance_name must be at most {INSTANCE_NAME_MAX_LENGTH} characters "
-                    "with no control characters"
+                    "with no control characters",
+                    max_length=INSTANCE_NAME_MAX_LENGTH,
                 )
             if value:
                 app_settings_repo.set(self._db, INSTANCE_NAME_SETTING_KEY, value)

@@ -94,6 +94,31 @@ describe('GeneralSettings - instance identity', () => {
     expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({ variant: 'destructive' }));
   });
 
+  it('shows a server-side coded rejection translated', async () => {
+    fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'PUT') {
+        return {
+          ok: false,
+          json: async () => ({
+            detail: { code: 'instance_id_invalid', message: 'english fallback', params: { max_length: 128 } },
+          }),
+        } as Response;
+      }
+      return { ok: true, json: async () => baseResponse } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<GeneralSettings />);
+    await screen.findByLabelText('Instance ID');
+    await userEvent.click(screen.getByRole('button', { name: /save settings/i }));
+    await waitFor(() => expect(toastMock).toHaveBeenCalled());
+    expect(toastMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        variant: 'destructive',
+        description: expect.stringContaining('Use 1-128 letters, digits'),
+      })
+    );
+  });
+
   it('is read-only for users without write access', async () => {
     canWrite = false;
     mockFetch();
