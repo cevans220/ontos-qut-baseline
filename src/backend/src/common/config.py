@@ -10,6 +10,7 @@ import yaml
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .api_errors import CodedValueError
 from .logging import get_logger
 
 logger = get_logger(__name__)
@@ -316,6 +317,12 @@ class ConfigManager:
 _settings: Optional[Settings] = None
 _config_manager: Optional[ConfigManager] = None
 
+class VolumeInvalidError(CodedValueError):
+    """The volume setting, or the catalog/schema it falls back to, can't name a volume."""
+
+    code = 'volume_invalid'
+
+
 def resolve_volume(settings: Settings) -> Optional[Tuple[str, str, str]]:
     """(catalog, schema, volume) for ``DATABRICKS_VOLUME``, or None when it isn't set.
 
@@ -325,7 +332,8 @@ def resolve_volume(settings: Settings) -> Optional[Tuple[str, str, str]]:
     ``DATABRICKS_CATALOG`` / ``DATABRICKS_SCHEMA`` (what the bundle passes).
 
     Raises:
-        ValueError: If the value has none of these forms
+        VolumeInvalidError: (a ``ValueError``) If the value has none of these forms, or a
+            bare volume name has no usable ``DATABRICKS_CATALOG`` / ``DATABRICKS_SCHEMA``
     """
     raw = (settings.DATABRICKS_VOLUME or '').strip()
     if not raw:
@@ -344,10 +352,19 @@ def resolve_volume(settings: Settings) -> Optional[Tuple[str, str, str]]:
         if len(parts) == 3 and valid(*parts):
             return parts[0], parts[1], parts[2]
         if len(parts) == 1 and valid(raw):
-            return settings.DATABRICKS_CATALOG, settings.DATABRICKS_SCHEMA, raw
-    raise ValueError(
+            catalog, schema = settings.DATABRICKS_CATALOG, settings.DATABRICKS_SCHEMA
+            if not valid(catalog or '', schema or ''):
+                raise VolumeInvalidError(
+                    f"The volume name {raw!r} needs DATABRICKS_CATALOG and DATABRICKS_SCHEMA "
+                    "to be set to plain Unity Catalog names (no periods, slashes or "
+                    f"whitespace); got catalog {catalog!r} and schema {schema!r}",
+                    value=raw, catalog=catalog or '', schema=schema or '',
+                )
+            return catalog, schema, raw
+    raise VolumeInvalidError(
         "DATABRICKS_VOLUME must be /Volumes/<catalog>/<schema>/<volume>, "
-        f"<catalog>.<schema>.<volume> or a volume name, got {raw!r}"
+        f"<catalog>.<schema>.<volume> or a volume name, got {raw!r}",
+        value=raw, catalog='', schema='',
     )
 
 
