@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { deleteOrThrow } from '@/lib/delete-product';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { DataProduct, InputPort, OutputPort, ManagementPort, TeamMember, Support, SubscriptionResponse, SubscribersListResponse } from '@/types/data-product';
@@ -735,7 +736,7 @@ export default function DataProductDetails() {
     if (!confirm(t('data-products:details.confirms.deleteProduct', { name: product.name }))) return;
 
     try {
-      await deleteApi(`/api/data-products/${productId}`);
+      await deleteOrThrow(deleteApi, `/api/data-products/${productId}`);
       toast({ title: t('common:toast.success'), description: t('data-products:details.deleteSuccess') });
       navigate(listPath);
     } catch (err) {
@@ -772,7 +773,7 @@ export default function DataProductDetails() {
     if (!confirm(t('data-products:details.confirms.discardDraft'))) return;
     setIsDiscarding(true);
     try {
-      await deleteApi(`/api/data-products/${productId}/discard`);
+      await deleteOrThrow(deleteApi, `/api/data-products/${productId}/discard`);
       toast({ title: t('data-products:details.toasts.draftDiscardedTitle'), description: t('data-products:details.toasts.draftDiscardedMessage') });
       // Navigate back to products list or parent product
       if (product.parentProductId) {
