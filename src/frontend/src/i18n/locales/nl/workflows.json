@@ -445,6 +445,24 @@
     "endpointHint": "Backend-endpoint dat JSON teruggeeft",
     "addField": "Veld toevoegen"
   },
+  "runDialog": {
+    "menuLabel": "Uitvoeren",
+    "title": "\"{{name}}\" uitvoeren",
+    "description": "Start deze handmatige workflow voor een entiteit. Hij draait nu, namens jou.",
+    "entityType": "Entiteitstype",
+    "entity": "Entiteit",
+    "selectEntity": "Selecteer een entiteit",
+    "loading": "Laden...",
+    "noEntities": "Niets om te selecteren.",
+    "listFailed": "De lijst kon niet worden geladen; voer de id in.",
+    "entityId": "Entiteits-id",
+    "entityIdPlaceholder": "bijv. main.sales.orders",
+    "entityIdHelp": "De id of volledige naam van de entiteit waarvoor de workflow moet draaien.",
+    "run": "Uitvoeren",
+    "failed": "De workflow kon niet worden gestart.",
+    "resultStatus": "Resultaat",
+    "viewExecution": "Uitvoering bekijken"
+  },
   "templateVars": {
     "copiedToClipboard": "{{placeholder}} gekopieerd naar klembord.",
     "copyFailed": "Kopiëren mislukt",

@@ -445,6 +445,24 @@
     "endpointHint": "Endpoint de backend que devuelve JSON",
     "addField": "Añadir campo"
   },
+  "runDialog": {
+    "menuLabel": "Ejecutar",
+    "title": "Ejecutar \"{{name}}\"",
+    "description": "Inicia este workflow manual para una entidad. Se ejecuta ahora, como usted.",
+    "entityType": "Tipo de entidad",
+    "entity": "Entidad",
+    "selectEntity": "Seleccione una entidad",
+    "loading": "Cargando...",
+    "noEntities": "Nada que seleccionar.",
+    "listFailed": "No se pudo cargar la lista; introduzca el id.",
+    "entityId": "Id de la entidad",
+    "entityIdPlaceholder": "p. ej. main.sales.orders",
+    "entityIdHelp": "El id o nombre completo de la entidad para la que se ejecutará el workflow.",
+    "run": "Ejecutar",
+    "failed": "No se pudo iniciar el workflow.",
+    "resultStatus": "Resultado",
+    "viewExecution": "Ver ejecución"
+  },
   "templateVars": {
     "copiedToClipboard": "{{placeholder}} copiado al portapapeles.",
     "copyFailed": "Error al copiar",
