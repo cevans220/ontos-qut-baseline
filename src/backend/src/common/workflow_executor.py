@@ -3379,7 +3379,8 @@ class WorkflowExecutor:
                 ).get('target_status')
                 if approved_request and target_status:
                     self._apply_requested_status_change(
-                        trigger_context, entity_id, target_status, responded_by
+                        trigger_context, entity_id, target_status, responded_by,
+                        execution_id=execution_id,
                     )
                     
         except Exception as e:
@@ -3519,6 +3520,7 @@ class WorkflowExecutor:
         product_id: str,
         target_status: str,
         responded_by: Optional[str],
+        execution_id: Optional[str] = None,
     ) -> None:
         """Apply an approved status change request to a data product.
 
@@ -3560,6 +3562,8 @@ class WorkflowExecutor:
                 "its status is now '%s'",
                 product_id, requested_from, target_status, current_status,
             )
+            # The "approved" notice of this run would contradict the one below
+            self._withdraw_approval_notices(execution_id, trigger_context.user_email)
             self._notify_status_change_not_applied(
                 trigger_context, product_id,
                 f"The request to change the status from '{requested_from}' to "
@@ -3588,6 +3592,7 @@ class WorkflowExecutor:
                 "Approved status change of data product %s to '%s' could not be applied: %s",
                 product_id, target_status, e,
             )
+            self._withdraw_approval_notices(execution_id, trigger_context.user_email)
             self._notify_status_change_not_applied(
                 trigger_context, product_id,
                 f"Your request to change the status to '{target_status}' was approved, "

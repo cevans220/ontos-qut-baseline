@@ -1,4 +1,4 @@
-"""A review approved in its workflow, whose status change a gate then refuses.
+"""A review or status change request approved in its workflow, then not applied.
 
 The default review workflows notify the requester right after the approval
 ("Request Approved"); the status change runs when the workflow completes. When
@@ -35,7 +35,7 @@ from src.repositories.process_workflows_repository import process_workflow_repo
 REQUESTER = 'requester@example.com'
 
 
-def _review_workflow(db, entity_type, approved_template):
+def _review_workflow(db, entity_type, approved_template, trigger=TriggerType.ON_REQUEST_REVIEW):
     """Approval, then the requester's approved / rejected notice, as the defaults do.
 
     The notices name the requester by email: the defaults' ``requester`` means
@@ -43,7 +43,7 @@ def _review_workflow(db, entity_type, approved_template):
     """
     db_workflow = process_workflow_repo.create(db, ProcessWorkflowCreate(
         name=f'review-{uuid.uuid4().hex[:6]}',
-        trigger=WorkflowTrigger(type=TriggerType.ON_REQUEST_REVIEW, entity_types=[entity_type]),
+        trigger=WorkflowTrigger(type=trigger, entity_types=[entity_type]),
         steps=[
             WorkflowStepCreate(
                 step_id='request-approval', step_type=StepType.APPROVAL,
@@ -86,7 +86,7 @@ def _product(db):
     return product
 
 
-def _paused(db, workflow, entity_type, entity):
+def _paused(db, workflow, entity_type, entity, trigger=TriggerType.ON_REQUEST_REVIEW, **context):
     execution = WorkflowExecutor(db).execute_workflow(
         workflow=workflow,
         entity={'id': entity.id, 'name': entity.name},
@@ -96,7 +96,7 @@ def _paused(db, workflow, entity_type, entity):
         user_email=REQUESTER,
         trigger_context=TriggerContext(
             entity_type=entity_type, entity_id=entity.id, entity_name=entity.name,
-            trigger_type=TriggerType.ON_REQUEST_REVIEW, user_email=REQUESTER,
+            trigger_type=trigger, user_email=REQUESTER, **context,
         ),
     )
     assert execution.status.value == 'paused'
@@ -154,4 +154,42 @@ def test_a_refused_product_activation_leaves_the_requester_one_notice(db_session
 
     db_session.refresh(product)
     assert product.status == 'under_review'
+    assert _requester_titles(db_session) == ['Status change not applied']
+
+
+def _request_deprecation(db, product):
+    workflow = _review_workflow(
+        db, EntityType.DATA_PRODUCT, 'request_approved', TriggerType.ON_REQUEST_STATUS_CHANGE,
+    )
+    return _paused(
+        db, workflow, 'data_product', product, TriggerType.ON_REQUEST_STATUS_CHANGE,
+        from_status='active', to_status='deprecated',
+    )
+
+
+def test_a_refused_requested_status_change_leaves_the_requester_one_notice(db_session):
+    product = _product(db_session)
+    product.status = 'active'
+    db_session.commit()
+    execution = _request_deprecation(db_session, product)
+
+    _approve(db_session, execution, gate_passes=False)
+
+    db_session.refresh(product)
+    assert product.status == 'active'
+    assert _requester_titles(db_session) == ['Status change not applied']
+
+
+def test_a_requested_status_change_made_stale_leaves_the_requester_one_notice(db_session):
+    product = _product(db_session)
+    product.status = 'active'
+    db_session.commit()
+    execution = _request_deprecation(db_session, product)
+    product.status = 'draft'  # changed while the request waited
+    db_session.commit()
+
+    _approve(db_session, execution, gate_passes=True)
+
+    db_session.refresh(product)
+    assert product.status == 'draft'
     assert _requester_titles(db_session) == ['Status change not applied']
