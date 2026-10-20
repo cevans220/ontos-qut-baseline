@@ -951,6 +951,9 @@ class NotificationStepHandler(StepHandler):
 
             created_count = 0
             email_count = 0
+            # The in-app notices, so a later step can withdraw one (see
+            # WorkflowExecutor._withdraw_approval_notices)
+            notices: List[Dict[str, str]] = []
 
             # --- in_app channel ---
             if 'in_app' in channels:
@@ -973,6 +976,7 @@ class NotificationStepHandler(StepHandler):
                         )
                         notification_repo.create(db=self._db, obj_in=notification)
                         created_count += 1
+                        notices.append({'id': notification.id, 'recipient': recipient_id})
                         logger.info(f"Notification created for {recipient_id}: {title}")
                     except Exception as e:
                         logger.warning(f"Failed to create notification for {recipient_id}: {e}")
@@ -1040,6 +1044,7 @@ class NotificationStepHandler(StepHandler):
                     'created_count': created_count,
                     'email_count': email_count,
                     'channels': channels,
+                    'notices': notices,
                 }
             )
         except Exception as e:
@@ -3094,6 +3099,7 @@ class WorkflowExecutor:
                 succeeded=(final_status == ExecutionStatus.SUCCEEDED),
                 responded_by=user_email,
                 approved=step_result,
+                execution_id=execution_id,
             )
         
         # Return updated execution
@@ -3106,6 +3112,7 @@ class WorkflowExecutor:
         contract_id: str,
         approved: bool,
         responded_by: Optional[str],
+        execution_id: Optional[str] = None,
     ) -> None:
         """Set a reviewed contract to ``approved`` or back to ``draft``.
 
@@ -3150,7 +3157,10 @@ class WorkflowExecutor:
                 'notApplied', {'reason': str(e)}, error=e,
             )
             # The workflow has already told the requester the review was
-            # decided; say that the contract's status didn't follow.
+            # decided; say that the contract's status didn't follow. An
+            # "approved" notice of this run would contradict it, so it goes.
+            if approved:
+                self._withdraw_approval_notices(execution_id, trigger_context.user_email)
             self._notify_status_not_changed(
                 trigger_context, target_status, str(e), trigger_context.user_email,
                 'requesterNotApplied', {'reason': str(e)}, error=e,
@@ -3164,6 +3174,51 @@ class WorkflowExecutor:
             "Data contract %s moved to '%s' after its review was decided",
             contract_id, target_status,
         )
+
+    # Notification templates that tell the requester their request was approved
+    _APPROVAL_NOTICE_TEMPLATES = ('request_approved', 'product_approved')
+
+    def _withdraw_approval_notices(self, execution_id: Optional[str], recipient: Optional[str]) -> int:
+        """Delete the "approved" notices this run sent ``recipient``.
+
+        Used when the approved status change was refused afterwards (e.g. by a
+        status gate): the requester then gets only the "not applied" notice
+        instead of two that contradict each other. Runs recorded before the
+        notification steps kept their notice ids have nothing to withdraw.
+        """
+        if not execution_id or not recipient:
+            return 0
+        from src.db_models.notifications import NotificationDb
+        from src.db_models.process_workflows import WorkflowStepExecutionDb
+
+        ids = []
+        runs = (
+            self._db.query(WorkflowStepExecutionDb)
+            .filter(WorkflowStepExecutionDb.execution_id == execution_id)
+            .filter(WorkflowStepExecutionDb.passed.is_(True))
+            .all()
+        )
+        for run in runs:
+            try:
+                data = json.loads(run.result_data) if isinstance(run.result_data, str) else run.result_data
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(data, dict) or data.get('template') not in self._APPROVAL_NOTICE_TEMPLATES:
+                continue
+            ids.extend(
+                notice.get('id') for notice in data.get('notices') or []
+                if isinstance(notice, dict) and notice.get('recipient') == recipient and notice.get('id')
+            )
+        if not ids:
+            return 0
+        removed = (
+            self._db.query(NotificationDb)
+            .filter(NotificationDb.id.in_(ids))
+            .delete(synchronize_session=False)
+        )
+        self._db.commit()
+        logger.info("Withdrew %d approval notice(s) of execution %s", removed, execution_id)
+        return removed
 
     @staticmethod
     def _coded_error_i18n(error: Optional[Exception]) -> Dict[str, Any]:
@@ -3236,6 +3291,7 @@ class WorkflowExecutor:
         succeeded: bool,
         responded_by: Optional[str] = None,
         approved: Optional[bool] = None,
+        execution_id: Optional[str] = None,
     ) -> None:
         """Handle entity status updates when a workflow completes.
         
@@ -3302,13 +3358,15 @@ class WorkflowExecutor:
                   and trigger_type in ('on_request_review', 'ON_REQUEST_REVIEW')
                   and approved is not None):
                 self._apply_contract_review_decision(
-                    trigger_context, entity_id, approved, responded_by
+                    trigger_context, entity_id, approved, responded_by,
+                    execution_id=execution_id,
                 )
                     
             # Handle data product activation completion
             elif entity_type == 'data_product' and trigger_type in ('on_request_review', 'ON_REQUEST_REVIEW'):
                 self._apply_product_review_outcome(
-                    trigger_context, entity_id, succeeded, responded_by
+                    trigger_context, entity_id, succeeded, responded_by,
+                    execution_id=execution_id,
                 )
 
             # Approved status change request: apply the requested transition,
@@ -3342,6 +3400,7 @@ class WorkflowExecutor:
         product_id: str,
         succeeded: bool,
         responded_by: Optional[str],
+        execution_id: Optional[str] = None,
     ) -> None:
         """Activate a reviewed data product, or return it to draft.
 
@@ -3394,7 +3453,10 @@ class WorkflowExecutor:
                 manager, trigger_context, product_id, steps, target_status, responded_by, applied,
             )
         except _ReviewStepRefused:
-            pass
+            # The requester was told the change wasn't applied; an "approved"
+            # notice of this run would contradict it, so it goes.
+            if succeeded:
+                self._withdraw_approval_notices(execution_id, trigger_context.user_email)
         except SQLAlchemyError:
             # The steps before the failed one are committed; the session must
             # be usable again to fire their trigger below
