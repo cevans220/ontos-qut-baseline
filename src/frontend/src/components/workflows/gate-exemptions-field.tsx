@@ -37,17 +37,33 @@ export function toOptions(data: unknown): Option[] {
 
 export const EMPTY_GATE_EXEMPTIONS: GateExemptions = { domains: [], data_products: [], data_contracts: [] };
 
-function useEntityOptions(url: string): Option[] {
-  const [options, setOptions] = useState<Option[]>([]);
+/**
+ * The selected ids that are not in their loaded list (the entity was deleted),
+ * so the save would be refused. A list that didn't load (``null``) counts none. Pure.
+ */
+export function missingExemptionIds(
+  value: GateExemptions,
+  lists: { domains: Option[] | null; data_products: Option[] | null; data_contracts: Option[] | null },
+): string[] {
+  return (['domains', 'data_products', 'data_contracts'] as const).flatMap((kind) => {
+    const options = lists[kind];
+    if (!options) return [];
+    return value[kind].filter((id) => !options.some((o) => o.id === id));
+  });
+}
+
+/** The ``{id, name}`` items of ``url``; ``null`` until loaded, or when the list can't be read. */
+function useEntityOptions(url: string): Option[] | null {
+  const [options, setOptions] = useState<Option[] | null>(null);
   useEffect(() => {
     let cancelled = false;
     fetch(url)
-      .then((res) => (res.ok ? res.json() : []))
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
       .then((data) => {
         if (!cancelled) setOptions(toOptions(data));
       })
       .catch(() => {
-        if (!cancelled) setOptions([]);
+        if (!cancelled) setOptions(null);
       });
     return () => {
       cancelled = true;
@@ -59,7 +75,7 @@ function useEntityOptions(url: string): Option[] {
 interface PickerProps {
   id: string;
   label: string;
-  options: Option[];
+  options: Option[] | null;
   value: string[];
   onChange: (ids: string[]) => void;
 }
@@ -67,7 +83,16 @@ interface PickerProps {
 function Picker({ id, label, options, value, onChange }: PickerProps) {
   const { t } = useTranslation('workflows');
   const [open, setOpen] = useState(false);
-  const nameOf = (optionId: string) => options.find((o) => o.id === optionId)?.name ?? optionId;
+  // Once the list is loaded, an id that isn't in it is an entity that was deleted
+  const isMissing = (optionId: string) => !!options && !options.some((o) => o.id === optionId);
+  const nameOf = (optionId: string) => {
+    const name = options?.find((o) => o.id === optionId)?.name;
+    if (name) return name;
+    if (!isMissing(optionId)) return optionId;
+    // Short enough that the "no longer exists" part stays visible
+    const shortId = optionId.length > 12 ? `${optionId.slice(0, 8)}…` : optionId;
+    return t('designer.triggerConfig.disabledFor.notFound', { id: shortId });
+  };
   const toggle = (optionId: string) =>
     onChange(value.includes(optionId) ? value.filter((v) => v !== optionId) : [...value, optionId]);
 
@@ -77,8 +102,13 @@ function Picker({ id, label, options, value, onChange }: PickerProps) {
       {value.length > 0 && (
         <div className="flex flex-wrap gap-1" data-testid={`${id}-selected`}>
           {value.map((optionId) => (
-            <Badge key={optionId} variant="secondary" className="flex items-center gap-1">
-              <span className="truncate max-w-[12rem]">{nameOf(optionId)}</span>
+            <Badge
+              key={optionId}
+              variant={isMissing(optionId) ? 'destructive' : 'secondary'}
+              className="flex items-center gap-1"
+              title={isMissing(optionId) ? optionId : undefined}
+            >
+              <span className={isMissing(optionId) ? undefined : 'truncate max-w-[12rem]'}>{nameOf(optionId)}</span>
               <button
                 type="button"
                 onClick={() => toggle(optionId)}
@@ -108,7 +138,7 @@ function Picker({ id, label, options, value, onChange }: PickerProps) {
             <CommandList>
               <CommandEmpty>{t('designer.triggerConfig.disabledFor.noResults')}</CommandEmpty>
               <CommandGroup>
-                {options.map((option) => (
+                {(options ?? []).map((option) => (
                   <CommandItem key={option.id} value={`${option.name} ${option.id}`} onSelect={() => toggle(option.id)}>
                     <Check className={cn('mr-2 h-4 w-4', value.includes(option.id) ? 'opacity-100' : 'opacity-0')} />
                     {option.name}
@@ -126,15 +156,26 @@ function Picker({ id, label, options, value, onChange }: PickerProps) {
 interface GateExemptionsFieldProps {
   value: GateExemptions;
   onChange: (value: GateExemptions) => void;
+  /** The selected ids whose entity no longer exists (the backend refuses to save them). */
+  onMissingChange?: (ids: string[]) => void;
 }
 
 /** Domains, data products and data contracts a before_status_change gate is switched off for. */
-export default function GateExemptionsField({ value, onChange }: GateExemptionsFieldProps) {
+export default function GateExemptionsField({ value, onChange, onMissingChange }: GateExemptionsFieldProps) {
   const { t } = useTranslation('workflows');
-  const { domains } = useDomains();
+  const { domains, loading: domainsLoading, error: domainsError } = useDomains();
   const products = useEntityOptions('/api/data-products');
   const contracts = useEntityOptions('/api/data-contracts');
-  const domainOptions = domains.map((d) => ({ id: d.id, name: d.name || d.id }));
+  const domainOptions = domainsLoading || domainsError
+    ? null
+    : domains.map((d) => ({ id: d.id, name: d.name || d.id }));
+  const missing = missingExemptionIds(value, {
+    domains: domainOptions, data_products: products, data_contracts: contracts,
+  });
+  const missingKey = missing.join('\n');
+  useEffect(() => {
+    onMissingChange?.(missingKey ? missingKey.split('\n') : []);
+  }, [missingKey, onMissingChange]);
 
   return (
     <div className="space-y-2 rounded-md border p-3" data-testid="gate-exemptions">

@@ -118,7 +118,10 @@
         "selectedCount_other": "{{count}} selected",
         "search": "Search...",
         "noResults": "Nothing found.",
-        "remove": "Remove {{name}}"
+        "remove": "Remove {{name}}",
+        "notFound": "{{id}} (no longer exists)",
+        "missingOnSave_one": "The gate is switched off for {{count}} item that no longer exists. Remove it and save again.",
+        "missingOnSave_other": "The gate is switched off for {{count}} items that no longer exist. Remove them and save again."
       }
     },
     "stepConfig": {

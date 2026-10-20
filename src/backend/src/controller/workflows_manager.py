@@ -58,6 +58,24 @@ def _step_issue(step: WorkflowStepCreate, issue: Dict[str, Any]) -> CodedMessage
     return CodedMessage(f"Step '{step.step_id}': {issue['message']}", issue['code'],
                         **{**(issue.get('params') or {}), 'step': step.step_id})
 
+
+class GateExemptionMessage(str):
+    """A ``disabled_for`` validation error: the English text, with a code and params.
+
+    It is a ``str``, so ``WorkflowValidationResult.errors`` keeps its plain
+    list; a client that reads ``code`` / ``params`` can show it in the
+    user's language.
+    """
+    code: str
+    params: Dict[str, Any]
+
+    def __new__(cls, message: str, code: str, **params: Any) -> 'GateExemptionMessage':
+        obj = super().__new__(cls, message)
+        obj.code = code
+        obj.params = params
+        return obj
+
+
 class WorkflowsManager:
     """Manager for process workflow definitions."""
 
@@ -487,23 +505,29 @@ class WorkflowsManager:
         if exemptions is None or exemptions.is_empty():
             return []
         if trigger.type != TriggerType.BEFORE_STATUS_CHANGE:
-            return ["Only before_status_change workflows can be switched off per domain, "
-                    "data product or data contract (disabled_for)"]
+            return [GateExemptionMessage(
+                "Only before_status_change workflows can be switched off per domain, "
+                "data product or data contract (disabled_for)",
+                'gate_exemptions_wrong_trigger', triggerType=trigger.type.value,
+            )]
         from src.db_models.data_domains import DataDomain as DataDomainDb
         from src.db_models.data_products import DataProductDb
         from src.db_models.data_contracts import DataContractDb
 
         errors = []
-        for label, model, ids in (
-            ('domain', DataDomainDb, exemptions.domains),
-            ('data product', DataProductDb, exemptions.data_products),
-            ('data contract', DataContractDb, exemptions.data_contracts),
+        for label, kind, model, ids in (
+            ('domain', 'domain', DataDomainDb, exemptions.domains),
+            ('data product', 'data_product', DataProductDb, exemptions.data_products),
+            ('data contract', 'data_contract', DataContractDb, exemptions.data_contracts),
         ):
             if not ids:
                 continue
             found = {row[0] for row in self._db.query(model.id).filter(model.id.in_(ids)).all()}
             for missing in [i for i in ids if i not in found]:
-                errors.append(f"disabled_for: unknown {label} '{missing}'")
+                errors.append(GateExemptionMessage(
+                    f"disabled_for: unknown {label} '{missing}'",
+                    'gate_exemption_not_found', kind=kind, id=missing,
+                ))
         return errors
 
     def _validate_step_config(self, step: WorkflowStepCreate) -> List[str]:

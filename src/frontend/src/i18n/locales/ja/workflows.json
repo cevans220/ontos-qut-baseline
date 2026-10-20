@@ -118,7 +118,10 @@
         "selectedCount_other": "{{count}} 件選択",
         "search": "検索...",
         "noResults": "見つかりません。",
-        "remove": "{{name}} を削除"
+        "remove": "{{name}} を削除",
+        "notFound": "{{id}}（存在しません）",
+        "missingOnSave_one": "このゲートは、存在しなくなった{{count}}件の項目に対してオフになっています。削除してから再度保存してください。",
+        "missingOnSave_other": "このゲートは、存在しなくなった{{count}}件の項目に対してオフになっています。削除してから再度保存してください。"
       }
     },
     "stepConfig": {

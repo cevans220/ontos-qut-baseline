@@ -118,7 +118,10 @@
         "selectedCount_other": "{{count}} selecionados",
         "search": "Buscar...",
         "noResults": "Nada encontrado.",
-        "remove": "Remover {{name}}"
+        "remove": "Remover {{name}}",
+        "notFound": "{{id}} (não existe mais)",
+        "missingOnSave_one": "O gate está desligado para {{count}} item que não existe mais. Remova-o e salve de novo.",
+        "missingOnSave_other": "O gate está desligado para {{count}} itens que não existem mais. Remova-os e salve de novo."
       }
     },
     "stepConfig": {

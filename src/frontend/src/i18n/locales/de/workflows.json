@@ -118,7 +118,10 @@
         "selectedCount_other": "{{count}} ausgewählt",
         "search": "Suchen...",
         "noResults": "Nichts gefunden.",
-        "remove": "{{name}} entfernen"
+        "remove": "{{name}} entfernen",
+        "notFound": "{{id}} (existiert nicht mehr)",
+        "missingOnSave_one": "Das Gate ist für {{count}} Eintrag abgeschaltet, der nicht mehr existiert. Entfernen Sie ihn und speichern Sie erneut.",
+        "missingOnSave_other": "Das Gate ist für {{count}} Einträge abgeschaltet, die nicht mehr existieren. Entfernen Sie sie und speichern Sie erneut."
       }
     },
     "stepConfig": {

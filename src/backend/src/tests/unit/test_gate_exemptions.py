@@ -298,6 +298,26 @@ class TestSetting:
         assert "disabled_for: unknown domain 'no-such-domain'" in validation.errors
         assert "disabled_for: unknown data contract 'no-such-contract'" in validation.errors
 
+    def test_refused_exemptions_carry_a_code_and_params(self, db_session):
+        """The messages stay English strings and also carry a code for clients."""
+        mgr = WorkflowsManager(db_session)
+        workflow, _ = self._create(
+            mgr, TriggerType.BEFORE_STATUS_CHANGE,
+            {'domains': ['no-such-domain'], 'data_contracts': ['no-such-contract']},
+        )
+        errors = mgr._validate_gate_exemptions(workflow.trigger)
+        assert [(e.code, e.params) for e in errors] == [
+            ('gate_exemption_not_found', {'kind': 'domain', 'id': 'no-such-domain'}),
+            ('gate_exemption_not_found', {'kind': 'data_contract', 'id': 'no-such-contract'}),
+        ]
+        assert errors[0] == "disabled_for: unknown domain 'no-such-domain'"
+        sales = _domain(db_session, 'Sales')
+        workflow, _ = self._create(mgr, TriggerType.ON_CREATE, {'domains': [sales]})
+        errors = mgr._validate_gate_exemptions(workflow.trigger)
+        assert [(e.code, e.params) for e in errors] == [
+            ('gate_exemptions_wrong_trigger', {'triggerType': 'on_create'}),
+        ]
+
     def test_only_status_gates_can_be_switched_off(self, db_session):
         sales = _domain(db_session, 'Sales')
         _, validation = self._create(WorkflowsManager(db_session), TriggerType.ON_CREATE, {'domains': [sales]})
