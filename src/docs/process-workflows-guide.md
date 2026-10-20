@@ -227,6 +227,8 @@ The `scope_config` JSON restricts workflow applicability:
 | `catalog` | Only entities in specified catalogs |
 | `domain` | Only entities in specified domains |
 
+> **Not applied yet:** the scope is saved with the workflow, but no trigger event carries a scope today, so a scoped workflow fires for every entity that matches its trigger ([#1118](https://github.com/databrickslabs/ontos/issues/1118)).
+
 ### Pydantic Models
 
 **Location:** `src/backend/src/models/process_workflows.py`
@@ -280,6 +282,8 @@ The `TriggerRegistry` provides a centralized interface for firing events and exe
 | Manual | `manual` | User-initiated execution |
 
 > **Pre-Creation vs Post-Creation Triggers:** Use `before_create`/`before_update` for inline validation that must pass before an entity is saved. Use `on_create`/`on_update` for asynchronous actions like notifications or tagging that run after the entity is already persisted.
+
+> **Scheduled and Manual:** the `scheduled` trigger does not run yet ([#941](https://github.com/databrickslabs/ontos/issues/941)). A `manual` workflow is started from the **Run** action in the row menu of the Workflows list (or with `POST /api/workflows/{id}/execute`); it asks for the entity type and the entity.
 
 ### Entity Types
 
@@ -465,8 +469,8 @@ Creates an approval request and pauses workflow execution.
 | Config Key | Type | Description |
 |------------|------|-------------|
 | `approvers` | String | Approver specification (email, group, or role) |
-| `timeout_days` | Integer | Days before approval expires |
-| `require_all` | Boolean | Require all approvers (vs. any one) |
+| `timeout_days` | Integer | Days before approval expires (accepted, not enforced yet: a pending approval never expires, [#1119](https://github.com/databrickslabs/ontos/issues/1119)) |
+| `require_all` | Boolean | Require all approvers (vs. any one) (accepted, not enforced yet: the first decision resumes the workflow, [#1119](https://github.com/databrickslabs/ontos/issues/1119)) |
 
 **Approver Specifications:**
 - `domain_owners` - Owners of the entity's domain
@@ -1130,23 +1134,11 @@ Content-Type: application/json
 
 #### Execute Workflow Manually
 
-```http
-POST /api/workflows/wf-uuid-123/execute
-Content-Type: application/json
-```
+The entity is passed as query parameters, with no request body. The same call backs the
+**Run** action of the Workflows list.
 
-```json
-{
-  "entity_type": "table",
-  "entity_id": "catalog.schema.table_name",
-  "entity_name": "table_name",
-  "entity_data": {
-    "name": "table_name",
-    "catalog": "catalog",
-    "schema": "schema",
-    "columns": [...]
-  }
-}
+```http
+POST /api/workflows/wf-uuid-123/execute?entity_type=table&entity_id=catalog.schema.table_name&entity_name=table_name
 ```
 
 ---
