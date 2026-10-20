@@ -472,3 +472,57 @@ def test_a_workflow_text_an_admin_edited_is_kept(db_session, preset):
     for table, column, whens in _workflow_updates(preset):
         for row_id, _, _ in whens:
             assert getattr(db_session.get(_model(table), row_id), column) == 'Our own text'
+
+
+# The Contract Purpose Gate (retail) is shipped disabled: its trigger never fires
+GATE_ID = '02a00002-0000-4000-8000-000000000002'
+GATE_TRIGGER = '{"type": "before_update", "entity_types": ["dataset"]}'
+GATE_DEACTIVATION = re.compile(
+    rf"^UPDATE process_workflows SET is_active = false\nWHERE id = '{GATE_ID}'\n.*?;$",
+    re.M | re.S,
+)
+
+
+def _gate_insert():
+    sql = _preset_sql('retail')
+    start = sql.index(f"('{GATE_ID}'")
+    return sql[start:sql.index('\n\n', start)]
+
+
+def test_the_contract_purpose_gate_is_inserted_inactive():
+    insert = _gate_insert()
+    assert GATE_TRIGGER in insert
+    # ..., scope_config, is_active, is_default, version, ...
+    assert re.search(r"'\{\"type\": \"all\"\}',\s*false, true, 1,", insert)
+    assert '#1149' in _shipped_workflow_rows('retail')[
+        ('process_workflows', GATE_ID)]['description']
+
+
+def _gate_row(db, name='Contract Purpose Gate', trigger=GATE_TRIGGER, active=True):
+    db.add(ProcessWorkflowDb(
+        id=GATE_ID, name=name, description='x', trigger_config=trigger, is_active=active))
+    db.flush()
+
+
+def _deactivate_gate(db):
+    match = GATE_DEACTIVATION.search(_preset_sql('retail'))
+    assert match
+    db.execute(text(match.group(0)))
+    db.expire_all()
+
+
+@pytest.mark.parametrize('name', ['Contract Purpose Gate', 'Data Quality Gate'])
+def test_an_earlier_contract_purpose_gate_is_deactivated(db_session, name):
+    _gate_row(db_session, name=name)
+    _deactivate_gate(db_session)
+    assert db_session.get(ProcessWorkflowDb, GATE_ID).is_active is False
+
+
+@pytest.mark.parametrize('edit', [
+    {'name': 'Our own gate'},
+    {'trigger': '{"type": "before_status_change", "entity_types": ["data_contract"]}'},
+])
+def test_a_contract_purpose_gate_an_admin_edited_is_kept(db_session, edit):
+    _gate_row(db_session, **edit)
+    _deactivate_gate(db_session)
+    assert db_session.get(ProcessWorkflowDb, GATE_ID).is_active is True
