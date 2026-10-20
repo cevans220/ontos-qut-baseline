@@ -235,6 +235,141 @@ def test_a_users_domain_under_a_demo_domain_blocks(db_session):
     ]
 
 
+def _contract(db):
+    from src.db_models.data_contracts import DataContractDb
+
+    contract = DataContractDb(id=_id(), name=_name('c'), version='1.0.0', status='active')
+    db.add(contract)
+    db.flush()
+    return contract
+
+
+def _comment(db, entity_type, entity_id, **extra):
+    from src.db_models.comments import CommentDb
+
+    comment = CommentDb(
+        id=uuid.uuid4(), entity_type=entity_type, entity_id=str(entity_id),
+        comment='Looks good', created_by='rita@example.com', **extra,
+    )
+    db.add(comment)
+    db.flush()
+    return comment
+
+
+def test_comments_on_demo_entities_go_with_them_and_others_stay(db_session):
+    from src.db_models.comments import CommentDb
+
+    demo_product, demo_contract, users_product = (
+        _product(db_session), _contract(db_session), _product(db_session),
+    )
+    on_product = _comment(db_session, 'data_product', demo_product.id)
+    rating = _comment(db_session, 'data_product', demo_product.id, comment_type='rating', rating=4)
+    on_contract = _comment(db_session, 'data_contract', demo_contract.id)
+    kept = _comment(db_session, 'data_product', users_product.id)
+    demo = [('data_products', 'id', [demo_product.id]), ('data_contracts', 'id', [demo_contract.id])]
+    gone = [c.id for c in (on_product, rating, on_contract)]
+    kept_id = kept.id
+
+    plan = plan_demo_clear(db_session, demo)
+    assert sorted(plan.deletes_report(db_session)['comments']) == sorted(str(i) for i in gone)
+    _, deleted = _clear(db_session, demo)
+
+    assert deleted['comments'] == 3
+    db_session.expire_all()
+    assert all(db_session.get(CommentDb, i) is None for i in gone)
+    assert db_session.get(CommentDb, kept_id) is not None
+
+
+def test_a_comment_from_the_demo_pack_is_deleted_once(db_session):
+    demo_product = _product(db_session)
+    pack_comment = _comment(db_session, 'data_product', demo_product.id)
+    demo = [('comments', 'id', [str(pack_comment.id)]), ('data_products', 'id', [demo_product.id])]
+
+    plan = plan_demo_clear(db_session, demo)
+
+    assert 'comments' not in plan.dependents
+    assert _clear(db_session, demo)[1]['comments'] == 1
+
+
+def test_a_semantic_link_on_a_demo_contracts_property_goes_with_it(db_session):
+    from src.db_models.semantic_links import EntitySemanticLinkDb
+
+    demo_contract = _contract(db_session)
+    link = EntitySemanticLinkDb(
+        id=uuid.uuid4(), entity_type='data_contract_property',
+        entity_id=f'{demo_contract.id}#orders#customer_id', iri='urn:example:Customer',
+    )
+    db_session.add(link)
+    db_session.flush()
+    link_id = link.id
+
+    _, deleted = _clear(db_session, [('data_contracts', 'id', [demo_contract.id])])
+
+    assert deleted['entity_semantic_links'] == 1
+    db_session.expire_all()
+    assert db_session.get(EntitySemanticLinkDb, link_id) is None
+
+
+def test_an_access_grant_on_a_demo_product_blocks(db_session):
+    from datetime import datetime, timedelta, timezone
+
+    from src.db_models.access_grants import AccessGrantDb
+
+    demo_product = _product(db_session)
+    grant = AccessGrantDb(
+        id=uuid.uuid4(), grantee_email='rita@example.com', entity_type='data_product',
+        entity_id=demo_product.id, expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+    )
+    db_session.add(grant)
+    db_session.flush()
+
+    plan, deleted = _clear(db_session, [('data_products', 'id', [demo_product.id])])
+
+    assert deleted is None
+    assert plan.blocking == {('access_grants', 'entity_id', 'data_products'): [str(grant.id).lower()]}
+    assert db_session.get(AccessGrantDb, grant.id) is not None
+
+
+def test_a_relationship_goes_between_demo_entities_and_blocks_to_a_users_one(db_session):
+    from src.db_models.entity_relationships import EntityRelationshipDb
+
+    demo_product, demo_contract, users_product = (
+        _product(db_session), _contract(db_session), _product(db_session),
+    )
+    between = EntityRelationshipDb(
+        id=uuid.uuid4(), source_type='DataProduct', source_id=demo_product.id,
+        target_type='DataContract', target_id=demo_contract.id, relationship_type='uses',
+    )
+    to_user = EntityRelationshipDb(
+        id=uuid.uuid4(), source_type='DataProduct', source_id=users_product.id,
+        target_type='DataProduct', target_id=demo_product.id, relationship_type='dependsOn',
+    )
+    db_session.add_all([between, to_user])
+    db_session.flush()
+    demo = [('data_products', 'id', [demo_product.id]), ('data_contracts', 'id', [demo_contract.id])]
+
+    plan = plan_demo_clear(db_session, demo)
+
+    assert list(plan.dependents['entity_relationships']) == [(str(between.id),)]
+    assert plan.blocking == {
+        ('entity_relationships', 'target_id', 'data_products'): [str(to_user.id)],
+    }
+
+
+def test_the_change_log_of_a_demo_entity_stays(db_session):
+    from src.db_models.change_log import ChangeLogDb
+
+    demo_product = _product(db_session)
+    entry = ChangeLogDb(entity_type='data_product', entity_id=demo_product.id, action='update')
+    db_session.add(entry)
+    db_session.flush()
+
+    _, deleted = _clear(db_session, [('data_products', 'id', [demo_product.id])])
+
+    assert 'entity_change_log' not in deleted
+    assert db_session.get(ChangeLogDb, entry.id) is not None
+
+
 def test_the_report_lists_what_would_be_deleted(db_session):
     demo = _product(db_session)
     prop = CustomPropertyDb(id=_id(), product_id=demo.id, property='costCenter', value='CC-1')
@@ -417,6 +552,21 @@ def test_the_dry_run_names_what_users_added_to_demo_rows(route_db):
         'Clearing would delete 2 records, 1 of them added after the demo was loaded '
         'as parts of demo records (e.g. subscriptions to demo products).'
     )
+
+
+def test_the_dry_run_names_comments_on_demo_rows(route_db):
+    from src.utils.demo_data_sql import DemoInsert
+
+    demo = _product(route_db)
+    _comment(route_db, 'data_product', demo.id)
+    route_db.commit()
+
+    with patch('src.utils.demo_data_sql.parse_demo_inserts',
+               side_effect=lambda text: [DemoInsert('data_products', 'id', [demo.id])]):
+        result = _call_route(route_db, dry_run=True)
+
+    assert result['params'] == {'would_delete': 2, 'added_later': 1, 'blocking': 0}
+    assert result['added_later'] == {'comments': 1}
 
 
 def test_the_clear_is_all_or_nothing(route_db):

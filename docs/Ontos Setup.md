@@ -325,11 +325,13 @@ can clean up exactly what was inserted.
 `DELETE /api/settings/demo-data` also deletes the records added later that
 are part of a demo record, also when users added them: subscriptions to a
 demo product, runs and results of a demo compliance policy, custom properties
-of a demo product. Comments posted on a demo entity are not deleted: they are
-not linked to it by a foreign key, so they stay after the clear. User data
-that only refers to demo data (an asset of a demo asset type, a product owned
-by a demo team) stops the clear instead: nothing is deleted and the response
-lists it. Call it with `?dry_run=true` first to see both, without changing
+of a demo product, and what users added about a demo entity: comments and
+ratings, documentation and links, semantic links, tag and domain assignments,
+cost and quality items. The entity change log stays. User data that only
+refers to demo data (an asset of a demo asset type, a product owned by a demo
+team), an access grant or an agreement on a demo entity, and a relationship
+between a demo entity and a user's one stop the clear instead: nothing is
+deleted and the response lists it. Call it with `?dry_run=true` first to see both, without changing
 anything: `added_later` counts, per table, the records added after the demo
 was loaded.
 
