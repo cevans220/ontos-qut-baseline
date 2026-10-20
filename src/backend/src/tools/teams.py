@@ -11,7 +11,7 @@ from src.common.search_interfaces import SearchIndexItem
 from src.controller import search_scoring
 from src.models.search_config import SearchConfig
 from src.repositories.entity_domain_association_repository import entity_domain_repo
-from src.tools.base import BaseTool, ToolContext, ToolResult
+from src.tools.base import TOOL_FAILED, BaseTool, ToolContext, ToolResult
 
 logger = get_logger(__name__)
 
@@ -106,7 +106,7 @@ class SearchTeamsTool(BaseTool):
 
         except Exception as e:
             logger.error(f"[search_teams] FAILED: {e.__class__.__name__}: {e}", exc_info=True)
-            return ToolResult(success=False, error=f"{e.__class__.__name__}: {str(e)}", data={"teams": []})
+            return ToolResult(success=False, **TOOL_FAILED, data={"teams": []})
 
 
 class GetTeamTool(BaseTool):
@@ -173,7 +173,7 @@ class GetTeamTool(BaseTool):
             
         except Exception as e:
             logger.error(f"[get_team] FAILED: {type(e).__name__}: {e}", exc_info=True)
-            return ToolResult(success=False, error=f"{type(e).__name__}: {str(e)}")
+            return ToolResult(success=False, **TOOL_FAILED)
 
 
 class CreateTeamTool(BaseTool):
@@ -249,7 +249,7 @@ class CreateTeamTool(BaseTool):
             
         except Exception as e:
             logger.error(f"[create_team] FAILED: {type(e).__name__}: {e}", exc_info=True)
-            return ToolResult(success=False, error=f"{type(e).__name__}: {str(e)}")
+            return ToolResult(success=False, **TOOL_FAILED)
 
 
 class UpdateTeamTool(BaseTool):
@@ -349,7 +349,7 @@ class UpdateTeamTool(BaseTool):
             
         except Exception as e:
             logger.error(f"[update_team] FAILED: {type(e).__name__}: {e}", exc_info=True)
-            return ToolResult(success=False, error=f"{type(e).__name__}: {str(e)}")
+            return ToolResult(success=False, **TOOL_FAILED)
 
 
 class DeleteTeamTool(BaseTool):
@@ -400,4 +400,4 @@ class DeleteTeamTool(BaseTool):
             
         except Exception as e:
             logger.error(f"[delete_team] FAILED: {type(e).__name__}: {e}", exc_info=True)
-            return ToolResult(success=False, error=f"{type(e).__name__}: {str(e)}")
+            return ToolResult(success=False, **TOOL_FAILED)

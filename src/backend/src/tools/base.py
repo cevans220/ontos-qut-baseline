@@ -17,6 +17,15 @@ from src.common.logging import get_logger
 logger = get_logger(__name__)
 
 
+# Client-facing failure for an unexpected exception in a tool. The exception's
+# class and text (SQL, parameters, paths, hosts) go to the server log only: a
+# tool result reaches the MCP client and the chat LLM, which may quote it.
+TOOL_FAILED_CODE = "tool_failed"
+TOOL_FAILED_MESSAGE = "The tool failed with an unexpected error. See the server log for details."
+# Spread into ``ToolResult(success=False, **TOOL_FAILED, ...)``.
+TOOL_FAILED: Dict[str, str] = {"error": TOOL_FAILED_MESSAGE, "error_code": TOOL_FAILED_CODE}
+
+
 @dataclass
 class ToolContext:
     """
@@ -44,17 +53,24 @@ class ToolResult:
         success: Whether the tool executed successfully
         data: The result data (dict, list, etc.)
         error: Error message if success is False
+        error_code: Optional stable machine-readable code for the failure
+            (e.g. ``tool_failed``). Additive: clients that only read ``error``
+            keep working.
     """
     success: bool
     data: Dict[str, Any] = field(default_factory=dict)
     error: Optional[str] = None
+    error_code: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         if self.success:
             return self.data
         else:
-            return {"error": self.error, **self.data}
+            out: Dict[str, Any] = {"error": self.error, **self.data}
+            if self.error_code:
+                out["error_code"] = self.error_code
+            return out
 
 
 class BaseTool(ABC):

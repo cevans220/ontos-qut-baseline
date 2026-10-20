@@ -41,7 +41,7 @@ from src.db_models.data_products import DataProductDb
 from src.db_models.projects import ProjectDb
 from src.db_models.settings import AppRoleDb
 from src.db_models.teams import TeamDb
-from src.tools.base import BaseTool, ToolContext, ToolResult
+from src.tools.base import TOOL_FAILED, BaseTool, ToolContext, ToolResult
 
 logger = get_logger(__name__)
 
@@ -170,7 +170,7 @@ class GetAppStateTool(BaseTool):
             logger.error(f"[get_app_state] snapshot failed: {e}", exc_info=True)
             return ToolResult(
                 success=False,
-                error=f"failed to compute app-state snapshot: {type(e).__name__}: {e}",
+                **TOOL_FAILED,
             )
 
         logger.info(

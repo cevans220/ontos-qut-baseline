@@ -7,7 +7,7 @@ Tools for global search across all indexed features.
 from typing import Any, Dict, List, Optional
 
 from src.common.logging import get_logger
-from src.tools.base import BaseTool, ToolContext, ToolResult
+from src.tools.base import TOOL_FAILED, BaseTool, ToolContext, ToolResult
 
 logger = get_logger(__name__)
 
@@ -81,7 +81,7 @@ class GlobalSearchTool(BaseTool):
             logger.error(f"[global_search] FAILED: {e.__class__.__name__}: {e}", exc_info=True)
             return ToolResult(
                 success=False,
-                error=f"{e.__class__.__name__}: {str(e)}",
+                **TOOL_FAILED,
                 data={"results": []},
             )
 

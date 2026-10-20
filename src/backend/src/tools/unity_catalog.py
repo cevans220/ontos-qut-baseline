@@ -8,7 +8,7 @@ catalogs, schemas, and their metadata.
 from typing import Any, Dict, List, Optional
 
 from src.common.logging import get_logger
-from src.tools.base import BaseTool, ToolContext, ToolResult
+from src.tools.base import TOOL_FAILED, BaseTool, ToolContext, ToolResult
 
 logger = get_logger(__name__)
 
@@ -57,7 +57,7 @@ class GetCurrentUserTool(BaseTool):
             logger.error(f"[get_current_user] FAILED: {type(e).__name__}: {e}", exc_info=True)
             return ToolResult(
                 success=False,
-                error=f"{type(e).__name__}: {str(e)}"
+                **TOOL_FAILED
             )
 
 
@@ -144,7 +144,7 @@ class ListCatalogsTool(BaseTool):
             logger.error(f"[list_catalogs] FAILED: {type(e).__name__}: {e}", exc_info=True)
             return ToolResult(
                 success=False,
-                error=f"{type(e).__name__}: {str(e)}"
+                **TOOL_FAILED
             )
 
 
@@ -216,7 +216,7 @@ class GetCatalogDetailsTool(BaseTool):
             logger.error(f"[get_catalog_details] FAILED for {catalog_name}: {type(e).__name__}: {e}", exc_info=True)
             return ToolResult(
                 success=False,
-                error=f"{type(e).__name__}: {str(e)}",
+                **TOOL_FAILED,
                 data={"catalog_name": catalog_name}
             )
 
@@ -331,7 +331,7 @@ class ListSchemasTool(BaseTool):
             logger.error(f"[list_schemas] FAILED for {catalog_name}: {type(e).__name__}: {e}", exc_info=True)
             return ToolResult(
                 success=False,
-                error=f"{type(e).__name__}: {str(e)}",
+                **TOOL_FAILED,
                 data={"catalog_name": catalog_name}
             )
 
