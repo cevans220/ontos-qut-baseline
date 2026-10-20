@@ -274,6 +274,45 @@
     },
     "errors": {
       "own_owner_approval": "Questa approvazione spetta ai proprietari; non puoi approvare la tua stessa richiesta."
+    },
+    "entityTypes": {
+      "entity": "Entità",
+      "data_product": "Prodotto dati",
+      "data_contract": "Contratto dati",
+      "data_domain": "Dominio dati",
+      "data_asset_review": "Revisione degli asset di dati",
+      "access_grant": "Concessione di accesso",
+      "asset": "Asset"
+    },
+    "fields": {
+      "product_id": "ID del prodotto",
+      "product_name": "Nome del prodotto",
+      "contract_id": "ID del contratto",
+      "contract_name": "Nome del contratto",
+      "status": "Stato",
+      "from_status": "Stato di partenza",
+      "to_status": "Stato di destinazione",
+      "target_status": "Stato richiesto",
+      "current_status": "Stato attuale",
+      "justification": "Giustificazione",
+      "sunset_date": "Data di dismissione",
+      "replacement_id": "ID del sostituto",
+      "replacement_name": "Sostituto",
+      "requested_scope": "Ambito richiesto",
+      "publication_scope": "Ambito di pubblicazione",
+      "requester": "Richiedente",
+      "requester_message": "Messaggio del richiedente",
+      "reviewer_email": "Revisore",
+      "requested_certification_level": "Livello di certificazione richiesto",
+      "certification_level": "Livello di certificazione",
+      "certification_notes": "Note di certificazione",
+      "asset_count": "Numero di asset",
+      "asset_fqns": "Asset",
+      "domain_id": "ID del dominio",
+      "project_id": "ID del progetto",
+      "project_name": "Progetto",
+      "name": "Nome",
+      "notes": "Note"
     }
   },
   "approvalWizard": {

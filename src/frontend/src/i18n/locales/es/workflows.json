@@ -274,6 +274,45 @@
     },
     "errors": {
       "own_owner_approval": "Esta aprobación corresponde a los propietarios; no puedes aprobar tu propia solicitud."
+    },
+    "entityTypes": {
+      "entity": "Entidad",
+      "data_product": "Producto de datos",
+      "data_contract": "Contrato de datos",
+      "data_domain": "Dominio de datos",
+      "data_asset_review": "Revisión de activos de datos",
+      "access_grant": "Concesión de acceso",
+      "asset": "Activo"
+    },
+    "fields": {
+      "product_id": "ID del producto",
+      "product_name": "Nombre del producto",
+      "contract_id": "ID del contrato",
+      "contract_name": "Nombre del contrato",
+      "status": "Estado",
+      "from_status": "Estado de origen",
+      "to_status": "Estado de destino",
+      "target_status": "Estado solicitado",
+      "current_status": "Estado actual",
+      "justification": "Justificación",
+      "sunset_date": "Fecha de retirada",
+      "replacement_id": "ID del reemplazo",
+      "replacement_name": "Reemplazo",
+      "requested_scope": "Alcance solicitado",
+      "publication_scope": "Alcance de publicación",
+      "requester": "Solicitante",
+      "requester_message": "Mensaje del solicitante",
+      "reviewer_email": "Revisor",
+      "requested_certification_level": "Nivel de certificación solicitado",
+      "certification_level": "Nivel de certificación",
+      "certification_notes": "Notas de certificación",
+      "asset_count": "Número de activos",
+      "asset_fqns": "Activos",
+      "domain_id": "ID del dominio",
+      "project_id": "ID del proyecto",
+      "project_name": "Proyecto",
+      "name": "Nombre",
+      "notes": "Notas"
     }
   },
   "approvalWizard": {

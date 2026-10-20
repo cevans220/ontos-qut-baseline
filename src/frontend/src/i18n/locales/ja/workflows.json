@@ -274,6 +274,45 @@
     },
     "errors": {
       "own_owner_approval": "この承認は所有者が行います。ご自身のリクエストは承認できません。"
+    },
+    "entityTypes": {
+      "entity": "エンティティ",
+      "data_product": "データ製品",
+      "data_contract": "データ契約",
+      "data_domain": "データドメイン",
+      "data_asset_review": "データ資産レビュー",
+      "access_grant": "アクセス付与",
+      "asset": "資産"
+    },
+    "fields": {
+      "product_id": "製品 ID",
+      "product_name": "製品名",
+      "contract_id": "契約 ID",
+      "contract_name": "契約名",
+      "status": "ステータス",
+      "from_status": "変更前のステータス",
+      "to_status": "変更後のステータス",
+      "target_status": "リクエストされたステータス",
+      "current_status": "現在のステータス",
+      "justification": "正当な理由",
+      "sunset_date": "提供終了日",
+      "replacement_id": "後継の ID",
+      "replacement_name": "後継",
+      "requested_scope": "リクエストされた範囲",
+      "publication_scope": "公開範囲",
+      "requester": "リクエスト者",
+      "requester_message": "リクエスト者のメッセージ",
+      "reviewer_email": "レビュー担当者",
+      "requested_certification_level": "リクエストされた認定レベル",
+      "certification_level": "認定レベル",
+      "certification_notes": "認定メモ",
+      "asset_count": "資産の数",
+      "asset_fqns": "資産",
+      "domain_id": "ドメイン ID",
+      "project_id": "プロジェクト ID",
+      "project_name": "プロジェクト",
+      "name": "名前",
+      "notes": "メモ"
     }
   },
   "approvalWizard": {

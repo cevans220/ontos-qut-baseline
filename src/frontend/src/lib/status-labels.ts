@@ -12,3 +12,19 @@ export function executionStatusLabel(status: string, t: TFunction): string {
 export function reviewStatusLabel(status: string, t: TFunction): string {
   return t(`data-asset-reviews:status.${status}`, { defaultValue: status });
 }
+
+/** A translate function, as `t` from useTranslation or a narrower one. */
+export type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+/**
+ * A data product's or data contract's lifecycle status (draft, proposed,
+ * under_review, approved, active, deprecated, retired, ...).
+ */
+export function lifecycleStatusLabel(
+  status: string,
+  entityType: string | undefined | null,
+  t: Translate,
+): string {
+  const ns = entityType?.toLowerCase() === 'data_contract' ? 'data-contracts' : 'data-products';
+  return t(`${ns}:status.${status.toLowerCase()}`, { defaultValue: status });
+}
