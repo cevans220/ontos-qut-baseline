@@ -372,6 +372,8 @@ export function WorkflowExecutionDialog({
 
   const shownExecution = stepResults ? { ...execution, step_executions: stepResults } : execution;
   const progress = workflow?.steps ? getStepsProgress(workflow.steps, shownExecution) : null;
+  // A finished execution has no current step: the backend still reports the last one it stopped at
+  const isActive = execution.status === 'paused' || execution.status === 'running';
   const progressText = !progress
     ? t('workflows:execution.stepsProgress', { done: execution.success_count, total: '?' })
     : progress.removed
@@ -427,7 +429,7 @@ export function WorkflowExecutionDialog({
                 {execution.status === 'paused' ? t('workflows:execution.summary.waitingAt') : t('workflows:execution.summary.progress')}
               </div>
               <div className="font-medium text-sm truncate">
-                {execution.current_step_name || progressText}
+                {isActive ? (execution.current_step_name || progressText) : progressText}
               </div>
             </Card>
           </div>
