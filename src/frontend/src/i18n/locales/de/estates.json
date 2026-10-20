@@ -105,7 +105,6 @@
     "backToEstateManager": "Zurück zum Estate-Manager",
     "backToListButton": "Zurück zur Liste",
     "configureSyncJob": "Synchronisierungsjob konfigurieren",
-    "editNotImplemented": "Funktion zum Bearbeiten von Estates wird noch implementiert",
     "syncEnabled": "Synchronisierung aktiviert",
     "syncDisabled": "Synchronisierung deaktiviert",
     "never": "Nie",
@@ -127,8 +126,12 @@
       "add": "Richtlinie hinzufügen",
       "resourceTypeLabel": "Ressourcentyp:",
       "rulesLabel": "Regeln ({{count}}):",
-      "filterBy": "Filtern nach",
-      "whereValue": "wobei Wert",
+      "ruleText": {
+        "equals": "Nach <b>{{filterType}}</b> filtern, wobei der Wert gleich <b>'{{value}}'</b> ist",
+        "contains": "Nach <b>{{filterType}}</b> filtern, wobei der Wert <b>'{{value}}'</b> enthält",
+        "starts_with": "Nach <b>{{filterType}}</b> filtern, wobei der Wert mit <b>'{{value}}'</b> beginnt",
+        "regex": "Nach <b>{{filterType}}</b> filtern, wobei der Wert dem regulären Ausdruck <b>'{{value}}'</b> entspricht"
+      },
       "noRules": "Für diese Richtlinie sind keine Regeln definiert.",
       "emptyHint": "Klicken Sie auf \"Richtlinie hinzufügen\", um mit der Freigabe von Ressourcen zu beginnen.",
       "editPolicyAlert": "Richtlinie bearbeiten: {{name}}",
@@ -190,6 +193,12 @@
       "operator": "Operator auswählen",
       "filterType": "z. B. Tag, Domäne, Status",
       "value": "z. B. finance, Active"
+    },
+    "operators": {
+      "equals": "Ist gleich",
+      "contains": "Enthält",
+      "starts_with": "Beginnt mit",
+      "regex": "Entspricht Regex"
     },
     "validation": {
       "nameMin": "Der Richtlinienname muss mindestens 3 Zeichen lang sein",

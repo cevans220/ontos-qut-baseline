@@ -105,7 +105,6 @@
     "backToEstateManager": "Torna al Gestore Estate",
     "backToListButton": "Torna all'Elenco",
     "configureSyncJob": "Configura Job di Sincronizzazione",
-    "editNotImplemented": "Funzionalità di Modifica Estate da implementare",
     "syncEnabled": "Sincronizzazione Abilitata",
     "syncDisabled": "Sincronizzazione Disabilitata",
     "never": "Mai",
@@ -127,8 +126,12 @@
       "add": "Aggiungi Politica",
       "resourceTypeLabel": "Tipo di Risorsa:",
       "rulesLabel": "Regole ({{count}}):",
-      "filterBy": "Filtra per",
-      "whereValue": "dove il valore",
+      "ruleText": {
+        "equals": "Filtra per <b>{{filterType}}</b> dove il valore è uguale a <b>'{{value}}'</b>",
+        "contains": "Filtra per <b>{{filterType}}</b> dove il valore contiene <b>'{{value}}'</b>",
+        "starts_with": "Filtra per <b>{{filterType}}</b> dove il valore inizia con <b>'{{value}}'</b>",
+        "regex": "Filtra per <b>{{filterType}}</b> dove il valore corrisponde all'espressione regolare <b>'{{value}}'</b>"
+      },
       "noRules": "Nessuna regola definita per questa politica.",
       "emptyHint": "Clicca su \"Aggiungi Politica\" per iniziare a condividere risorse.",
       "editPolicyAlert": "Modifica politica: {{name}}",
@@ -190,6 +193,12 @@
       "operator": "Seleziona operatore",
       "filterType": "es. tag, dominio, stato",
       "value": "es. finance, Attivo"
+    },
+    "operators": {
+      "equals": "È uguale a",
+      "contains": "Contiene",
+      "starts_with": "Inizia con",
+      "regex": "Corrisponde alla regex"
     },
     "validation": {
       "nameMin": "Il nome della politica deve contenere almeno 3 caratteri",

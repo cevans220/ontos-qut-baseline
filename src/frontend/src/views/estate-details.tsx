@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 import { useApi } from '@/hooks/use-api';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,7 @@ import { Separator } from '@/components/ui/separator';
 import { ArrowLeft, Globe, Edit3, PlusCircle, Trash2, Share2, Database, Zap, ZapOff, Settings2, ShieldCheck, ListFilter } from 'lucide-react';
 import useBreadcrumbStore from '@/stores/breadcrumb-store';
 import { DetailViewSkeleton } from '@/components/common/list-view-skeleton';
+import { buildEstateEditPath } from '@/lib/estate-paths';
 import AddSharingPolicyDialog from '@/components/estates/add-sharing-policy-dialog';
 
 import {
@@ -187,7 +188,7 @@ export default function EstateDetailsView() {
             <Button variant="outline" size="sm">
                 <Settings2 className="mr-2 h-4 w-4" /> {t('estates:details.configureSyncJob')}
             </Button>
-            <Button variant="outline" size="sm" onClick={() => alert(t('estates:details.editNotImplemented'))}>
+            <Button variant="outline" size="sm" onClick={() => navigate(buildEstateEditPath(estate.id))}>
                 <Edit3 className="mr-2 h-4 w-4" /> {t('estates:editEstate')}
             </Button>
         </div>
@@ -293,7 +294,13 @@ export default function EstateDetailsView() {
                         <ul className="list-disc list-inside pl-2 space-y-1 text-sm text-muted-foreground">
                         {policy.rules.map((rule, ruleIndex) => (
                             <li key={ruleIndex}>
-                            {t('estates:details.policies.filterBy')} <span className="font-medium text-foreground">{rule.filter_type}</span> {t('estates:details.policies.whereValue')} <span className="font-medium text-foreground">{rule.operator.replace('_', ' ')}</span> <span className="font-medium text-foreground">'{rule.filter_value}'</span>
+                            <Trans
+                              t={t}
+                              i18nKey={`estates:details.policies.ruleText.${rule.operator}`}
+                              defaults={`${rule.filter_type} ${rule.operator} '${rule.filter_value}'`}
+                              values={{ filterType: rule.filter_type, value: rule.filter_value }}
+                              components={{ b: <span className="font-medium text-foreground" /> }}
+                            />
                             </li>
                         ))}
                         </ul>

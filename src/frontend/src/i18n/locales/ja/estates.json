@@ -105,7 +105,6 @@
     "backToEstateManager": "エステートマネージャーに戻る",
     "backToListButton": "一覧に戻る",
     "configureSyncJob": "同期ジョブを構成",
-    "editNotImplemented": "エステート編集機能は今後実装されます",
     "syncEnabled": "同期が有効",
     "syncDisabled": "同期が無効",
     "never": "なし",
@@ -127,8 +126,12 @@
       "add": "ポリシーを追加",
       "resourceTypeLabel": "リソースタイプ:",
       "rulesLabel": "ルール（{{count}}）:",
-      "filterBy": "フィルタ条件",
-      "whereValue": "値の条件",
+      "ruleText": {
+        "equals": "<b>{{filterType}}</b> で絞り込み：値が <b>'{{value}}'</b> に等しい",
+        "contains": "<b>{{filterType}}</b> で絞り込み：値に <b>'{{value}}'</b> を含む",
+        "starts_with": "<b>{{filterType}}</b> で絞り込み：値が <b>'{{value}}'</b> で始まる",
+        "regex": "<b>{{filterType}}</b> で絞り込み：値が正規表現 <b>'{{value}}'</b> に一致する"
+      },
       "noRules": "このポリシーにはルールが定義されていません。",
       "emptyHint": "「ポリシーを追加」をクリックしてリソースの共有を開始してください。",
       "editPolicyAlert": "ポリシーを編集: {{name}}",
@@ -190,6 +193,12 @@
       "operator": "演算子を選択",
       "filterType": "例: tag、domain、status",
       "value": "例: finance、Active"
+    },
+    "operators": {
+      "equals": "等しい",
+      "contains": "含む",
+      "starts_with": "で始まる",
+      "regex": "正規表現に一致"
     },
     "validation": {
       "nameMin": "ポリシー名は3文字以上である必要があります",

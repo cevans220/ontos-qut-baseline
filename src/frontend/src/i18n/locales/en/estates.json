@@ -105,7 +105,6 @@
     "backToEstateManager": "Back to Estate Manager",
     "backToListButton": "Back to List",
     "configureSyncJob": "Configure Sync Job",
-    "editNotImplemented": "Edit Estate functionality to be implemented",
     "syncEnabled": "Sync Enabled",
     "syncDisabled": "Sync Disabled",
     "never": "Never",
@@ -127,8 +126,12 @@
       "add": "Add Policy",
       "resourceTypeLabel": "Resource Type:",
       "rulesLabel": "Rules ({{count}}):",
-      "filterBy": "Filter by",
-      "whereValue": "where value",
+      "ruleText": {
+        "equals": "Filter by <b>{{filterType}}</b> where the value equals <b>'{{value}}'</b>",
+        "contains": "Filter by <b>{{filterType}}</b> where the value contains <b>'{{value}}'</b>",
+        "starts_with": "Filter by <b>{{filterType}}</b> where the value starts with <b>'{{value}}'</b>",
+        "regex": "Filter by <b>{{filterType}}</b> where the value matches the regular expression <b>'{{value}}'</b>"
+      },
       "noRules": "No rules defined for this policy.",
       "emptyHint": "Click \"Add Policy\" to start sharing resources.",
       "editPolicyAlert": "Edit policy: {{name}}",
@@ -190,6 +193,12 @@
       "operator": "Select operator",
       "filterType": "e.g., tag, domain, status",
       "value": "e.g., finance, Active"
+    },
+    "operators": {
+      "equals": "Equals",
+      "contains": "Contains",
+      "starts_with": "Starts with",
+      "regex": "Matches regex"
     },
     "validation": {
       "nameMin": "Policy name must be at least 3 characters",

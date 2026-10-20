@@ -24,7 +24,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ESTATE_EDIT_PARAM } from '@/lib/estate-paths';
 import useBreadcrumbStore from '@/stores/breadcrumb-store';
 import { ViewModeToggle } from '@/components/common/view-mode-toggle';
 import { DataTable } from '@/components/ui/data-table';
@@ -52,6 +53,7 @@ export default function EstateManager() {
   const { toast } = useToast();
   const { get, post, put, delete: deleteEstateApi } = useApi();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const setStaticSegments = useBreadcrumbStore((state) => state.setStaticSegments);
   const setDynamicTitle = useBreadcrumbStore((state) => state.setDynamicTitle);
   const [estates, setEstates] = useState<Estate[]>([]);
@@ -84,6 +86,18 @@ export default function EstateManager() {
         setDynamicTitle(null);
     };
   }, [setStaticSegments, setDynamicTitle]);
+
+  // The estate page's "Edit Estate" opens this list with ?edit=<id>
+  const editId = searchParams.get(ESTATE_EDIT_PARAM);
+  useEffect(() => {
+    if (!editId || isLoading) return;
+    const estate = estates.find((e) => e.id === editId);
+    if (estate) openDialog(estate);
+    const next = new URLSearchParams(searchParams);
+    next.delete(ESTATE_EDIT_PARAM);
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editId, isLoading, estates]);
 
   const fetchEstates = async () => {
     try {

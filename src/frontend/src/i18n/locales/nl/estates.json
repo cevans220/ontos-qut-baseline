@@ -105,7 +105,6 @@
     "backToEstateManager": "Terug naar Estate Manager",
     "backToListButton": "Terug naar lijst",
     "configureSyncJob": "Sync-taak configureren",
-    "editNotImplemented": "Functionaliteit voor het bewerken van estates wordt nog geïmplementeerd",
     "syncEnabled": "Sync ingeschakeld",
     "syncDisabled": "Sync uitgeschakeld",
     "never": "Nooit",
@@ -127,8 +126,12 @@
       "add": "Beleid toevoegen",
       "resourceTypeLabel": "Resourcetype:",
       "rulesLabel": "Regels ({{count}}):",
-      "filterBy": "Filteren op",
-      "whereValue": "waar waarde",
+      "ruleText": {
+        "equals": "Filteren op <b>{{filterType}}</b> waarbij de waarde gelijk is aan <b>'{{value}}'</b>",
+        "contains": "Filteren op <b>{{filterType}}</b> waarbij de waarde <b>'{{value}}'</b> bevat",
+        "starts_with": "Filteren op <b>{{filterType}}</b> waarbij de waarde begint met <b>'{{value}}'</b>",
+        "regex": "Filteren op <b>{{filterType}}</b> waarbij de waarde overeenkomt met de reguliere expressie <b>'{{value}}'</b>"
+      },
       "noRules": "Geen regels gedefinieerd voor dit beleid.",
       "emptyHint": "Klik op \"Beleid toevoegen\" om te beginnen met het delen van resources.",
       "editPolicyAlert": "Beleid bewerken: {{name}}",
@@ -190,6 +193,12 @@
       "operator": "Selecteer operator",
       "filterType": "bijv. tag, domein, status",
       "value": "bijv. finance, Actief"
+    },
+    "operators": {
+      "equals": "Is gelijk aan",
+      "contains": "Bevat",
+      "starts_with": "Begint met",
+      "regex": "Komt overeen met regex"
     },
     "validation": {
       "nameMin": "Beleidsnaam moet minimaal 3 tekens bevatten",

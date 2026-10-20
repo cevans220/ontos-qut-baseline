@@ -196,7 +196,7 @@ const AddSharingPolicyDialog: React.FC<AddSharingPolicyDialogProps> = ({
                             <SelectValue placeholder={t('estates:sharingPolicy.placeholders.operator')} />
                           </SelectTrigger>
                           <SelectContent>
-                            {sharingRuleOperatorValues.map(val => <SelectItem key={val} value={val}>{val.replace('_', ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}</SelectItem>)}
+                            {sharingRuleOperatorValues.map(val => <SelectItem key={val} value={val}>{t(`estates:sharingPolicy.operators.${val}`, { defaultValue: val })}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       )}

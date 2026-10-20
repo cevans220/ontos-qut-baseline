@@ -5,7 +5,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 import i18n from '@/i18n/config';
 import type { Estate } from '@/types/estate';
@@ -60,6 +60,11 @@ vi.mock('@/components/estates/add-sharing-policy-dialog', () => ({
   ),
 }));
 
+function ListPage() {
+  const location = useLocation();
+  return <p data-testid="estate-list">{location.search}</p>;
+}
+
 function renderPage() {
   api.get.mockResolvedValue({ data: estate });
   api.put.mockImplementation(async (_url: string, body: Estate) => ({ data: body }));
@@ -67,6 +72,7 @@ function renderPage() {
     <MemoryRouter initialEntries={['/estates/e-1']}>
       <Routes>
         <Route path="/estates/:estateId" element={<EstateDetailsView />} />
+        <Route path="/estate-manager" element={<ListPage />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -113,5 +119,33 @@ describe('EstateDetailsView policies', () => {
     expect(url).toBe('/api/estates/e-1');
     expect(body.import_policies.map((p: { name: string }) => p.name)).toEqual(['Shared terms', 'New concepts']);
     expect(body.export_policies.map((p: { name: string }) => p.name)).toEqual(['Active products']);
+  });
+});
+
+describe('EstateDetailsView rules and editing', () => {
+  it('shows a rule as one translated sentence', async () => {
+    await i18n.changeLanguage('pt');
+    renderPage();
+    const exports = await screen.findByTestId('estate-export-policies');
+
+    expect(within(exports).getByRole('listitem')).toHaveTextContent(
+      "Filtrar por status onde o valor é igual a 'active'",
+    );
+  });
+
+  it('says each operator in its own sentence', async () => {
+    const sentence = (operator: string) => i18n.t(`estates:details.policies.ruleText.${operator}`, {
+      filterType: 'tag', value: 'pii',
+    });
+    expect(sentence('starts_with')).toBe("Filter by <b>tag</b> where the value starts with <b>'pii'</b>");
+    await i18n.changeLanguage('de');
+    expect(sentence('contains')).toBe("Nach <b>tag</b> filtern, wobei der Wert <b>'pii'</b> enthält");
+  });
+
+  it('opens the edit dialog of the estate on the estate list', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Edit Estate/ }));
+
+    expect(await screen.findByTestId('estate-list')).toHaveTextContent('?edit=e-1');
   });
 });
