@@ -777,17 +777,24 @@ ON CONFLICT (id) DO NOTHING;
 -- ============================================================================
 
 INSERT INTO compliance_runs (id, policy_id, status, started_at, finished_at, success_count, failure_count, score) VALUES
-('01200101-0001-4000-8000-000000000001', '01100001-0001-4000-8000-000000000001', 'completed', NOW() - INTERVAL '7 days', NOW() - INTERVAL '7 days' + INTERVAL '12 minutes', 6, 1, 0.857),
-('01200102-0001-4000-8000-000000000002', '01100002-0001-4000-8000-000000000002', 'completed', NOW() - INTERVAL '5 days', NOW() - INTERVAL '5 days' + INTERVAL '8 minutes',  4, 0, 1.000),
-('01200103-0001-4000-8000-000000000003', '01100004-0001-4000-8000-000000000004', 'completed', NOW() - INTERVAL '1 days', NOW() - INTERVAL '1 days' + INTERVAL '4 minutes',  2, 1, 0.667)
-ON CONFLICT (id) DO NOTHING;
+('01200101-0001-4000-8000-000000000001', '01100001-0001-4000-8000-000000000001', 'succeeded', NOW() - INTERVAL '7 days', NOW() - INTERVAL '7 days' + INTERVAL '12 minutes', 1, 1, 50),
+('01200102-0001-4000-8000-000000000002', '01100002-0001-4000-8000-000000000002', 'succeeded', NOW() - INTERVAL '5 days', NOW() - INTERVAL '5 days' + INTERVAL '8 minutes', 2, 1, 66.67),
+('01200103-0001-4000-8000-000000000003', '01100004-0001-4000-8000-000000000004', 'succeeded', NOW() - INTERVAL '1 days', NOW() - INTERVAL '1 days' + INTERVAL '4 minutes', 2, 0, 100)
+ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, success_count = EXCLUDED.success_count,
+  failure_count = EXCLUDED.failure_count, score = EXCLUDED.score;
+
+-- Sample results of a real run of each policy above. A load replaces the ones an earlier
+-- version of this preset inserted for the same sample runs.
+DELETE FROM compliance_results WHERE run_id IN ('01200101-0001-4000-8000-000000000001', '01200102-0001-4000-8000-000000000002', '01200103-0001-4000-8000-000000000003');
 
 INSERT INTO compliance_results (id, run_id, object_type, object_id, object_name, passed, message, created_at) VALUES
-('01300101-0001-4000-8000-000000000001', '01200101-0001-4000-8000-000000000001', 'data_product', '00700001-0001-4000-8000-000000000001', 'Patient 360 View v1',                 true,  'PHI de-identification verified.', NOW() - INTERVAL '7 days'),
-('01300102-0001-4000-8000-000000000002', '01200101-0001-4000-8000-000000000001', 'data_product', '00700004-0001-4000-8000-000000000004', 'Real-World Evidence Platform v1',     true,  'Limited Data Set certification on file.', NOW() - INTERVAL '7 days'),
-('01300103-0001-4000-8000-000000000003', '01200101-0001-4000-8000-000000000001', 'data_contract','00400003-0001-4000-8000-000000000003', 'Adverse Event Reports Contract',      false, 'Free-text narrative may contain residual PHI; manual review queued.', NOW() - INTERVAL '7 days'),
-('01300104-0001-4000-8000-000000000004', '01200102-0001-4000-8000-000000000002', 'data_product', '00700002-0001-4000-8000-000000000002', 'Clinical Trial Analytics v1',         true,  'Audit trail validated against 21 CFR Part 11.', NOW() - INTERVAL '5 days'),
-('01300105-0001-4000-8000-000000000005', '01200103-0001-4000-8000-000000000003', 'data_product', '00700003-0001-4000-8000-000000000003', 'Drug Safety Signal Detection v1',     false, 'One ICSR exceeded the 15-day reporting window (case ICSR-2025-4521).', NOW() - INTERVAL '1 days')
+('01300101-0001-4000-8000-000000000001', '01200101-0001-4000-8000-000000000001', 'data_product', '00700003-0001-4000-8000-000000000003', 'Drug Safety Signal Detection v1', false, 'Assertion failed for data_product Drug Safety Signal Detection v1', NOW() - INTERVAL '7 days'),
+('01300102-0001-4000-8000-000000000002', '01200101-0001-4000-8000-000000000001', 'data_product', '00700001-0001-4000-8000-000000000001', 'Patient 360 View v1', true, NULL, NOW() - INTERVAL '7 days'),
+('01300103-0001-4000-8000-000000000003', '01200102-0001-4000-8000-000000000002', 'data_product', '00700002-0001-4000-8000-000000000002', 'Clinical Trial Analytics v1', true, NULL, NOW() - INTERVAL '5 days'),
+('01300104-0001-4000-8000-000000000004', '01200102-0001-4000-8000-000000000002', 'data_product', '00700003-0001-4000-8000-000000000003', 'Drug Safety Signal Detection v1', true, NULL, NOW() - INTERVAL '5 days'),
+('01300105-0001-4000-8000-000000000005', '01200102-0001-4000-8000-000000000002', 'data_product', '00700004-0001-4000-8000-000000000004', 'Real-World Evidence Platform v1', false, 'Assertion failed for data_product Real-World Evidence Platform v1', NOW() - INTERVAL '5 days'),
+('01300106-0001-4000-8000-000000000006', '01200103-0001-4000-8000-000000000003', 'data_contract', '00400003-0001-4000-8000-000000000003', 'Adverse Event Reporting Contract', true, NULL, NOW() - INTERVAL '1 days'),
+('01300107-0001-4000-8000-000000000007', '01200103-0001-4000-8000-000000000003', 'data_contract', '00400002-0001-4000-8000-000000000002', 'Clinical Trial Data Contract', true, NULL, NOW() - INTERVAL '1 days')
 ON CONFLICT (id) DO NOTHING;
 
 

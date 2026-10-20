@@ -633,33 +633,41 @@ WHERE id = '01100005-0000-4000-8000-000000000005'
 INSERT INTO compliance_runs (id, policy_id, status, started_at, finished_at, success_count, failure_count, score) VALUES
 ('01200001-0000-4000-8000-000000000001', '01100001-0000-4000-8000-000000000001', 'succeeded', NOW() - INTERVAL '1 day', NOW() - INTERVAL '1 day' + INTERVAL '1 minute', 4, 2, 66.7),
 ('01200002-0000-4000-8000-000000000002', '01100001-0000-4000-8000-000000000001', 'succeeded', NOW() - INTERVAL '2 days', NOW() - INTERVAL '2 days' + INTERVAL '2 minutes', 5, 1, 83.3),
-('01200003-0000-4000-8000-000000000003', '01100002-0000-4000-8000-000000000002', 'succeeded', NOW() - INTERVAL '1 day', NOW() - INTERVAL '1 day' + INTERVAL '40 seconds', 4, 1, 80.0),
-('01200004-0000-4000-8000-000000000004', '01100003-0000-4000-8000-000000000003', 'succeeded', NOW() - INTERVAL '3 days', NOW() - INTERVAL '3 days' + INTERVAL '1 minute 10 seconds', 9, 1, 90.0),
-('01200005-0000-4000-8000-000000000005', '01100004-0000-4000-8000-000000000004', 'succeeded', NOW() - INTERVAL '4 days', NOW() - INTERVAL '4 days' + INTERVAL '35 seconds', 3, 1, 75.0),
-('01200006-0000-4000-8000-000000000006', '01100005-0000-4000-8000-000000000005', 'succeeded', NOW() - INTERVAL '5 days', NOW() - INTERVAL '5 days' + INTERVAL '28 seconds', 8, 1, 88.9)
-
-ON CONFLICT (id) DO NOTHING;
+('01200003-0000-4000-8000-000000000003', '01100002-0000-4000-8000-000000000002', 'succeeded', NOW() - INTERVAL '1 day', NOW() - INTERVAL '1 day' + INTERVAL '40 seconds', 1, 1, 50),
+('01200004-0000-4000-8000-000000000004', '01100003-0000-4000-8000-000000000003', 'succeeded', NOW() - INTERVAL '3 days', NOW() - INTERVAL '3 days' + INTERVAL '1 minute 10 seconds', 2, 1, 66.67),
+('01200005-0000-4000-8000-000000000005', '01100004-0000-4000-8000-000000000004', 'succeeded', NOW() - INTERVAL '4 days', NOW() - INTERVAL '4 days' + INTERVAL '35 seconds', 1, 1, 50),
+('01200006-0000-4000-8000-000000000006', '01100005-0000-4000-8000-000000000005', 'succeeded', NOW() - INTERVAL '5 days', NOW() - INTERVAL '5 days' + INTERVAL '28 seconds', 4, 3, 57.14)
+ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, success_count = EXCLUDED.success_count,
+  failure_count = EXCLUDED.failure_count, score = EXCLUDED.score;
 
 
 -- ============================================================================
 -- 8c. COMPLIANCE RESULTS (type=013)
 -- ============================================================================
 
+-- Sample results of a real run of each policy above. A load replaces the ones an earlier
+-- version of this preset inserted for the same sample runs.
+DELETE FROM compliance_results WHERE run_id IN ('01200003-0000-4000-8000-000000000003', '01200004-0000-4000-8000-000000000004', '01200005-0000-4000-8000-000000000005', '01200006-0000-4000-8000-000000000006');
+
 INSERT INTO compliance_results (id, run_id, object_type, object_id, object_name, passed, message, created_at) VALUES
 ('01300001-0000-4000-8000-000000000001', '01200001-0000-4000-8000-000000000001', 'catalog', 'analytics', 'analytics', true, NULL, NOW()),
 ('01300002-0000-4000-8000-000000000002', '01200001-0000-4000-8000-000000000001', 'schema', 'customer_360', 'customer_360', true, NULL, NOW()),
 ('01300003-0000-4000-8000-000000000003', '01200001-0000-4000-8000-000000000001', 'table', 'Orders', 'Orders', false, 'Expected name to match ^[a-z][a-z0-9_]*$', NOW()),
 ('01300004-0000-4000-8000-000000000004', '01200001-0000-4000-8000-000000000001', 'view', 'orders_view', 'orders_view', false, 'Views must start with v_', NOW()),
-('01300005-0000-4000-8000-000000000005', '01200003-0000-4000-8000-000000000003', 'dataset', 'customer.emails', 'customer.emails', true, NULL, NOW()),
-('01300006-0000-4000-8000-000000000006', '01200003-0000-4000-8000-000000000003', 'dataset', 'customer.addresses', 'customer.addresses', true, NULL, NOW()),
-('01300007-0000-4000-8000-000000000007', '01200003-0000-4000-8000-000000000003', 'dataset', 'customer.cards', 'customer.cards', false, 'Encryption required: AES256', NOW()),
-('01300008-0000-4000-8000-000000000008', '01200004-0000-4000-8000-000000000004', 'dataset', 'sales.orders_daily', 'sales.orders_daily', true, NULL, NOW()),
-('01300009-0000-4000-8000-000000000009', '01200004-0000-4000-8000-000000000004', 'dataset', 'sales.orders_raw', 'sales.orders_raw', false, 'completeness=0.91 < 0.95', NOW()),
-('0130000a-0000-4000-8000-000000000010', '01200005-0000-4000-8000-000000000005', 'dataset', 'hr.salaries', 'hr.salaries', true, NULL, NOW()),
-('0130000b-0000-4000-8000-000000000011', '01200005-0000-4000-8000-000000000005', 'dataset', 'finance.payments', 'finance.payments', false, 'access_level must be restricted', NOW()),
-('0130000c-0000-4000-8000-000000000012', '01200006-0000-4000-8000-000000000006', 'dataset', 'bi.product_dim', 'bi.product_dim', true, NULL, NOW()),
-('0130000d-0000-4000-8000-000000000013', '01200006-0000-4000-8000-000000000006', 'dataset', 'bi.inventory_fact', 'bi.inventory_fact', false, 'last_updated older than 1 day', NOW())
-
+('01300005-0000-4000-8000-000000000005', '01200003-0000-4000-8000-000000000003', 'data_product', '00700006-0000-4000-8000-000000000006', 'Customer Marketing Recommendations v1', true, NULL, NOW()),
+('01300006-0000-4000-8000-000000000006', '01200003-0000-4000-8000-000000000003', 'data_product', '00700002-0000-4000-8000-000000000002', 'Prepared Sales Transactions v1', false, 'Assertion failed for data_product Prepared Sales Transactions v1', NOW()),
+('01300007-0000-4000-8000-000000000007', '01200004-0000-4000-8000-000000000004', 'data_contract', '00400001-0000-4000-8000-000000000001', 'Customer Data Contract', true, NULL, NOW()),
+('01300008-0000-4000-8000-000000000008', '01200004-0000-4000-8000-000000000004', 'data_contract', '00400003-0000-4000-8000-000000000003', 'Data Sharing Agreement', false, 'Assertion failed for data_contract Data Sharing Agreement', NOW()),
+('01300009-0000-4000-8000-000000000009', '01200004-0000-4000-8000-000000000004', 'data_contract', '00400004-0000-4000-8000-000000000004', 'IoT Device Data Contract', true, NULL, NOW()),
+('0130000a-0000-4000-8000-000000000010', '01200005-0000-4000-8000-000000000005', 'data_contract', '00400001-0000-4000-8000-000000000001', 'Customer Data Contract', false, 'Assertion failed for data_contract Customer Data Contract', NOW()),
+('0130000b-0000-4000-8000-000000000011', '01200005-0000-4000-8000-000000000005', 'data_contract', '00400006-0000-4000-8000-000000000006', 'Financial Transactions Contract', true, NULL, NOW()),
+('0130000c-0000-4000-8000-000000000012', '01200006-0000-4000-8000-000000000006', 'data_contract', '00400001-0000-4000-8000-000000000001', 'Customer Data Contract', true, NULL, NOW()),
+('0130000d-0000-4000-8000-000000000013', '01200006-0000-4000-8000-000000000006', 'data_contract', '00400003-0000-4000-8000-000000000003', 'Data Sharing Agreement', true, NULL, NOW()),
+('0130000e-0000-4000-8000-000000000014', '01200006-0000-4000-8000-000000000006', 'data_contract', '00400006-0000-4000-8000-000000000006', 'Financial Transactions Contract', true, NULL, NOW()),
+('0130000f-0000-4000-8000-000000000015', '01200006-0000-4000-8000-000000000006', 'data_contract', '00400007-0000-4000-8000-000000000007', 'Inventory Management Contract', false, 'Assertion failed for data_contract Inventory Management Contract', NOW()),
+('01300010-0000-4000-8000-000000000016', '01200006-0000-4000-8000-000000000006', 'data_contract', '00400004-0000-4000-8000-000000000004', 'IoT Device Data Contract', true, NULL, NOW()),
+('01300011-0000-4000-8000-000000000017', '01200006-0000-4000-8000-000000000006', 'data_contract', '00400005-0000-4000-8000-000000000005', 'IoT Sensor Data Contract', false, 'Assertion failed for data_contract IoT Sensor Data Contract', NOW()),
+('01300012-0000-4000-8000-000000000018', '01200006-0000-4000-8000-000000000006', 'data_contract', '00400002-0000-4000-8000-000000000002', 'Product Catalog Contract', false, 'Assertion failed for data_contract Product Catalog Contract', NOW())
 ON CONFLICT (id) DO NOTHING;
 
 
