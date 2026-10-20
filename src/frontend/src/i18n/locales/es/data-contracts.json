@@ -55,7 +55,8 @@
     "uploadFailed": "Error en la subida",
     "uploadOdpsHint": "\n\nSugerencia: Esta página es para Contratos de Datos (formato ODCS). Si intentas subir un Producto de Datos (formato ODPS), usa la página de Productos de Datos.",
     "uploadSuccess": "Contrato subido correctamente",
-    "uploadSuccessCount": "{{count}} contrato(s) importado(s) correctamente"
+    "uploadSuccessCount_one": "{{count}} contrato importado correctamente",
+    "uploadSuccessCount_other": "{{count}} contratos importados correctamente"
   },
   "status": {
     "draft": "Borrador",

@@ -55,7 +55,8 @@
     "uploadFailed": "Échec du téléversement",
     "uploadOdpsHint": "\n\nAstuce : cette page concerne les contrats de données (format ODCS). Si vous essayez de téléverser un produit de données (format ODPS), veuillez plutôt utiliser la page Produits de données.",
     "uploadSuccess": "Contrat téléversé avec succès",
-    "uploadSuccessCount": "{{count}} contrat(s) importé(s) avec succès"
+    "uploadSuccessCount_one": "{{count}} contrat importé avec succès",
+    "uploadSuccessCount_other": "{{count}} contrats importés avec succès"
   },
   "status": {
     "draft": "Brouillon",

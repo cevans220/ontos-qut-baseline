@@ -55,7 +55,8 @@
     "uploadFailed": "アップロードに失敗しました",
     "uploadOdpsHint": "\n\nヒント: このページはデータコントラクト（ODCS 形式）用です。データプロダクト（ODPS 形式）をアップロードする場合は、代わりにデータプロダクトのページを使用してください。",
     "uploadSuccess": "コントラクトをアップロードしました",
-    "uploadSuccessCount": "{{count}} 件の契約をインポートしました"
+    "uploadSuccessCount_one": "{{count}} 件の契約をインポートしました",
+    "uploadSuccessCount_other": "{{count}} 件の契約をインポートしました"
   },
   "status": {
     "draft": "下書き",

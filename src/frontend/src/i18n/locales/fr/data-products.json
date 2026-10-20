@@ -49,7 +49,10 @@
   },
   "upload": {
     "success": "Téléchargement Réussi",
-    "successMessage": "{{filename}} traité avec succès. {{count}} produit(s) traité(s).",
+    "successMessage_one": "{{filename}} traité avec succès. {{count}} produit traité.",
+    "successMessage_other": "{{filename}} traité avec succès. {{count}} produits traités.",
+    "successMessage_files_one": "{{files}} fichiers traités avec succès. {{count}} produit traité.",
+    "successMessage_files_other": "{{files}} fichiers traités avec succès. {{count}} produits traités.",
     "partialSuccess": "Importé avec des problèmes",
     "failed": "Téléchargement Échoué",
     "unexpectedError": "Une erreur inattendue s'est produite lors du téléchargement.",

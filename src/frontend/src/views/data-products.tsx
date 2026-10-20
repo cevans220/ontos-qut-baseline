@@ -15,6 +15,7 @@ import {
 import { useApi } from '@/hooks/use-api';
 import { DataProduct, DataProductStatus, DataProductOwner } from '@/types/data-product';
 import { BatchImportResult, summarizeImport } from '@/types/import-results';
+import { productUploadSuccessText } from '@/lib/upload-text';
 import { useToast } from "@/hooks/use-toast"
 import { Toaster } from "@/components/ui/toaster"
 import { RelativeDate } from '@/components/common/relative-date';
@@ -453,7 +454,6 @@ export default function DataProducts() {
     // #853: id adoption + duplicate handling.
     formData.append('adopt_ids', String(adoptIds));
     formData.append('on_duplicate', duplicatesAsNew ? 'new' : 'skip');
-    const fileLabel = files.length === 1 ? files[0].name : `${files.length} files`;
     try {
       // The upload endpoint returns a truthful BatchImportResult summary
       // (created/skipped/failed) across all files and entities.
@@ -496,7 +496,7 @@ export default function DataProducts() {
         setUploadDialogOpen(false);
         toast({
           title: t('upload.success'),
-          description: t('upload.successMessage', { filename: fileLabel, count: result?.created ?? 0 }),
+          description: productUploadSuccessText(files, result?.created ?? 0, t),
         });
       }
       await fetchProducts();

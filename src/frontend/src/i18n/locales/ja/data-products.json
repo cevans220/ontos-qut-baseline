@@ -49,7 +49,10 @@
   },
   "upload": {
     "success": "アップロード成功",
-    "successMessage": "{{filename}}の処理が完了しました。{{count}}個の製品が処理されました。",
+    "successMessage_one": "{{filename}}の処理が完了しました。{{count}}個の製品が処理されました。",
+    "successMessage_other": "{{filename}}の処理が完了しました。{{count}}個の製品が処理されました。",
+    "successMessage_files_one": "{{files}}個のファイルの処理が完了しました。{{count}}個の製品が処理されました。",
+    "successMessage_files_other": "{{files}}個のファイルの処理が完了しました。{{count}}個の製品が処理されました。",
     "partialSuccess": "問題ありでインポートしました",
     "failed": "アップロード失敗",
     "unexpectedError": "アップロード中に予期しないエラーが発生しました。",

@@ -55,7 +55,8 @@
     "uploadFailed": "Hochladen fehlgeschlagen",
     "uploadOdpsHint": "\n\nHinweis: Diese Seite ist für Datenverträge (ODCS-Format). Wenn Sie ein Datenprodukt (ODPS-Format) hochladen möchten, verwenden Sie stattdessen die Seite Datenprodukte.",
     "uploadSuccess": "Vertrag erfolgreich hochgeladen",
-    "uploadSuccessCount": "{{count}} Vertrag/Verträge erfolgreich importiert"
+    "uploadSuccessCount_one": "{{count}} Vertrag erfolgreich importiert",
+    "uploadSuccessCount_other": "{{count}} Verträge erfolgreich importiert"
   },
   "status": {
     "draft": "Entwurf",

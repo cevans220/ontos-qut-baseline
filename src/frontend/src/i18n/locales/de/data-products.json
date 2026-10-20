@@ -49,7 +49,10 @@
   },
   "upload": {
     "success": "Upload erfolgreich",
-    "successMessage": "{{filename}} erfolgreich verarbeitet. {{count}} Produkt(e) verarbeitet.",
+    "successMessage_one": "{{filename}} erfolgreich verarbeitet. {{count}} Produkt verarbeitet.",
+    "successMessage_other": "{{filename}} erfolgreich verarbeitet. {{count}} Produkte verarbeitet.",
+    "successMessage_files_one": "{{files}} Dateien erfolgreich verarbeitet. {{count}} Produkt verarbeitet.",
+    "successMessage_files_other": "{{files}} Dateien erfolgreich verarbeitet. {{count}} Produkte verarbeitet.",
     "partialSuccess": "Mit Problemen importiert",
     "failed": "Upload fehlgeschlagen",
     "unexpectedError": "Ein unerwarteter Fehler ist beim Upload aufgetreten.",

@@ -55,7 +55,8 @@
     "uploadFailed": "Uploaden mislukt",
     "uploadOdpsHint": "\n\nTip: Deze pagina is voor datacontracten (ODCS-formaat). Als u een dataproduct (ODPS-formaat) probeert te uploaden, gebruik dan de pagina Dataproducten.",
     "uploadSuccess": "Contract succesvol geüpload",
-    "uploadSuccessCount": "{{count}} contract(en) geïmporteerd"
+    "uploadSuccessCount_one": "{{count}} contract geïmporteerd",
+    "uploadSuccessCount_other": "{{count}} contracten geïmporteerd"
   },
   "status": {
     "draft": "Concept",

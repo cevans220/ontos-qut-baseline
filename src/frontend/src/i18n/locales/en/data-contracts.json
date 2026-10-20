@@ -55,7 +55,8 @@
     "uploadFailed": "Upload failed",
     "uploadOdpsHint": "\n\nHint: This page is for Data Contracts (ODCS format). If you're trying to upload a Data Product (ODPS format), please use the Data Products page instead.",
     "uploadSuccess": "Contract uploaded successfully",
-    "uploadSuccessCount": "{{count}} contract(s) imported successfully"
+    "uploadSuccessCount_one": "{{count}} contract imported successfully",
+    "uploadSuccessCount_other": "{{count}} contracts imported successfully"
   },
   "status": {
     "draft": "Draft",

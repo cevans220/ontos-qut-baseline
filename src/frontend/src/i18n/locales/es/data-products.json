@@ -49,7 +49,10 @@
   },
   "upload": {
     "success": "Carga Exitosa",
-    "successMessage": "{{filename}} procesado exitosamente. {{count}} producto(s) procesado(s).",
+    "successMessage_one": "{{filename}} procesado exitosamente. {{count}} producto procesado.",
+    "successMessage_other": "{{filename}} procesado exitosamente. {{count}} productos procesados.",
+    "successMessage_files_one": "{{files}} archivos procesados exitosamente. {{count}} producto procesado.",
+    "successMessage_files_other": "{{files}} archivos procesados exitosamente. {{count}} productos procesados.",
     "partialSuccess": "Importado con incidencias",
     "failed": "Carga Fallida",
     "unexpectedError": "Ocurrió un error inesperado durante la carga.",

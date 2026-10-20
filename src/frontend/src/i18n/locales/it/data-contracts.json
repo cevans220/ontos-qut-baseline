@@ -55,7 +55,8 @@
     "uploadFailed": "Caricamento non riuscito",
     "uploadOdpsHint": "\n\nSuggerimento: questa pagina è per i Contratti Dati (formato ODCS). Se stai cercando di caricare un Prodotto Dati (formato ODPS), usa invece la pagina Prodotti Dati.",
     "uploadSuccess": "Contratto caricato con successo",
-    "uploadSuccessCount": "{{count}} contratto/i importato/i correttamente"
+    "uploadSuccessCount_one": "{{count}} contratto importato correttamente",
+    "uploadSuccessCount_other": "{{count}} contratti importati correttamente"
   },
   "status": {
     "draft": "Bozza",

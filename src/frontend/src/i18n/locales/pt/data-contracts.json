@@ -55,7 +55,8 @@
     "uploadFailed": "Falha no envio",
     "uploadOdpsHint": " \n\nDica: Esta página é para Contratos de Dados (formato ODCS). Se você está tentando enviar um Produto de Dados (formato ODPS), use a página de Produtos de Dados.",
     "uploadSuccess": "Contrato enviado com sucesso",
-    "uploadSuccessCount": "{{count}} contrato(s) importado(s) com sucesso"
+    "uploadSuccessCount_one": "{{count}} contrato importado com sucesso",
+    "uploadSuccessCount_other": "{{count}} contratos importados com sucesso"
   },
   "status": {
     "draft": "Rascunho",
