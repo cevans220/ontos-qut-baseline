@@ -487,11 +487,11 @@ export default function DataProducts() {
           .join('\n');
         toast({
           title: result.created > 0 ? t('upload.partialSuccess', 'Imported with issues') : t('upload.failed'),
-          description: `${summarizeImport(result)}${detail ? `\n${detail}` : ''}`,
+          description: `${summarizeImport(result, t)}${detail ? `\n${detail}` : ''}`,
           variant: result.failed > 0 && result.created === 0 ? 'destructive' : 'default',
           duration: 10000,
         });
-        if (unimportedItems.length > 0) setError(`${summarizeImport(result)}\n${detail}`);
+        if (unimportedItems.length > 0) setError(`${summarizeImport(result, t)}\n${detail}`);
       } else {
         setUploadDialogOpen(false);
         toast({
