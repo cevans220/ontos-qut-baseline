@@ -20,6 +20,7 @@ from sqlalchemy import text
 from src.common.compliance_dsl import Lexer, Parser, TokenType, parse_actions, parse_rule
 from src.controller.compliance_manager import ComplianceManager
 from src.db_models.compliance import CompliancePolicyDb
+from src.db_models.process_workflows import ProcessWorkflowDb, WorkflowStepDb
 from src.common.compliance_entities import (
     AppEntityLoader,
     EntityIterator,
@@ -326,3 +327,125 @@ def test_sample_run_matches_a_real_run_of_its_policy(db_session, preset, run_id)
     assert (run['status'], run['success'], run['failure']) == (
         real.status, real.success_count, real.failure_count)
     assert run['score'] == pytest.approx(real.score)
+
+
+# --- Retail demo workflows --------------------------------------------------
+#
+# The retail workflows call the renamed policies by id. Their names, step names
+# and messages must say what those policies check.
+
+# The words of the checks the policies used to describe
+STALE_WORDS = re.compile(r'encrypt|fresh|stale|quality|access control|access failure', re.I)
+WORKFLOW_UPDATE = re.compile(
+    r"^UPDATE (process_workflows|workflow_steps) SET (\w+) = CASE\n(.*?)\n  ELSE \w+ END\n"
+    r"WHERE id IN \([^)]*\);$",
+    re.M | re.S,
+)
+WHEN = re.compile(rf"WHEN id = ({LITERAL}) AND \w+ = ({LITERAL}) THEN ({LITERAL})")
+
+
+def _retail_sql():
+    return (DATA_DIR / 'demo_data_retail.sql').read_text()
+
+
+def _shipped_workflow_rows():
+    """(table, column, id, value) of what the retail preset inserts for workflows and steps."""
+    sql = _retail_sql()
+    rows = {}
+    for table, columns in (
+        ('process_workflows', ('id', 'name', 'description')),
+        ('workflow_steps', ('id', 'workflow_id', 'step_id', 'name', 'step_type', 'config')),
+    ):
+        start = sql.index(f'INSERT INTO {table} ')
+        block = sql[start:sql.index('ON CONFLICT', start)]
+        for chunk in re.split(r"^(?=\('02[ab]0)", block, flags=re.M)[1:]:
+            literals = [_sql_string(raw) for raw in re.findall(LITERAL, chunk)]
+            values = dict(zip(columns, literals))
+            rows[(table, values['id'])] = values
+    return rows
+
+
+def test_the_retail_workflows_and_steps_are_parsed():
+    rows = _shipped_workflow_rows()
+    assert len([k for k in rows if k[0] == 'process_workflows']) == 5
+    assert len([k for k in rows if k[0] == 'workflow_steps']) == 21
+
+
+def test_retail_workflows_do_not_describe_the_old_checks():
+    for (_, row_id), values in _shipped_workflow_rows().items():
+        for column in ('name', 'description', 'config'):
+            assert not STALE_WORDS.search(values.get(column) or ''), (row_id, column)
+
+
+def test_retail_policy_check_steps_call_policies_of_the_preset():
+    policies = _preset_policies('retail')
+    called = {
+        re.search(r'"policy_id": "([^"]+)"', v['config']).group(1)
+        for (table, _), v in _shipped_workflow_rows().items()
+        if table == 'workflow_steps' and v['step_type'] == 'policy_check'
+    }
+    assert called and called <= set(policies)
+
+
+def _workflow_updates():
+    return [
+        (table, column, [tuple(_sql_string(x) for x in when) for when in WHEN.findall(body)])
+        for table, column, body in WORKFLOW_UPDATE.findall(_retail_sql())
+    ]
+
+
+def test_every_renamed_workflow_text_has_an_upgrade():
+    updates = _workflow_updates()
+    assert len(updates) == 4
+    shipped = _shipped_workflow_rows()
+    for table, column, whens in updates:
+        for row_id, old, new in whens:
+            assert shipped[(table, row_id)][column] == new
+            assert old != new
+
+
+def _earlier_rows(db, edited=None):
+    """The workflows and steps as an earlier install of the preset holds them."""
+    shipped = _shipped_workflow_rows()
+    for table, column, whens in _workflow_updates():
+        for row_id, old, _ in whens:
+            values = shipped[(table, row_id)]
+            if table == 'process_workflows':
+                row = db.get(ProcessWorkflowDb, row_id) or ProcessWorkflowDb(
+                    id=row_id, name=values['name'], description=values['description'],
+                    trigger_config='{}')
+            else:
+                row = db.get(WorkflowStepDb, row_id) or WorkflowStepDb(
+                    id=row_id, workflow_id=values['workflow_id'], step_id=values['step_id'],
+                    name=values['name'], step_type=values['step_type'],
+                    config=values['config'], order=0)
+            if not db.get(type(row), row_id):
+                db.add(row)
+                db.flush()
+            setattr(row, column, edited if edited else old)
+    db.flush()
+
+
+def _upgrade_workflows(db):
+    for match in WORKFLOW_UPDATE.finditer(_retail_sql()):
+        db.execute(text(match.group(0)))
+    db.expire_all()
+
+
+def test_an_earlier_retail_workflow_is_renamed_in_place(db_session):
+    _earlier_rows(db_session)
+    _upgrade_workflows(db_session)
+    shipped = _shipped_workflow_rows()
+    for table, column, whens in _workflow_updates():
+        model = ProcessWorkflowDb if table == 'process_workflows' else WorkflowStepDb
+        for row_id, _, new in whens:
+            assert getattr(db_session.get(model, row_id), column) == new
+
+
+def test_a_workflow_text_an_admin_edited_is_kept(db_session):
+    _earlier_rows(db_session, edited='Our own text')
+    _upgrade_workflows(db_session)
+    for table, column, whens in _workflow_updates():
+        model = ProcessWorkflowDb if table == 'process_workflows' else WorkflowStepDb
+        for row_id, _, _ in whens:
+            assert getattr(db_session.get(model, row_id), column) == 'Our own text'

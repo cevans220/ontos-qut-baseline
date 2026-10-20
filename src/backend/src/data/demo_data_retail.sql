@@ -1967,26 +1967,26 @@ INSERT INTO process_workflows (id, name, description, trigger_config, scope_conf
 '{"type": "all"}',
 true, true, 1, 'system@demo', 'system@demo', NOW(), NOW()),
 
--- Data quality validation on updates
-('02a00002-0000-4000-8000-000000000002', 'Data Quality Gate', 'Ensures data quality thresholds are met before allowing dataset updates.', 
+-- Contract purpose validation on updates
+('02a00002-0000-4000-8000-000000000002', 'Contract Purpose Gate', 'Checks that active data contracts describe their purpose (policy Contract Purpose Described) before dataset updates.', 
 '{"type": "before_update", "entity_types": ["dataset"]}',
 '{"type": "all"}',
 true, true, 1, 'system@demo', 'system@demo', NOW(), NOW()),
 
 -- Security compliance workflow for sensitive data
-('02a00003-0000-4000-8000-000000000003', 'PII Data Security Check', 'Validates PII encryption and access controls for sensitive data products.', 
+('02a00003-0000-4000-8000-000000000003', 'PII Data Security Check', 'Validates that PII data products are tagged gdpr and confidential data contracts are tagged restricted.', 
 '{"type": "on_create", "entity_types": ["data_product", "data_contract"]}',
 '{"type": "all"}',
 true, true, 1, 'system@demo', 'system@demo', NOW(), NOW()),
 
--- Freshness monitoring workflow
-('02a00004-0000-4000-8000-000000000004', 'Data Freshness Monitor', 'Monitors data freshness and notifies stakeholders when data becomes stale.', 
+-- Contract lifecycle monitoring workflow
+('02a00004-0000-4000-8000-000000000004', 'Contract Lifecycle Monitor', 'Checks daily that no data contract is deprecated or retired and notifies the owner when one is.', 
 '{"type": "scheduled", "schedule": "0 6 * * *"}',
 '{"type": "all"}',
 true, false, 1, 'system@demo', 'system@demo', NOW(), NOW()),
 
 -- Full governance workflow with multiple checks
-('02a00005-0000-4000-8000-000000000005', 'Full Governance Pre-Check', 'Comprehensive pre-creation validation including naming, access control, and PII checks.', 
+('02a00005-0000-4000-8000-000000000005', 'Full Governance Pre-Check', 'Comprehensive pre-creation validation including naming, GDPR controls for PII products, and restricted access for confidential contracts.', 
 '{"type": "before_create", "entity_types": ["table", "view"]}',
 '{"type": "project", "ids": ["00300001-0000-4000-8000-000000000001"]}',
 true, false, 1, 'system@demo', 'system@demo', NOW(), NOW())
@@ -2014,27 +2014,27 @@ NULL, NULL, 2, '{"x": 150, "y": 300}', NOW(), NOW()),
 '{"message": "Asset name does not follow naming conventions"}',
 NULL, NULL, 3, '{"x": 350, "y": 300}', NOW(), NOW()),
 
--- Data Quality Gate workflow steps (02a00002)
+-- Contract Purpose Gate workflow steps (02a00002)
 -- Uses policy 01100003 (Contract Purpose Described)
-('02b00004-0000-4000-8000-000000000004', '02a00002-0000-4000-8000-000000000002', 'check-quality', 'Check Data Quality', 'policy_check', 
+('02b00004-0000-4000-8000-000000000004', '02a00002-0000-4000-8000-000000000002', 'check-quality', 'Check Contract Purpose', 'policy_check', 
 '{"policy_id": "01100003-0000-4000-8000-000000000003"}',
 'quality-pass', 'quality-fail', 1, '{"x": 250, "y": 150}', NOW(), NOW()),
 
-('02b00005-0000-4000-8000-000000000005', '02a00002-0000-4000-8000-000000000002', 'quality-pass', 'Quality Check Passed', 'pass', 
+('02b00005-0000-4000-8000-000000000005', '02a00002-0000-4000-8000-000000000002', 'quality-pass', 'Purpose Check Passed', 'pass', 
 '{}',
 NULL, NULL, 2, '{"x": 150, "y": 300}', NOW(), NOW()),
 
-('02b00006-0000-4000-8000-000000000006', '02a00002-0000-4000-8000-000000000002', 'quality-fail', 'Quality Check Failed', 'notification', 
+('02b00006-0000-4000-8000-000000000006', '02a00002-0000-4000-8000-000000000002', 'quality-fail', 'Purpose Check Failed', 'notification', 
 '{"recipients": "owner", "template": "validation_failed"}',
 NULL, NULL, 3, '{"x": 350, "y": 300}', NOW(), NOW()),
 
 -- PII Data Security Check workflow steps (02a00003)
 -- Uses policies 01100002 (PII Products Under GDPR Controls) and 01100004 (Confidential Contracts Restricted)
-('02b00007-0000-4000-8000-000000000007', '02a00003-0000-4000-8000-000000000003', 'check-pii', 'Check PII Encryption', 'policy_check', 
+('02b00007-0000-4000-8000-000000000007', '02a00003-0000-4000-8000-000000000003', 'check-pii', 'Check PII Products Under GDPR', 'policy_check', 
 '{"policy_id": "01100002-0000-4000-8000-000000000002"}',
 'check-access', 'notify-pii-fail', 1, '{"x": 250, "y": 100}', NOW(), NOW()),
 
-('02b00008-0000-4000-8000-000000000008', '02a00003-0000-4000-8000-000000000003', 'check-access', 'Check Access Control', 'policy_check', 
+('02b00008-0000-4000-8000-000000000008', '02a00003-0000-4000-8000-000000000003', 'check-access', 'Check Confidential Contracts Restricted', 'policy_check', 
 '{"policy_id": "01100004-0000-4000-8000-000000000004"}',
 'security-pass', 'notify-access-fail', 2, '{"x": 250, "y": 220}', NOW(), NOW()),
 
@@ -2042,25 +2042,25 @@ NULL, NULL, 3, '{"x": 350, "y": 300}', NOW(), NOW()),
 '{}',
 NULL, NULL, 3, '{"x": 150, "y": 340}', NOW(), NOW()),
 
-('02b0000a-0000-4000-8000-000000000010', '02a00003-0000-4000-8000-000000000003', 'notify-pii-fail', 'Notify PII Failure', 'notification', 
+('02b0000a-0000-4000-8000-000000000010', '02a00003-0000-4000-8000-000000000003', 'notify-pii-fail', 'Notify PII Product Without GDPR', 'notification', 
 '{"recipients": "domain_owners", "template": "validation_failed"}',
 NULL, NULL, 4, '{"x": 350, "y": 340}', NOW(), NOW()),
 
-('02b0000b-0000-4000-8000-000000000011', '02a00003-0000-4000-8000-000000000003', 'notify-access-fail', 'Notify Access Failure', 'notification', 
+('02b0000b-0000-4000-8000-000000000011', '02a00003-0000-4000-8000-000000000003', 'notify-access-fail', 'Notify Unrestricted Confidential Contract', 'notification', 
 '{"recipients": "domain_owners", "template": "validation_failed"}',
 NULL, NULL, 5, '{"x": 450, "y": 340}', NOW(), NOW()),
 
--- Data Freshness Monitor workflow steps (02a00004)
+-- Contract Lifecycle Monitor workflow steps (02a00004)
 -- Uses policy 01100005 (No Deprecated or Retired Contracts)
-('02b0000c-0000-4000-8000-000000000012', '02a00004-0000-4000-8000-000000000004', 'check-freshness', 'Check Data Freshness', 'policy_check', 
+('02b0000c-0000-4000-8000-000000000012', '02a00004-0000-4000-8000-000000000004', 'check-freshness', 'Check Contract Lifecycle', 'policy_check', 
 '{"policy_id": "01100005-0000-4000-8000-000000000005"}',
 'freshness-ok', 'freshness-stale', 1, '{"x": 250, "y": 150}', NOW(), NOW()),
 
-('02b0000d-0000-4000-8000-000000000013', '02a00004-0000-4000-8000-000000000004', 'freshness-ok', 'Data is Fresh', 'pass', 
+('02b0000d-0000-4000-8000-000000000013', '02a00004-0000-4000-8000-000000000004', 'freshness-ok', 'No Deprecated or Retired Contracts', 'pass', 
 '{}',
 NULL, NULL, 2, '{"x": 150, "y": 300}', NOW(), NOW()),
 
-('02b0000e-0000-4000-8000-000000000014', '02a00004-0000-4000-8000-000000000004', 'freshness-stale', 'Notify Stale Data', 'notification', 
+('02b0000e-0000-4000-8000-000000000014', '02a00004-0000-4000-8000-000000000004', 'freshness-stale', 'Notify Deprecated or Retired Contract', 'notification', 
 '{"recipients": "owner", "template": "validation_failed"}',
 NULL, NULL, 3, '{"x": 350, "y": 300}', NOW(), NOW()),
 
@@ -2070,11 +2070,11 @@ NULL, NULL, 3, '{"x": 350, "y": 300}', NOW(), NOW()),
 '{"policy_id": "01100001-0000-4000-8000-000000000001"}',
 'step-pii', 'fail-naming', 1, '{"x": 250, "y": 80}', NOW(), NOW()),
 
-('02b00010-0000-4000-8000-000000000016', '02a00005-0000-4000-8000-000000000005', 'step-pii', 'Check PII Encryption', 'policy_check', 
+('02b00010-0000-4000-8000-000000000016', '02a00005-0000-4000-8000-000000000005', 'step-pii', 'Check PII Products Under GDPR', 'policy_check', 
 '{"policy_id": "01100002-0000-4000-8000-000000000002"}',
 'step-access', 'fail-pii', 2, '{"x": 250, "y": 180}', NOW(), NOW()),
 
-('02b00011-0000-4000-8000-000000000017', '02a00005-0000-4000-8000-000000000005', 'step-access', 'Check Access Control', 'policy_check', 
+('02b00011-0000-4000-8000-000000000017', '02a00005-0000-4000-8000-000000000005', 'step-access', 'Check Confidential Contracts Restricted', 'policy_check', 
 '{"policy_id": "01100004-0000-4000-8000-000000000004"}',
 'all-passed', 'fail-access', 3, '{"x": 250, "y": 280}', NOW(), NOW()),
 
@@ -2086,15 +2086,56 @@ NULL, NULL, 4, '{"x": 150, "y": 400}', NOW(), NOW()),
 '{"message": "Asset does not follow naming conventions"}',
 NULL, NULL, 5, '{"x": 400, "y": 130}', NOW(), NOW()),
 
-('02b00014-0000-4000-8000-000000000020', '02a00005-0000-4000-8000-000000000005', 'fail-pii', 'PII Check Failed', 'fail', 
-'{"message": "PII data must be encrypted"}',
+('02b00014-0000-4000-8000-000000000020', '02a00005-0000-4000-8000-000000000005', 'fail-pii', 'GDPR Check Failed', 'fail', 
+'{"message": "PII data products must be tagged gdpr"}',
 NULL, NULL, 6, '{"x": 400, "y": 230}', NOW(), NOW()),
 
-('02b00015-0000-4000-8000-000000000021', '02a00005-0000-4000-8000-000000000005', 'fail-access', 'Access Check Failed', 'fail', 
-'{"message": "Access controls must be properly configured"}',
+('02b00015-0000-4000-8000-000000000021', '02a00005-0000-4000-8000-000000000005', 'fail-access', 'Restricted Access Check Failed', 'fail', 
+'{"message": "Confidential data contracts must be tagged restricted"}',
 NULL, NULL, 7, '{"x": 400, "y": 330}', NOW(), NOW())
 
 ON CONFLICT (id) DO NOTHING;
+
+-- Installs that loaded an earlier version of this preset keep their workflow rows
+-- (ON CONFLICT DO NOTHING above). Rename those in place, but only the texts that
+-- still have their shipped value, so a workflow or step an admin renamed is left alone.
+UPDATE process_workflows SET name = CASE
+  WHEN id = '02a00002-0000-4000-8000-000000000002' AND name = 'Data Quality Gate' THEN 'Contract Purpose Gate'
+  WHEN id = '02a00004-0000-4000-8000-000000000004' AND name = 'Data Freshness Monitor' THEN 'Contract Lifecycle Monitor'
+  ELSE name END
+WHERE id IN ('02a00002-0000-4000-8000-000000000002', '02a00004-0000-4000-8000-000000000004');
+
+UPDATE process_workflows SET description = CASE
+  WHEN id = '02a00002-0000-4000-8000-000000000002' AND description = 'Ensures data quality thresholds are met before allowing dataset updates.' THEN 'Checks that active data contracts describe their purpose (policy Contract Purpose Described) before dataset updates.'
+  WHEN id = '02a00003-0000-4000-8000-000000000003' AND description = 'Validates PII encryption and access controls for sensitive data products.' THEN 'Validates that PII data products are tagged gdpr and confidential data contracts are tagged restricted.'
+  WHEN id = '02a00004-0000-4000-8000-000000000004' AND description = 'Monitors data freshness and notifies stakeholders when data becomes stale.' THEN 'Checks daily that no data contract is deprecated or retired and notifies the owner when one is.'
+  WHEN id = '02a00005-0000-4000-8000-000000000005' AND description = 'Comprehensive pre-creation validation including naming, access control, and PII checks.' THEN 'Comprehensive pre-creation validation including naming, GDPR controls for PII products, and restricted access for confidential contracts.'
+  ELSE description END
+WHERE id IN ('02a00002-0000-4000-8000-000000000002', '02a00003-0000-4000-8000-000000000003', '02a00004-0000-4000-8000-000000000004', '02a00005-0000-4000-8000-000000000005');
+
+UPDATE workflow_steps SET name = CASE
+  WHEN id = '02b00004-0000-4000-8000-000000000004' AND name = 'Check Data Quality' THEN 'Check Contract Purpose'
+  WHEN id = '02b00005-0000-4000-8000-000000000005' AND name = 'Quality Check Passed' THEN 'Purpose Check Passed'
+  WHEN id = '02b00006-0000-4000-8000-000000000006' AND name = 'Quality Check Failed' THEN 'Purpose Check Failed'
+  WHEN id = '02b00007-0000-4000-8000-000000000007' AND name = 'Check PII Encryption' THEN 'Check PII Products Under GDPR'
+  WHEN id = '02b00008-0000-4000-8000-000000000008' AND name = 'Check Access Control' THEN 'Check Confidential Contracts Restricted'
+  WHEN id = '02b0000a-0000-4000-8000-000000000010' AND name = 'Notify PII Failure' THEN 'Notify PII Product Without GDPR'
+  WHEN id = '02b0000b-0000-4000-8000-000000000011' AND name = 'Notify Access Failure' THEN 'Notify Unrestricted Confidential Contract'
+  WHEN id = '02b0000c-0000-4000-8000-000000000012' AND name = 'Check Data Freshness' THEN 'Check Contract Lifecycle'
+  WHEN id = '02b0000d-0000-4000-8000-000000000013' AND name = 'Data is Fresh' THEN 'No Deprecated or Retired Contracts'
+  WHEN id = '02b0000e-0000-4000-8000-000000000014' AND name = 'Notify Stale Data' THEN 'Notify Deprecated or Retired Contract'
+  WHEN id = '02b00010-0000-4000-8000-000000000016' AND name = 'Check PII Encryption' THEN 'Check PII Products Under GDPR'
+  WHEN id = '02b00011-0000-4000-8000-000000000017' AND name = 'Check Access Control' THEN 'Check Confidential Contracts Restricted'
+  WHEN id = '02b00014-0000-4000-8000-000000000020' AND name = 'PII Check Failed' THEN 'GDPR Check Failed'
+  WHEN id = '02b00015-0000-4000-8000-000000000021' AND name = 'Access Check Failed' THEN 'Restricted Access Check Failed'
+  ELSE name END
+WHERE id IN ('02b00004-0000-4000-8000-000000000004', '02b00005-0000-4000-8000-000000000005', '02b00006-0000-4000-8000-000000000006', '02b00007-0000-4000-8000-000000000007', '02b00008-0000-4000-8000-000000000008', '02b0000a-0000-4000-8000-000000000010', '02b0000b-0000-4000-8000-000000000011', '02b0000c-0000-4000-8000-000000000012', '02b0000d-0000-4000-8000-000000000013', '02b0000e-0000-4000-8000-000000000014', '02b00010-0000-4000-8000-000000000016', '02b00011-0000-4000-8000-000000000017', '02b00014-0000-4000-8000-000000000020', '02b00015-0000-4000-8000-000000000021');
+
+UPDATE workflow_steps SET config = CASE
+  WHEN id = '02b00014-0000-4000-8000-000000000020' AND config = '{"message": "PII data must be encrypted"}' THEN '{"message": "PII data products must be tagged gdpr"}'
+  WHEN id = '02b00015-0000-4000-8000-000000000021' AND config = '{"message": "Access controls must be properly configured"}' THEN '{"message": "Confidential data contracts must be tagged restricted"}'
+  ELSE config END
+WHERE id IN ('02b00014-0000-4000-8000-000000000020', '02b00015-0000-4000-8000-000000000021');
 
 
 -- ============================================================================
