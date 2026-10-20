@@ -731,7 +731,7 @@ INSERT INTO process_workflows (id, name, description, trigger_config, scope_conf
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO workflow_steps (id, workflow_id, step_id, name, step_type, config, on_pass, on_fail, "order", position, created_at, updated_at) VALUES
-('02b00101-0002-4000-8000-000000000001', '02a00101-0002-4000-8000-000000000001', 'lineage_check',     'BCBS 239 Lineage Coverage',
+('02b00101-0002-4000-8000-000000000001', '02a00101-0002-4000-8000-000000000001', 'lineage_check',     'BCBS 239 Risk Tier Tagged',
  'policy_check',
  '{"policy_id": "01100001-0002-4000-8000-000000000001"}',
  'cro_attest', 'reject', 1, '{"x": 100, "y": 100}', NOW(), NOW()),
@@ -744,6 +744,14 @@ INSERT INTO workflow_steps (id, workflow_id, step_id, name, step_type, config, o
  '{"approvers": "business:0f000003-0002-4000-8000-000000000003"}',
  'approve', 'reject', 1, '{"x": 100, "y": 100}', NOW(), NOW())
 ON CONFLICT (id) DO NOTHING;
+
+-- Installs that loaded an earlier version of this preset keep their workflow rows
+-- (ON CONFLICT DO NOTHING above). Rename those in place, but only the texts that
+-- still have their shipped value, so a step an admin renamed is left alone.
+UPDATE workflow_steps SET name = CASE
+  WHEN id = '02b00101-0002-4000-8000-000000000001' AND name = 'BCBS 239 Lineage Coverage' THEN 'BCBS 239 Risk Tier Tagged'
+  ELSE name END
+WHERE id IN ('02b00101-0002-4000-8000-000000000001');
 
 
 -- ============================================================================

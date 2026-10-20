@@ -329,13 +329,23 @@ def test_sample_run_matches_a_real_run_of_its_policy(db_session, preset, run_id)
     assert run['score'] == pytest.approx(real.score)
 
 
-# --- Retail demo workflows --------------------------------------------------
+# --- Demo workflows ---------------------------------------------------------
 #
-# The retail workflows call the renamed policies by id. Their names, step names
-# and messages must say what those policies check.
+# The workflows call the renamed policies by id. Their names, step names and
+# messages must say what those policies check.
 
+WORKFLOW_PRESETS = ['fsi', 'hls', 'retail']
+WORKFLOW_COUNTS = {  # workflows, steps (retail: the policy workflows, 02a/02b)
+    'fsi': (2, 3), 'hls': (2, 4), 'auto': (1, 3), 'mfg': (1, 2), 'retail': (5, 21),
+}
 # The words of the checks the policies used to describe
-STALE_WORDS = re.compile(r'encrypt|fresh|stale|quality|access control|access failure', re.I)
+STALE_WORDS = re.compile(
+    r'encrypt|fresh|stale|access control|access failure|lineage coverage|document present'
+    r'|phi classification|\bBAA\b',
+    re.I,
+)
+# Retail's policies used to be data quality checks; in other presets "quality" is a role
+STALE_RETAIL_WORDS = re.compile(r'quality', re.I)
 WORKFLOW_UPDATE = re.compile(
     r"^UPDATE (process_workflows|workflow_steps) SET (\w+) = CASE\n(.*?)\n  ELSE \w+ END\n"
     r"WHERE id IN \([^)]*\);$",
@@ -344,13 +354,13 @@ WORKFLOW_UPDATE = re.compile(
 WHEN = re.compile(rf"WHEN id = ({LITERAL}) AND \w+ = ({LITERAL}) THEN ({LITERAL})")
 
 
-def _retail_sql():
-    return (DATA_DIR / 'demo_data_retail.sql').read_text()
+def _preset_sql(preset):
+    return (DATA_DIR / f'demo_data_{preset}.sql').read_text()
 
 
-def _shipped_workflow_rows():
-    """(table, column, id, value) of what the retail preset inserts for workflows and steps."""
-    sql = _retail_sql()
+def _shipped_workflow_rows(preset):
+    """(table, id) -> values of what the preset inserts for its workflows and steps."""
+    sql = _preset_sql(preset)
     rows = {}
     for table, columns in (
         ('process_workflows', ('id', 'name', 'description')),
@@ -365,87 +375,100 @@ def _shipped_workflow_rows():
     return rows
 
 
-def test_the_retail_workflows_and_steps_are_parsed():
-    rows = _shipped_workflow_rows()
-    assert len([k for k in rows if k[0] == 'process_workflows']) == 5
-    assert len([k for k in rows if k[0] == 'workflow_steps']) == 21
+@pytest.mark.parametrize('preset', PRESETS)
+def test_the_workflows_and_steps_of_a_preset_are_parsed(preset):
+    rows = _shipped_workflow_rows(preset)
+    assert (
+        len([k for k in rows if k[0] == 'process_workflows']),
+        len([k for k in rows if k[0] == 'workflow_steps']),
+    ) == WORKFLOW_COUNTS[preset]
 
 
-def test_retail_workflows_do_not_describe_the_old_checks():
-    for (_, row_id), values in _shipped_workflow_rows().items():
+@pytest.mark.parametrize('preset', PRESETS)
+def test_workflows_do_not_describe_the_old_checks(preset):
+    words = [STALE_WORDS] + ([STALE_RETAIL_WORDS] if preset == 'retail' else [])
+    for (_, row_id), values in _shipped_workflow_rows(preset).items():
         for column in ('name', 'description', 'config'):
-            assert not STALE_WORDS.search(values.get(column) or ''), (row_id, column)
+            for pattern in words:
+                assert not pattern.search(values.get(column) or ''), (row_id, column)
 
 
-def test_retail_policy_check_steps_call_policies_of_the_preset():
-    policies = _preset_policies('retail')
+@pytest.mark.parametrize('preset', PRESETS)
+def test_policy_check_steps_call_policies_of_the_preset(preset):
+    policies = _preset_policies(preset)
     called = {
         re.search(r'"policy_id": "([^"]+)"', v['config']).group(1)
-        for (table, _), v in _shipped_workflow_rows().items()
+        for (table, _), v in _shipped_workflow_rows(preset).items()
         if table == 'workflow_steps' and v['step_type'] == 'policy_check'
     }
-    assert called and called <= set(policies)
+    assert called <= set(policies)
+    assert called or preset in ('auto', 'mfg')
 
 
-def _workflow_updates():
+def _workflow_updates(preset):
     return [
         (table, column, [tuple(_sql_string(x) for x in when) for when in WHEN.findall(body)])
-        for table, column, body in WORKFLOW_UPDATE.findall(_retail_sql())
+        for table, column, body in WORKFLOW_UPDATE.findall(_preset_sql(preset))
     ]
 
 
-def test_every_renamed_workflow_text_has_an_upgrade():
-    updates = _workflow_updates()
-    assert len(updates) == 4
-    shipped = _shipped_workflow_rows()
+@pytest.mark.parametrize('preset', WORKFLOW_PRESETS)
+def test_every_renamed_workflow_text_has_an_upgrade(preset):
+    updates = _workflow_updates(preset)
+    assert len(updates) == {'fsi': 1, 'hls': 2, 'retail': 4}[preset]
+    shipped = _shipped_workflow_rows(preset)
     for table, column, whens in updates:
         for row_id, old, new in whens:
             assert shipped[(table, row_id)][column] == new
             assert old != new
 
 
-def _earlier_rows(db, edited=None):
+def _model(table):
+    return ProcessWorkflowDb if table == 'process_workflows' else WorkflowStepDb
+
+
+def _earlier_rows(db, preset, edited=None):
     """The workflows and steps as an earlier install of the preset holds them."""
-    shipped = _shipped_workflow_rows()
-    for table, column, whens in _workflow_updates():
+    shipped = _shipped_workflow_rows(preset)
+    # The steps need their workflow
+    for (table, row_id), values in shipped.items():
+        if table == 'process_workflows':
+            db.add(ProcessWorkflowDb(
+                id=row_id, name=values['name'], description=values['description'],
+                trigger_config='{}'))
+    db.flush()
+    for (table, row_id), values in shipped.items():
+        if table == 'workflow_steps':
+            db.add(WorkflowStepDb(
+                id=row_id, workflow_id=values['workflow_id'], step_id=values['step_id'],
+                name=values['name'], step_type=values['step_type'], config=values['config'],
+                order=0))
+    db.flush()
+    for table, column, whens in _workflow_updates(preset):
         for row_id, old, _ in whens:
-            values = shipped[(table, row_id)]
-            if table == 'process_workflows':
-                row = db.get(ProcessWorkflowDb, row_id) or ProcessWorkflowDb(
-                    id=row_id, name=values['name'], description=values['description'],
-                    trigger_config='{}')
-            else:
-                row = db.get(WorkflowStepDb, row_id) or WorkflowStepDb(
-                    id=row_id, workflow_id=values['workflow_id'], step_id=values['step_id'],
-                    name=values['name'], step_type=values['step_type'],
-                    config=values['config'], order=0)
-            if not db.get(type(row), row_id):
-                db.add(row)
-                db.flush()
-            setattr(row, column, edited if edited else old)
+            setattr(db.get(_model(table), row_id), column, edited or old)
     db.flush()
 
 
-def _upgrade_workflows(db):
-    for match in WORKFLOW_UPDATE.finditer(_retail_sql()):
+def _upgrade_workflows(db, preset):
+    for match in WORKFLOW_UPDATE.finditer(_preset_sql(preset)):
         db.execute(text(match.group(0)))
     db.expire_all()
 
 
-def test_an_earlier_retail_workflow_is_renamed_in_place(db_session):
-    _earlier_rows(db_session)
-    _upgrade_workflows(db_session)
-    shipped = _shipped_workflow_rows()
-    for table, column, whens in _workflow_updates():
-        model = ProcessWorkflowDb if table == 'process_workflows' else WorkflowStepDb
+@pytest.mark.parametrize('preset', WORKFLOW_PRESETS)
+def test_an_earlier_workflow_is_renamed_in_place(db_session, preset):
+    _earlier_rows(db_session, preset)
+    _upgrade_workflows(db_session, preset)
+    for table, column, whens in _workflow_updates(preset):
         for row_id, _, new in whens:
-            assert getattr(db_session.get(model, row_id), column) == new
+            assert getattr(db_session.get(_model(table), row_id), column) == new
 
 
-def test_a_workflow_text_an_admin_edited_is_kept(db_session):
-    _earlier_rows(db_session, edited='Our own text')
-    _upgrade_workflows(db_session)
-    for table, column, whens in _workflow_updates():
-        model = ProcessWorkflowDb if table == 'process_workflows' else WorkflowStepDb
+@pytest.mark.parametrize('preset', WORKFLOW_PRESETS)
+def test_a_workflow_text_an_admin_edited_is_kept(db_session, preset):
+    _earlier_rows(db_session, preset, edited='Our own text')
+    _upgrade_workflows(db_session, preset)
+    for table, column, whens in _workflow_updates(preset):
         for row_id, _, _ in whens:
-            assert getattr(db_session.get(model, row_id), column) == 'Our own text'
+            assert getattr(db_session.get(_model(table), row_id), column) == 'Our own text'
