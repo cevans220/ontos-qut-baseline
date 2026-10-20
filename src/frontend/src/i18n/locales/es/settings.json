@@ -140,6 +140,19 @@
         "placeholder": "app_files"
       }
     },
+    "instanceIdentity": {
+      "title": "Identidad de la instancia",
+      "id": {
+        "label": "ID de la instancia",
+        "help": "Identificador estable de esta instancia de Ontos, estampado en las entidades exportadas. Valor predeterminado: {{default}}. Vacíe el campo para restaurar el valor predeterminado.",
+        "invalid": "Use de 1 a 128 letras, dígitos, \".\", \"_\", \":\" o \"-\", comenzando con una letra o un dígito."
+      },
+      "name": {
+        "label": "Nombre de la instancia",
+        "help": "Nombre legible de esta instancia. Valor predeterminado: {{default}}. Vacíe el campo para restaurar el valor predeterminado.",
+        "tooLong": "Use como máximo 128 caracteres."
+      }
+    },
     "auditLog": {
       "label": "Directorio de logs de auditoría",
       "placeholder": "audit_logs",

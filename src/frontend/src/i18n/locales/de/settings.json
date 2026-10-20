@@ -140,6 +140,19 @@
         "placeholder": "app_files"
       }
     },
+    "instanceIdentity": {
+      "title": "Instanzidentität",
+      "id": {
+        "label": "Instanz-ID",
+        "help": "Stabile Kennung dieser Ontos-Instanz, die auf exportierte Entitäten gestempelt wird. Standard: {{default}}. Feld leeren, um den Standard wiederherzustellen.",
+        "invalid": "Verwenden Sie 1-128 Buchstaben, Ziffern, \".\", \"_\", \":\" oder \"-\", beginnend mit einem Buchstaben oder einer Ziffer."
+      },
+      "name": {
+        "label": "Instanzname",
+        "help": "Lesbarer Name dieser Instanz. Standard: {{default}}. Feld leeren, um den Standard wiederherzustellen.",
+        "tooLong": "Verwenden Sie höchstens 128 Zeichen."
+      }
+    },
     "auditLog": {
       "label": "Audit-Log-Verzeichnis",
       "placeholder": "audit_logs",

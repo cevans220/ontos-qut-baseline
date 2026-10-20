@@ -7,7 +7,7 @@ import json
 import re
 
 import yaml
-from pydantic import AliasChoices, Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .api_errors import CodedValueError
@@ -62,6 +62,17 @@ class Settings(BaseSettings):
     )  # Local dev: name of profile in ~/.databrickscfg (OAuth U2M with auto-refresh)
     DATABRICKS_HTTP_PATH: Optional[str] = None # Will be computed by validator
     DATABRICKS_APP_NAME: str = Field("ontos", env='DATABRICKS_APP_NAME')  # Name of the Databricks App
+    DATABRICKS_WORKSPACE_ID: Optional[str] = Field(None, env='DATABRICKS_WORKSPACE_ID')  # Injected by Databricks Apps; absent in local dev
+
+    # Instance identity (federation / Estate Manager). When unset, both values are derived
+    # from DATABRICKS_WORKSPACE_ID + DATABRICKS_APP_NAME (see derive_instance_identity).
+    # Admins can override them at runtime via General Settings (persisted in app_settings
+    # as ONTOS_INSTANCE_ID / ONTOS_INSTANCE_NAME), which wins over env and derived values.
+    ONTOS_INSTANCE_ID: Optional[str] = Field(None, env='ONTOS_INSTANCE_ID')
+    ONTOS_INSTANCE_NAME: Optional[str] = Field(None, env='ONTOS_INSTANCE_NAME')
+    # Values in effect before any admin override (env value if set, else derived)
+    _instance_id_default: str = PrivateAttr(default="")
+    _instance_name_default: str = PrivateAttr(default="")
 
     # Environment
     ENV: str = "PROD"  # LOCAL, DEV, PROD
@@ -212,6 +223,41 @@ class Settings(BaseSettings):
         """Compute the DATABRICKS_HTTP_PATH after validation."""
         if self.DATABRICKS_WAREHOUSE_ID:
             self.DATABRICKS_HTTP_PATH = f"/sql/1.0/warehouses/{self.DATABRICKS_WAREHOUSE_ID}"
+        return self
+
+    @property
+    def instance_id_default(self) -> str:
+        """Instance id in effect before any admin override (env value, else derived)."""
+        return self._instance_id_default
+
+    @property
+    def instance_name_default(self) -> str:
+        """Instance name in effect before any admin override (env value, else derived)."""
+        return self._instance_name_default
+
+    @staticmethod
+    def derive_instance_identity(workspace_id: Optional[str], app_name: Optional[str]) -> Tuple[str, str]:
+        """Derive the default (instance_id, instance_name) from workspace id and app name.
+
+        Deterministic, so the same deployment gets the same identity across restarts:
+        - id: "<workspace_id>-<app_name>"; just "<app_name>" when the workspace id is missing
+          (local dev); "ontos" when both are missing.
+        - name: the app name (falls back to "ontos").
+        """
+        ws = (workspace_id or "").strip()
+        app = (app_name or "").strip() or "ontos"
+        return (f"{ws}-{app}" if ws else app), app
+
+    @model_validator(mode='after')
+    def compute_instance_identity(self) -> 'Settings':
+        """Fill ONTOS_INSTANCE_ID / ONTOS_INSTANCE_NAME from env or derived defaults."""
+        derived_id, derived_name = self.derive_instance_identity(
+            self.DATABRICKS_WORKSPACE_ID, self.DATABRICKS_APP_NAME
+        )
+        self._instance_id_default = (self.ONTOS_INSTANCE_ID or "").strip() or derived_id
+        self._instance_name_default = (self.ONTOS_INSTANCE_NAME or "").strip() or derived_name
+        self.ONTOS_INSTANCE_ID = self._instance_id_default
+        self.ONTOS_INSTANCE_NAME = self._instance_name_default
         return self
 
     @model_validator(mode='after')

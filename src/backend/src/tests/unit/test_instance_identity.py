@@ -1,0 +1,146 @@
+"""Unit tests for Ontos instance identity (ONTOS_INSTANCE_ID / ONTOS_INSTANCE_NAME).
+
+Covers the derived defaults, env overrides, the missing-env cases (local dev) and the
+SettingsManager read/update/persist path. No ``client`` fixture is used.
+"""
+import pytest
+
+from src.common.config import Settings
+from src.controller.settings_manager import SettingsManager
+from src.repositories.app_settings_repository import app_settings_repo
+
+
+def make_settings(tmp_path, **overrides) -> Settings:
+    # _env_file=None keeps a developer's local .env out of the test.
+    values = dict(
+        DATABRICKS_HOST="https://test.example.com",
+        DATABRICKS_WAREHOUSE_ID="wh",
+        APP_AUDIT_LOG_DIR=str(tmp_path),
+        ENV="TEST",
+    )
+    values.update(overrides)
+    return Settings(_env_file=None, **values)
+
+
+@pytest.fixture(autouse=True)
+def _clean_env(monkeypatch):
+    for key in (
+        "DATABRICKS_WORKSPACE_ID",
+        "DATABRICKS_APP_NAME",
+        "ONTOS_INSTANCE_ID",
+        "ONTOS_INSTANCE_NAME",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+
+class TestDefaults:
+    def test_derived_from_workspace_id_and_app_name(self, tmp_path):
+        s = make_settings(tmp_path, DATABRICKS_WORKSPACE_ID="123456", DATABRICKS_APP_NAME="ontos-prod")
+        assert s.ONTOS_INSTANCE_ID == "123456-ontos-prod"
+        assert s.ONTOS_INSTANCE_NAME == "ontos-prod"
+
+    def test_derivation_is_stable_across_instances(self, tmp_path):
+        a = make_settings(tmp_path, DATABRICKS_WORKSPACE_ID="42", DATABRICKS_APP_NAME="x")
+        b = make_settings(tmp_path, DATABRICKS_WORKSPACE_ID="42", DATABRICKS_APP_NAME="x")
+        assert a.ONTOS_INSTANCE_ID == b.ONTOS_INSTANCE_ID
+        assert a.ONTOS_INSTANCE_NAME == b.ONTOS_INSTANCE_NAME
+
+    def test_missing_workspace_id_falls_back_to_app_name(self, tmp_path):
+        s = make_settings(tmp_path, DATABRICKS_APP_NAME="my-app")
+        assert s.ONTOS_INSTANCE_ID == "my-app"
+        assert s.ONTOS_INSTANCE_NAME == "my-app"
+
+    def test_missing_both_uses_default_app_name(self, tmp_path):
+        s = make_settings(tmp_path)
+        assert s.ONTOS_INSTANCE_ID == "ontos"
+        assert s.ONTOS_INSTANCE_NAME == "ontos"
+
+    def test_blank_workspace_id_is_treated_as_missing(self, tmp_path):
+        s = make_settings(tmp_path, DATABRICKS_WORKSPACE_ID="   ", DATABRICKS_APP_NAME="a")
+        assert s.ONTOS_INSTANCE_ID == "a"
+
+    def test_explicit_values_win_over_derived(self, tmp_path):
+        s = make_settings(
+            tmp_path,
+            DATABRICKS_WORKSPACE_ID="1",
+            DATABRICKS_APP_NAME="a",
+            ONTOS_INSTANCE_ID="custom-id",
+            ONTOS_INSTANCE_NAME="Custom Name",
+        )
+        assert s.ONTOS_INSTANCE_ID == "custom-id"
+        assert s.ONTOS_INSTANCE_NAME == "Custom Name"
+
+    def test_env_vars_are_read(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ONTOS_INSTANCE_ID", "from-env")
+        monkeypatch.setenv("DATABRICKS_WORKSPACE_ID", "99")
+        s = make_settings(tmp_path)
+        assert s.ONTOS_INSTANCE_ID == "from-env"
+        assert s.ONTOS_INSTANCE_NAME == "ontos"
+
+
+class TestManagerReadUpdate:
+    @pytest.fixture
+    def settings(self, tmp_path):
+        return make_settings(tmp_path, DATABRICKS_WORKSPACE_ID="7", DATABRICKS_APP_NAME="app")
+
+    @pytest.fixture
+    def manager(self, db_session, settings):
+        return SettingsManager(db=db_session, settings=settings, workspace_client=None)
+
+    def test_get_settings_exposes_values_and_defaults(self, manager):
+        data = manager.get_settings()
+        assert data["ontos_instance_id"] == "7-app"
+        assert data["ontos_instance_name"] == "app"
+        assert data["ontos_instance_id_default"] == "7-app"
+        assert data["ontos_instance_name_default"] == "app"
+
+    def test_update_persists_and_applies(self, manager, db_session, settings):
+        manager.update_settings({"ontos_instance_id": " my.id-1 ", "ontos_instance_name": "My Ontos"})
+        assert settings.ONTOS_INSTANCE_ID == "my.id-1"
+        assert settings.ONTOS_INSTANCE_NAME == "My Ontos"
+        assert app_settings_repo.get_by_key(db_session, "ONTOS_INSTANCE_ID") == "my.id-1"
+        assert app_settings_repo.get_by_key(db_session, "ONTOS_INSTANCE_NAME") == "My Ontos"
+        data = manager.get_settings()
+        assert data["ontos_instance_id"] == "my.id-1"
+        # defaults stay available so the UI can show them
+        assert data["ontos_instance_id_default"] == "7-app"
+
+    def test_override_survives_restart(self, manager, db_session, tmp_path):
+        manager.update_settings({"ontos_instance_id": "kept", "ontos_instance_name": "Kept"})
+        fresh = make_settings(tmp_path, DATABRICKS_WORKSPACE_ID="7", DATABRICKS_APP_NAME="app")
+        assert fresh.ONTOS_INSTANCE_ID == "7-app"
+        SettingsManager(db=db_session, settings=fresh, workspace_client=None)
+        assert fresh.ONTOS_INSTANCE_ID == "kept"
+        assert fresh.ONTOS_INSTANCE_NAME == "Kept"
+
+    def test_blank_clears_override_and_restores_default(self, manager, db_session, settings):
+        manager.update_settings({"ontos_instance_id": "x", "ontos_instance_name": "X"})
+        manager.update_settings({"ontos_instance_id": "", "ontos_instance_name": "  "})
+        assert settings.ONTOS_INSTANCE_ID == "7-app"
+        assert settings.ONTOS_INSTANCE_NAME == "app"
+        assert app_settings_repo.get_by_key(db_session, "ONTOS_INSTANCE_ID") is None
+        assert app_settings_repo.get_by_key(db_session, "ONTOS_INSTANCE_NAME") is None
+
+    def test_clear_restores_env_value_not_derived(self, db_session, tmp_path):
+        s = make_settings(tmp_path, DATABRICKS_WORKSPACE_ID="7", ONTOS_INSTANCE_ID="env-id")
+        m = SettingsManager(db=db_session, settings=s, workspace_client=None)
+        m.update_settings({"ontos_instance_id": "override"})
+        m.update_settings({"ontos_instance_id": ""})
+        assert s.ONTOS_INSTANCE_ID == "env-id"
+
+    def test_unrelated_update_does_not_touch_identity(self, manager, settings, db_session):
+        manager.update_settings({"schema_import_child_limit": 10})
+        assert settings.ONTOS_INSTANCE_ID == "7-app"
+        assert app_settings_repo.get_by_key(db_session, "ONTOS_INSTANCE_ID") is None
+
+    @pytest.mark.parametrize("bad", ["has space", "-leading", "a/b", "x" * 129, "ünï"])
+    def test_invalid_id_rejected(self, manager, settings, bad):
+        with pytest.raises(ValueError):
+            manager.update_settings({"ontos_instance_id": bad})
+        assert settings.ONTOS_INSTANCE_ID == "7-app"
+
+    @pytest.mark.parametrize("bad", ["x" * 129, "line\nbreak"])
+    def test_invalid_name_rejected(self, manager, settings, bad):
+        with pytest.raises(ValueError):
+            manager.update_settings({"ontos_instance_name": bad})
+        assert settings.ONTOS_INSTANCE_NAME == "app"
