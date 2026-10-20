@@ -124,3 +124,36 @@ describe('WorkflowApprovalResponseDialog request details', () => {
     expect(screen.getByText(/Data Product · Sales/)).toBeInTheDocument();
   });
 });
+
+describe('WorkflowApprovalResponseDialog workflow name', () => {
+  const request = (workflowName: string) => ({
+    execution_id: 'e-3',
+    entity_type: 'data_product',
+    entity_id: 'p-1',
+    entity_name: 'Sales',
+    workflow_name: workflowName,
+  });
+
+  it('shows a shipped default workflow name in Portuguese', async () => {
+    await i18n.changeLanguage('pt');
+    render(
+      <MemoryRouter>
+        <WorkflowApprovalResponseDialog isOpen onOpenChange={() => {}} payload={request('Status Change Request') as never} />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Solicitação de mudança de status')).toBeInTheDocument();
+    expect(screen.queryByText('Status Change Request')).not.toBeInTheDocument();
+  });
+
+  it('shows a renamed workflow as named', async () => {
+    await i18n.changeLanguage('pt');
+    render(
+      <MemoryRouter>
+        <WorkflowApprovalResponseDialog isOpen onOpenChange={() => {}} payload={request('EU status changes') as never} />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('EU status changes')).toBeInTheDocument();
+  });
+});

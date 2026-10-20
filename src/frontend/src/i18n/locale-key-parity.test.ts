@@ -1,13 +1,14 @@
 /**
  * Every locale has the same keys as English in the data contract, data
- * product and workflow namespaces, so no text falls back to English.
+ * product, workflow, data domain, database schema and default workflow text
+ * namespaces, so no text falls back to English.
  */
 import { describe, expect, it } from 'vitest';
 
 type Messages = Record<string, unknown>;
 
 const FILES = import.meta.glob(
-  './locales/*/{data-contracts,data-products,workflows}.json',
+  './locales/*/{data-contracts,data-products,workflows,data-domains,database-schema,workflowDefaults}.json',
   { eager: true },
 ) as Record<string, { default: Messages }>;
 

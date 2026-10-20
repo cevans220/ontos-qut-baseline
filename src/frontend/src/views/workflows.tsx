@@ -782,7 +782,7 @@ export default function Workflows() {
             onClick={() => navigate(`${pathname}/${row.original.id}`)}
             className="font-medium hover:underline hover:text-primary text-left"
           >
-            {row.original.name}
+            {defaultWorkflowText(row.original.name)}
           </button>
           {row.original.is_default && (
             <Badge variant="secondary" className="text-xs">{t('workflows:view.badges.default')}</Badge>
@@ -913,7 +913,7 @@ export default function Workflows() {
         return (
           <div className="flex items-center gap-2">
             <GitBranch className="h-4 w-4 text-muted-foreground" />
-            <span className="font-medium">{row.original.workflow_name}</span>
+            <span className="font-medium">{defaultWorkflowText(row.original.workflow_name)}</span>
             {wfType === 'approval' ? (
               <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">{t('workflows:view.badges.approval')}</Badge>
             ) : (
@@ -1501,7 +1501,7 @@ export default function Workflows() {
           <DialogHeader>
             <DialogTitle>{t('workflows:view.dialogs.duplicateTitle')}</DialogTitle>
             <DialogDescription>
-              {t('workflows:view.dialogs.duplicateDescription', { name: duplicatingWorkflow?.name })}
+              {t('workflows:view.dialogs.duplicateDescription', { name: defaultWorkflowText(duplicatingWorkflow?.name) })}
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
@@ -1558,7 +1558,7 @@ export default function Workflows() {
             <div className="py-4 space-y-2">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium">{t('workflows:view.detail.workflow')}</span>
-                <span className="text-sm text-muted-foreground">{executionToDelete.workflow_name}</span>
+                <span className="text-sm text-muted-foreground">{defaultWorkflowText(executionToDelete.workflow_name)}</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium">{t('workflows:view.detail.status')}</span>

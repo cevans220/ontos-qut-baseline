@@ -219,6 +219,7 @@ export function WorkflowExecutionDialog({
   onOpenChange,
 }: WorkflowExecutionDialogProps) {
   const { t } = useTranslation(['workflows', 'common']);
+  const defaultWorkflowText = useDefaultWorkflowText();
   const { get } = useApi();
   const [workflow, setWorkflow] = useState<ProcessWorkflow | null>(null);
   const [stepResults, setStepResults] = useState<WorkflowExecution['step_executions'] | null>(null);
@@ -278,7 +279,7 @@ export function WorkflowExecutionDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Zap className="h-5 w-5" />
-            {execution.workflow_name || t('workflows:execution.titleFallback')}
+            {defaultWorkflowText(execution.workflow_name) || t('workflows:execution.titleFallback')}
           </DialogTitle>
           <DialogDescription>
             {t('workflows:execution.executionId', { id: execution.id.slice(0, 8) })}

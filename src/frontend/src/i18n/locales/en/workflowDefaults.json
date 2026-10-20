@@ -93,5 +93,38 @@
     "publicationRequestReview": {
       "end": "Publication workflow failed"
     }
+  },
+  "workflowNames": {
+    "naming-convention-check": "Naming Convention Validation",
+    "data-product-approval": "Data Product Publish Approval",
+    "data-contract-validation": "Data Contract Schema Validation",
+    "pii-detection": "PII Detection and Classification",
+    "pre-creation-compliance": "Pre-Creation Compliance Validation",
+    "table-pre-creation": "Table Pre-Creation Validation",
+    "contract-review-request": "Data Contract Review Request",
+    "contract-deploy-request": "Data Contract Deploy Request",
+    "product-review-request": "Data Product Review Request",
+    "access-grant-request": "Access Grant Request",
+    "status-change-request": "Status Change Request",
+    "data-asset-review-request": "Data Asset Review Request",
+    "project-access-request": "Project Access Request",
+    "role-access-request": "Role Access Request",
+    "job-failure-notification": "Job Failure Notification",
+    "job-success-notification": "Job Success Notification",
+    "access-expiring-warning": "Access Expiring Warning",
+    "access-revoked-notification": "Access Revoked Notification",
+    "approval-response": "Approval response",
+    "subscription": "Subscription Agreement",
+    "request-review": "Request Review",
+    "request-access": "Request Access",
+    "request-publish": "Request Publish",
+    "request-status-change": "Request Status Change",
+    "before-status-change-default": "Status Change Gate (Default)",
+    "on-publish-notification": "Publish Notification",
+    "on-unpublish-notification": "Unpublish Notification",
+    "certification-request-review": "Certification Request Review",
+    "publication-request-review": "Publication Request Review",
+    "first-access-welcome": "Welcome — Terms of Use",
+    "on-request-access-grant-permissions-reference": "Reference — Grant UC SELECT to requester (on_request_access)"
   }
 }

@@ -86,6 +86,7 @@ function buildDetailRows(
   payload: WorkflowApprovalResponseDialogPayload,
   onNavigate: () => void,
   t: (key: string, options?: Record<string, unknown>) => string,
+  workflowText: (text: string) => string | undefined = (text) => text,
 ): DetailRow[] {
   const rows: DetailRow[] = [];
 
@@ -149,7 +150,11 @@ function buildDetailRows(
   }
 
   if (payload.workflow_name) {
-    rows.push({ label: t('workflows:approvalResponse.rows.workflow'), value: payload.workflow_name });
+    // A shipped default workflow's name in the user's language
+    rows.push({
+      label: t('workflows:approvalResponse.rows.workflow'),
+      value: workflowText(payload.workflow_name) ?? payload.workflow_name,
+    });
   }
 
   if (payload.full_payload) {
@@ -296,7 +301,7 @@ export default function WorkflowApprovalResponseDialog({
   const description =
     defaultText(config.description) ?? t('workflows:approvalResponse.descriptionFallback');
 
-  const detailRows = payload ? buildDetailRows(payload, () => onOpenChange(false), t) : [];
+  const detailRows = payload ? buildDetailRows(payload, () => onOpenChange(false), t, defaultText) : [];
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
