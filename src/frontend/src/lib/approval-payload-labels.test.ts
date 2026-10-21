@@ -35,4 +35,11 @@ describe('approval payload labels', () => {
     expect(approvalFieldValue('justification', 'active', 'data_product', i18n.t)).toBe('active');
     expect(approvalFieldValue('asset_fqns', ['a.b.c', 'a.b.d'], 'data_product', i18n.t)).toBe('a.b.c, a.b.d');
   });
+
+  it('shows structured and non-string status values as sent', () => {
+    expect(approvalFieldValue('metadata', { a: 1 }, 'data_product', i18n.t)).toBe('{"a":1}');
+    // A status field only goes through the status labels when it is a string
+    expect(approvalFieldValue('status', 3, 'data_product', i18n.t)).toBe('3');
+    expect(approvalFieldValue('status', { code: 'x' }, 'data_product', i18n.t)).toBe('{"code":"x"}');
+  });
 });

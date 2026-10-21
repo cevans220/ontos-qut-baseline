@@ -157,3 +157,23 @@ describe('WorkflowApprovalResponseDialog workflow name', () => {
     expect(await screen.findByText('EU status changes')).toBeInTheDocument();
   });
 });
+
+describe('WorkflowApprovalResponseDialog fallbacks', () => {
+  it('uses the translated title and description when the workflow has no step config', async () => {
+    const original = api.get;
+    (api as any).get = async () => ({ data: { id: 'wf', name: 'Approval response', steps: [] } });
+    await i18n.changeLanguage('pt');
+    try {
+      render(
+        <MemoryRouter>
+          <WorkflowApprovalResponseDialog isOpen onOpenChange={() => {}} payload={{ execution_id: 'e-9' } as never} />
+        </MemoryRouter>,
+      );
+      expect(await screen.findByText(i18n.t('workflows:approvalResponse.titleFallback'))).toBeInTheDocument();
+      expect(screen.getByText(i18n.t('workflows:approvalResponse.descriptionFallback'))).toBeInTheDocument();
+      expect(i18n.t('workflows:approvalResponse.titleFallback')).not.toBe('Approve or reject');
+    } finally {
+      (api as any).get = original;
+    }
+  });
+});

@@ -52,6 +52,37 @@ describe('getExecutionErrorText', () => {
   });
 });
 
+describe('getExecutionErrorText edge cases', () => {
+  it('has no text for an execution without an error', () => {
+    expect(getExecutionErrorText(failedExecution({ error_message: undefined }), i18n.t)).toBeUndefined();
+    expect(getExecutionErrorText(failedExecution({ error_message: '' }), i18n.t)).toBeUndefined();
+  });
+
+  it('has no text when the step results are not loaded or carry no result data', () => {
+    expect(getExecutionErrorText(failedExecution({ step_executions: undefined }), i18n.t)).toBeUndefined();
+    const noData = { ...CODED_RUN, result_data: undefined };
+    expect(getExecutionErrorText(failedExecution({ step_executions: [noData] as any }), i18n.t))
+      .toBeUndefined();
+  });
+
+  it('ignores a coded step whose error is not the execution error', () => {
+    const other = { ...CODED_RUN, error_message: 'Some other failure' };
+    expect(getExecutionErrorText(failedExecution({ step_executions: [other] as any }), i18n.t))
+      .toBeUndefined();
+  });
+
+  it('takes the latest coded run when several steps failed with the same message', async () => {
+    const earlier = { ...CODED_RUN, id: 'run-0', result_data: { error_code: 'unknown_code_xyz' } };
+    await i18n.changeLanguage('pt');
+    try {
+      expect(getExecutionErrorText(failedExecution({ step_executions: [earlier, CODED_RUN] as any }), i18n.t))
+        .toBe(PORTUGUESE);
+    } finally {
+      await i18n.changeLanguage('en');
+    }
+  });
+});
+
 describe('WorkflowExecutionDialog error box', () => {
   beforeEach(() => get.mockReset());
 
@@ -72,5 +103,14 @@ describe('WorkflowExecutionDialog error box', () => {
     } finally {
       await i18n.changeLanguage('en');
     }
+  });
+
+  it('shows the title fallback and an uncoded error as sent', async () => {
+    get.mockResolvedValue({ data: { id: 'wf-1', name: 'Gate', steps: [] } });
+    const execution = failedExecution({ workflow_name: undefined, step_executions: [], error_message: 'Step not found: x' });
+    render(<WorkflowExecutionDialog execution={execution} open onOpenChange={vi.fn()} />);
+
+    expect(await screen.findByText('Workflow Execution')).toBeInTheDocument();
+    expect(screen.getByText('Step not found: x')).toBeInTheDocument();
   });
 });

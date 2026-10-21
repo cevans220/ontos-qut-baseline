@@ -2,7 +2,7 @@
  * The domain sync page and its result summary are in the user's language.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 import i18n from '@/i18n/config';
 import SyncDomainsView, { syncSummaryText } from './sync-domains';
@@ -46,5 +46,20 @@ describe('SyncDomainsView', () => {
     expect(screen.getByRole('button', { name: 'Pré-visualizar' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Aplicar' })).toBeInTheDocument();
     expect(screen.queryByText('Preview')).not.toBeInTheDocument();
+  });
+
+  it('describes the export flow, anchor and top-level target after switching direction', async () => {
+    render(<SyncDomainsView />);
+    expect(await screen.findByText('Place under')).toBeInTheDocument();
+    expect(screen.getByText('Unity Catalog → Ontos')).toBeInTheDocument();
+    expect(screen.getByText('Top level (no parent)')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('radio', { name: /Export to Unity Catalog/ }));
+
+    expect(await screen.findByText('Anchor')).toBeInTheDocument();
+    expect(screen.getByText('Its children become UC roots; grandchildren become subdomains.')).toBeInTheDocument();
+    expect(screen.getByText('Ontos → Unity Catalog')).toBeInTheDocument();
+    expect(screen.getByText('Top-level domains')).toBeInTheDocument();
+    expect(screen.queryByText('Place under')).not.toBeInTheDocument();
   });
 });
