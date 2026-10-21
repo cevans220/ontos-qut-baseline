@@ -855,6 +855,7 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
   const [triggerToStatus, setTriggerToStatus] = useState('');
   const [triggerOnError, setTriggerOnError] = useState<GateErrorMode>('fail_open');
   const [triggerDisabledFor, setTriggerDisabledFor] = useState<GateExemptions>(EMPTY_GATE_EXEMPTIONS);
+  const [, setMissingExemptions] = useState<string[]>([]);
   const [isActive, setIsActive] = useState(true);
   const [steps, setSteps] = useState<WorkflowStepCreate[]>([]);
   const [workflowType, setWorkflowType] = useState<WorkflowTypeValue | null>(isNew ? (initialType || null) : null);
