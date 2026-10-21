@@ -1063,6 +1063,7 @@ def mark_cleanup_legacy_done(engine: Engine) -> None:
 def _build_desired_set(
     datasets: List[DatasetTagInfo],
     direct: "DirectLinkInfos",
+    current: Optional[DeliveryState] = None,
 ) -> Dict[Tuple[str, str], bool]:
     """Build set of (object_type, fqn) pairs that currently have desired tags.
 
@@ -1089,6 +1090,11 @@ def _build_desired_set(
     # Columns from direct links
     for col in direct.columns:
         desired[("COLUMN", col.fqn.lower())] = True
+
+    # Everything this run delivered: inherited schema/catalog tags, contract columns
+    for object_type, objects in (current or {}).items():
+        for fqn in objects:
+            desired[(object_type, fqn.lower())] = True
 
     return desired
 
@@ -1193,8 +1199,12 @@ def handle_legacy_tag_cleanup(
     cleanup_enabled: bool,
     is_partial_read: bool,
     dry_run: bool = False,
+    current: Optional[DeliveryState] = None,
 ) -> Tuple[int, List[str]]:
     """Handle optional cleanup of legacy tags (delivered before this feature).
+
+    ``current`` is what this run delivered: every object in it keeps its tags,
+    including schemas and catalogs that inherit tags from their tables.
 
     When cleanup_enabled is False and this is first full run, log candidates
     for operator review and mark "checked" so we don't repeat.
@@ -1240,7 +1250,7 @@ def handle_legacy_tag_cleanup(
             return (0, [])
 
         # Build current desired set
-        desired = _build_desired_set(datasets, direct)
+        desired = _build_desired_set(datasets, direct, current)
 
         print(f"[INFO] Cleaning up legacy tags with prefix '{default_prefix}'...")
 
@@ -1314,7 +1324,7 @@ def handle_legacy_tag_cleanup(
     elif not cleanup_enabled and not is_partial_read and previous is not None:
         if not cleanup_status.get("checked_first_run"):
             # First full run without cleanup: scan and log candidates
-            desired = _build_desired_set(datasets, direct)
+            desired = _build_desired_set(datasets, direct, current)
             candidates_found = 0
             candidate_samples: List[str] = []
 
@@ -1780,6 +1790,7 @@ def main() -> None:
         cleanup_enabled=cleanup_legacy,
         is_partial_read=is_partial_read,
         dry_run=dry_run,
+        current=result.delivered,
     )
     removed_total += legacy_removed
     all_errors.extend(legacy_errors)

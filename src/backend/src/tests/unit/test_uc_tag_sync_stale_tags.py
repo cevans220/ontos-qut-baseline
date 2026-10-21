@@ -833,3 +833,29 @@ def test_legacy_cleanup_multi_level_objects(tag_sync, uc, db, monkeypatch):
     assert uc.get(("SCHEMA", "main.unlinked_sch"), {}) == {}
     assert uc.get(("TABLE", "main.s.unlinked_t"), {}) == {}
     assert uc.get(("COLUMN", "main.s.t.unlinked_col"), {}) == {}
+
+
+def test_legacy_cleanup_keeps_tags_this_run_delivered(tag_sync, uc, db, monkeypatch):
+    """A schema that inherits its tag from a linked table isn't a legacy candidate."""
+    default_prefix = "x_ontos_"
+    key = f"{default_prefix}legacy_tag"
+    uc[("SCHEMA", "main.s")] = {key: OPEX}
+    uc[("SCHEMA", "main.other")] = {key: OPEX}
+
+    def fake_bulk_read(spark, catalog, prefix):
+        return {k: dict(v) for k, v in uc.items() if k[1].startswith(catalog)}
+
+    monkeypatch.setattr(tag_sync, "_bulk_read_prefixed_tags_per_catalog", fake_bulk_read)
+    dataset = _asset_dataset(tag_sync, "main.s.t", [OPEX])
+    current = {t: {} for t in tag_sync.DELIVERY_OBJECT_TYPES}
+    current["SCHEMA"]["main.s"] = {key: OPEX}
+
+    removed, errors = tag_sync.handle_legacy_tag_cleanup(
+        MagicMock(), db, [dataset], tag_sync.DirectLinkInfos(),
+        prefix=default_prefix, previous={}, cleanup_enabled=True,
+        is_partial_read=False, dry_run=False, current=current,
+    )
+
+    assert uc[("SCHEMA", "main.s")] == {key: OPEX}
+    assert key not in uc[("SCHEMA", "main.other")]
+    assert (removed, errors) == (1, [])
