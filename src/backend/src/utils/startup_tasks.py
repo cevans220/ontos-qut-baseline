@@ -141,187 +141,173 @@ def _count_estates(db: Session) -> int:
     return db.query(EstateDb).count()
 
 
-def _load_estates_yaml() -> Optional[Dict]:
+def _normalize_estates(data: List) -> str:
+    """Normalize estates data (removing timestamps) and return hash for comparison."""
+    import hashlib
+    normalized = json.loads(json.dumps(data))  # Deep copy
+    for e in normalized:
+        for key in ['created_at', 'updated_at', 'last_sync_time', 'last_sync_status']:
+            e.pop(key, None)
+        for p in e.get('sharing_policies', []) + e.get('export_policies', []) + e.get('import_policies', []):
+            for key in ['created_at', 'updated_at', 'id']:
+                p.pop(key, None)
+    return hashlib.sha256(json.dumps(normalized, sort_keys=True).encode()).hexdigest()
+
+
+def _is_shipped_sample(data: List) -> bool:
+    """Check if data matches the shipped sample estates (never configured)."""
+    if not isinstance(data, list) or len(data) < 2:
+        return False
+    # Shipped samples have these exact names
+    names = {e.get('name') for e in data if isinstance(e, dict)}
+    return names == {'US Production', 'EU Analytics'} and _normalize_estates(data) == _normalize_estates([
+        {'name': 'US Production', 'cloud_type': 'aws', 'sharing_policies': [
+            {'name': 'Share Active US Data Products', 'resource_type': 'data_product', 'rules': [
+                {'filter_type': 'status', 'operator': 'equals', 'filter_value': 'Active'},
+                {'filter_type': 'domain', 'operator': 'equals', 'filter_value': 'US Operations'},
+            ]}
+        ]},
+        {'name': 'EU Analytics', 'cloud_type': 'azure', 'sharing_policies': [
+            {'name': 'Share Finance Glossary Terms from EU', 'resource_type': 'business_glossary', 'rules': [
+                {'filter_type': 'tag', 'operator': 'contains', 'filter_value': 'finance'},
+                {'filter_type': 'domain', 'operator': 'equals', 'filter_value': 'EU Analytics'},
+            ]}
+        ]},
+    ])
+
+
+def _load_estates_yaml(yaml_path: Optional[Path] = None) -> Optional[List]:
     """Load and parse the estates YAML file.
 
-    Returns the parsed YAML content (list of estate dicts) or None if not found.
-    Logs issues but does not raise exceptions.
+    Args:
+        yaml_path: Optional override path. Defaults to data/estates.yaml.
+
+    Returns parsed YAML (list of dicts) or None if not found/invalid.
+    Raises yaml.YAMLError only; caller handles gracefully.
     """
-    yaml_path = Path(__file__).parent.parent / 'data' / 'estates.yaml'
+    if yaml_path is None:
+        yaml_path = Path(__file__).parent.parent / 'data' / 'estates.yaml'
 
     if not yaml_path.exists():
         logger.info("Estates YAML file not found at %s", yaml_path)
         return None
 
-    try:
-        with open(yaml_path, 'r', encoding='utf-8') as f:
-            data = yaml.safe_load(f)
+    with open(yaml_path, 'r', encoding='utf-8') as f:
+        data = yaml.safe_load(f)
 
-        if not data:
-            logger.warning("Estates YAML file is empty: %s", yaml_path)
-            return None
-
-        if not isinstance(data, list):
-            logger.warning("Estates YAML file does not contain a list at top level: %s", yaml_path)
-            return None
-
-        logger.info("Loaded estates YAML with %d estate(s)", len(data))
-        return data
-    except yaml.YAMLError as e:
-        logger.error("Failed to parse estates YAML: malformed YAML at %s: %s", yaml_path, e)
-        return None
-    except Exception as e:
-        logger.error("Failed to read estates YAML file %s: %s", yaml_path, e, exc_info=True)
+    if not data:
+        logger.info("Estates YAML file is empty")
         return None
 
+    if not isinstance(data, list):
+        logger.error("Estates YAML must contain a list at top level, got %s", type(data).__name__)
+        raise ValueError("Estates YAML must be a list")
 
-def import_estates_from_yaml_once(db: Session) -> bool:
-    """Import estates from YAML file on startup if tables are empty.
+    logger.info("Loaded estates YAML with %d estate(s)", len(data))
+    return data
 
-    Checks if the import has already been done (via app_settings flag).
-    If not done and the estates tables are empty, imports from YAML.
+
+def import_estates_from_yaml_once(db: Session, yaml_path: Optional[Path] = None) -> bool:
+    """Import estates from YAML on startup if empty (one-time only).
+
+    Detects shipped samples (never configured) and skips them.
+    On malformed YAML: logs a coded warning, does NOT mark done → retry after fix.
+    All estates created in a transaction for atomicity.
+
+    Args:
+        db: Database session
+        yaml_path: Optional path override for testing
+
     Returns True if import was performed, False otherwise.
     """
     import_key = 'estates_yaml_import_done'
 
-    # Check if import has already been done
-    import_done = app_settings_repo.get_by_key(db, import_key)
-    if import_done:
+    # Check if import already done
+    if app_settings_repo.get_by_key(db, import_key):
         logger.debug("Estates YAML import already marked as done")
         return False
 
-    # Check if estates tables are empty
-    estates_count = _count_estates(db)
-    if estates_count > 0:
-        logger.debug("Estates table not empty (%d estate(s)); skipping YAML import", estates_count)
+    # Check if table is empty
+    if _count_estates(db) > 0:
+        logger.debug("Estates table not empty; skipping YAML import")
         return False
 
-    # Load YAML
-    estates_data = _load_estates_yaml()
-    if not estates_data:
-        # No YAML or invalid YAML: mark as done to avoid re-checking on every startup
-        logger.info("No valid estates YAML found; marking import as done to avoid retry")
-        app_settings_repo.set(db, import_key, 'true')
-        return False
-
-    # Import estates
+    # Load YAML (may raise YAMLError)
     try:
-        from src.controller.estate_manager import EstateManager
-        from src.models.estate import Estate, SharingPolicy, SharingRule, SharingPolicyDirection, SharingResourceType, ConnectionType, CloudType
+        estates_data = _load_estates_yaml(yaml_path)
+    except yaml.YAMLError as e:
+        logger.error("Estates YAML is malformed (code: estates_yaml_import_failed): %s", e)
+        logger.warning("Fix the estates YAML file and restart to retry import")
+        return False  # Do NOT mark done
 
-        estate_manager = EstateManager()
-        imported_count = 0
-        failed_count = 0
-
-        for estate_dict in estates_data:
-            try:
-                # Convert the YAML dict to an Estate API model
-                # Handle legacy 'sharing_policies' field (exported as export_policies)
-                sharing_policies = estate_dict.pop('sharing_policies', None) or []
-                export_policies = estate_dict.pop('export_policies', None) or sharing_policies
-                import_policies = estate_dict.pop('import_policies', None) or []
-
-                # Convert sharing policies to SharingPolicy objects
-                export_policy_objs = []
-                for policy in export_policies:
-                    try:
-                        rules = [
-                            SharingRule(
-                                filter_type=rule['filter_type'],
-                                operator=rule.get('operator', 'equals'),
-                                filter_value=rule['filter_value']
-                            )
-                            for rule in policy.get('rules', [])
-                        ]
-                        # Convert legacy resource_type if needed
-                        resource_type = policy['resource_type']
-                        if resource_type == 'business_glossary':
-                            resource_type = 'business_term'
-
-                        policy_obj = SharingPolicy(
-                            id=policy.get('id'),
-                            name=policy['name'],
-                            description=policy.get('description', ''),
-                            resource_type=resource_type,
-                            rules=rules,
-                            is_enabled=policy.get('is_enabled', True),
-                            created_at=policy.get('created_at'),
-                            updated_at=policy.get('updated_at'),
-                        )
-                        export_policy_objs.append(policy_obj)
-                    except Exception as e:
-                        logger.warning("Failed to convert export policy for estate %s: %s", estate_dict.get('name', 'unknown'), e)
-
-                import_policy_objs = []
-                for policy in import_policies:
-                    try:
-                        rules = [
-                            SharingRule(
-                                filter_type=rule['filter_type'],
-                                operator=rule.get('operator', 'equals'),
-                                filter_value=rule['filter_value']
-                            )
-                            for rule in policy.get('rules', [])
-                        ]
-                        # Convert legacy resource_type if needed
-                        resource_type = policy['resource_type']
-                        if resource_type == 'business_glossary':
-                            resource_type = 'business_term'
-
-                        policy_obj = SharingPolicy(
-                            id=policy.get('id'),
-                            name=policy['name'],
-                            description=policy.get('description', ''),
-                            resource_type=resource_type,
-                            rules=rules,
-                            is_enabled=policy.get('is_enabled', True),
-                            created_at=policy.get('created_at'),
-                            updated_at=policy.get('updated_at'),
-                        )
-                        import_policy_objs.append(policy_obj)
-                    except Exception as e:
-                        logger.warning("Failed to convert import policy for estate %s: %s", estate_dict.get('name', 'unknown'), e)
-
-                # Create Estate object
-                estate = Estate(
-                    id=estate_dict.get('id'),
-                    name=estate_dict['name'],
-                    description=estate_dict.get('description', ''),
-                    workspace_url=estate_dict['workspace_url'],
-                    cloud_type=estate_dict['cloud_type'],
-                    metastore_name=estate_dict['metastore_name'],
-                    connection_type=estate_dict.get('connection_type', 'delta_share'),
-                    export_policies=export_policy_objs,
-                    import_policies=import_policy_objs,
-                    is_enabled=estate_dict.get('is_enabled', True),
-                    sync_schedule=estate_dict.get('sync_schedule', '0 0 * * *'),
-                    last_sync_time=estate_dict.get('last_sync_time'),
-                    last_sync_status=estate_dict.get('last_sync_status'),
-                    last_sync_error=estate_dict.get('last_sync_error'),
-                    created_at=estate_dict.get('created_at'),
-                    updated_at=estate_dict.get('updated_at'),
-                )
-
-                # Create the estate
-                estate_manager.create_estate(db, estate, user='system@startup')
-                imported_count += 1
-                logger.info("Imported estate from YAML: %s", estate.name)
-            except Exception as e:
-                logger.error("Failed to import estate from YAML: %s", e, exc_info=True)
-                failed_count += 1
-
-        # Mark import as done
-        app_settings_repo.set(db, import_key, 'true')
-        logger.info(
-            "Completed estates YAML import: %d imported, %d failed",
-            imported_count, failed_count
-        )
-        return imported_count > 0
-    except Exception as e:
-        logger.error("Fatal error during estates YAML import: %s", e, exc_info=True)
-        # Still mark as done to avoid retry on every startup
+    if not estates_data:
+        logger.info("No estates YAML found; marking import done")
         app_settings_repo.set(db, import_key, 'true')
         return False
+
+    # Check if sample (never configured, should stay empty)
+    if _is_shipped_sample(estates_data):
+        logger.info("Estates YAML contains only shipped sample; skipping import")
+        app_settings_repo.set(db, import_key, 'true')
+        return False
+
+    # Import in transaction
+    from src.controller.estate_manager import EstateManager
+    from src.models.estate import Estate, SharingPolicy, SharingRule
+
+    savepoint = db.begin_nested()
+    try:
+        estate_manager = EstateManager()
+        imported = 0
+
+        for e_dict in estates_data:
+            try:
+                policies = e_dict.pop('sharing_policies', []) or []
+                export_policies = e_dict.pop('export_policies', None) or policies
+                import_policies = e_dict.pop('import_policies', [])
+
+                def make_policies(pol_list):
+                    return [
+                        SharingPolicy(
+                            id=p.get('id'),
+                            name=p['name'],
+                            description=p.get('description', ''),
+                            resource_type=p['resource_type'].replace('business_glossary', 'business_term'),
+                            rules=[SharingRule(filter_type=r['filter_type'], operator=r.get('operator', 'equals'), filter_value=r['filter_value'])
+                                   for r in p.get('rules', [])],
+                            is_enabled=p.get('is_enabled', True),
+                        )
+                        for p in pol_list
+                    ]
+
+                estate = Estate(
+                    id=e_dict.get('id'),
+                    name=e_dict['name'],
+                    description=e_dict.get('description', ''),
+                    workspace_url=e_dict['workspace_url'],
+                    cloud_type=e_dict['cloud_type'],
+                    metastore_name=e_dict['metastore_name'],
+                    connection_type=e_dict.get('connection_type', 'delta_share'),
+                    export_policies=make_policies(export_policies),
+                    import_policies=make_policies(import_policies),
+                    is_enabled=e_dict.get('is_enabled', True),
+                    sync_schedule=e_dict.get('sync_schedule', '0 0 * * *'),
+                )
+                estate_manager.create_estate(db, estate, user='system@startup')
+                imported += 1
+                logger.info("Imported estate: %s", estate.name)
+            except Exception as e:
+                logger.error("Failed to import estate: %s", e, exc_info=True)
+
+        savepoint.commit()
+        app_settings_repo.set(db, import_key, 'true')
+        logger.info("Completed estates YAML import: %d imported", imported)
+        return imported > 0
+    except Exception as e:
+        savepoint.rollback()
+        logger.error("Estates import transaction failed (code: estates_yaml_import_failed): %s", e, exc_info=True)
+        logger.warning("Fix the estates YAML and restart to retry")
+        return False  # Do NOT mark done
 
 
 def initialize_database():

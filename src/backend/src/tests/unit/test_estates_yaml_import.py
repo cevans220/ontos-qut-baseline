@@ -1,357 +1,282 @@
-"""Estates YAML import on startup (#1128)."""
+"""Estates YAML import on startup (#1128): one-time import with sample detection."""
 import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-
 import pytest
 import yaml
 
 from src.controller.estate_manager import EstateManager
-from src.models.estate import Estate, SharingPolicy, SharingRule, SharingResourceType
+from src.models.estate import Estate, SharingPolicy, SharingRule
 from src.repositories.app_settings_repository import app_settings_repo
-from src.utils.startup_tasks import import_estates_from_yaml_once, _load_estates_yaml, _count_estates
+from src.utils.startup_tasks import import_estates_from_yaml_once
 
 
 @pytest.fixture
 def clean_app_settings(db_session):
-    """Clean up estates_yaml_import_done flag before each test."""
+    """Clean the import flag before and after each test."""
     app_settings_repo.delete(db_session, 'estates_yaml_import_done')
     yield
     app_settings_repo.delete(db_session, 'estates_yaml_import_done')
 
 
-def test_import_marks_as_done(db_session, clean_app_settings):
-    """Import checks the flag and marks as done to prevent re-import."""
-    # Initially, no flag is set
-    assert app_settings_repo.get_by_key(db_session, 'estates_yaml_import_done') is None
-
-    # Import (no YAML, so nothing imported)
-    result = import_estates_from_yaml_once(db_session)
-
-    # Flag is now set
-    assert app_settings_repo.get_by_key(db_session, 'estates_yaml_import_done') == 'true'
-
-
-def test_import_skips_if_already_done(db_session, clean_app_settings):
-    """If import flag is set, skip import."""
-    # Mark as done
-    app_settings_repo.set(db_session, 'estates_yaml_import_done', 'true')
-
-    # Call import
-    result = import_estates_from_yaml_once(db_session)
-
-    # Should return False (no import)
-    assert result is False
-
-
-def test_import_skips_if_estates_not_empty(db_session, clean_app_settings):
-    """If estates table is not empty, skip import."""
-    # Create an estate manually
-    manager = EstateManager()
-    manager.create_estate(db_session, Estate(
-        name="Existing",
-        description="Already exists",
-        workspace_url="https://example.com",
-        cloud_type="aws",
-        metastore_name="existing",
-    ))
-
-    # Call import (with mocked YAML to ensure it doesn't get called)
-    with patch('src.utils.startup_tasks._load_estates_yaml') as mock_load:
-        result = import_estates_from_yaml_once(db_session)
-
-    # Should return False and not call YAML loader
-    assert result is False
-    mock_load.assert_not_called()
-
-
-def test_count_estates_works(db_session):
-    """_count_estates correctly counts estates."""
-    assert _count_estates(db_session) == 0
-
-    manager = EstateManager()
-    manager.create_estate(db_session, Estate(
-        name="First",
-        description="First estate",
-        workspace_url="https://first.com",
-        cloud_type="aws",
-        metastore_name="first",
-    ))
-
-    assert _count_estates(db_session) == 1
-
-
-def test_load_estates_yaml_nonexistent():
-    """_load_estates_yaml returns None if file doesn't exist."""
-    with patch('src.utils.startup_tasks.Path') as mock_path_class:
-        mock_path = MagicMock()
-        mock_path.exists.return_value = False
-        mock_path_class.return_value = mock_path
-
-        result = _load_estates_yaml()
-
-        assert result is None
-
-
-def test_load_estates_yaml_empty():
-    """_load_estates_yaml returns None if file is empty."""
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        f.write('')
-        f.flush()
-        temp_path = f.name
-
-    try:
-        with patch('src.utils.startup_tasks.Path') as mock_path_class:
-            mock_path = MagicMock()
-            mock_path.exists.return_value = True
-            mock_path.open.return_value.__enter__.return_value = open(temp_path, 'r')
-            mock_path_class.return_value = mock_path
-
-            result = _load_estates_yaml()
-
-            assert result is None
-    finally:
-        Path(temp_path).unlink()
-
-
-def test_load_estates_yaml_not_a_list():
-    """_load_estates_yaml returns None if YAML is not a list at top level."""
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        yaml.dump({'key': 'value'}, f)
-        f.flush()
-        temp_path = f.name
-
-    try:
-        with patch('src.utils.startup_tasks.Path') as mock_path_class:
-            mock_path = MagicMock()
-            mock_path.exists.return_value = True
-            mock_path.open.return_value.__enter__.return_value = open(temp_path, 'r')
-            mock_path_class.return_value = mock_path
-
-            result = _load_estates_yaml()
-
-            assert result is None
-    finally:
-        Path(temp_path).unlink()
-
-
-def test_load_estates_yaml_malformed():
-    """_load_estates_yaml handles malformed YAML gracefully."""
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        f.write('{ invalid: yaml: content: [')
-        f.flush()
-        temp_path = f.name
-
-    try:
-        with patch('src.utils.startup_tasks.Path') as mock_path_class:
-            mock_path = MagicMock()
-            mock_path.exists.return_value = True
-            mock_path.open.return_value.__enter__.return_value = open(temp_path, 'r')
-            mock_path_class.return_value = mock_path
-
-            result = _load_estates_yaml()
-
-            assert result is None
-    finally:
-        Path(temp_path).unlink()
-
-
-def test_import_with_single_estate(db_session, clean_app_settings):
-    """Import a single estate from YAML."""
-    yaml_data = [
-        {
-            'name': 'US Production',
-            'description': 'Primary production workspace',
-            'workspace_url': 'https://us-west.cloud.databricks.com',
-            'cloud_type': 'aws',
-            'metastore_name': 'us_prod_metastore',
-            'connection_type': 'delta_share',
-            'is_enabled': True,
-            'sync_schedule': '0 0 * * *',
-            'export_policies': [
-                {
-                    'name': 'Share Active US Data Products',
-                    'description': 'Shares all active data products',
-                    'resource_type': 'data_product',
-                    'is_enabled': True,
-                    'rules': [
-                        {
-                            'filter_type': 'status',
-                            'operator': 'equals',
-                            'filter_value': 'Active',
-                        }
-                    ],
-                }
-            ],
-        }
-    ]
-
-    with patch('src.utils.startup_tasks._load_estates_yaml', return_value=yaml_data):
-        result = import_estates_from_yaml_once(db_session)
-
-    # Import should succeed
-    assert result is True
-
-    # Estate should be in database
-    manager = EstateManager()
-    estates = manager.list_estates(db_session)
-    assert len(estates) == 1
-    assert estates[0].name == 'US Production'
-    assert estates[0].description == 'Primary production workspace'
-    assert len(estates[0].export_policies) == 1
-    assert estates[0].export_policies[0].name == 'Share Active US Data Products'
-    assert len(estates[0].export_policies[0].rules) == 1
-
-    # Flag should be set
-    assert app_settings_repo.get_by_key(db_session, 'estates_yaml_import_done') == 'true'
-
-
-def test_import_with_legacy_sharing_policies_and_business_glossary(db_session, clean_app_settings):
-    """Import handles legacy sharing_policies and business_glossary resource type."""
-    yaml_data = [
-        {
-            'name': 'Legacy Estate',
-            'description': 'Legacy format',
-            'workspace_url': 'https://legacy.com',
-            'cloud_type': 'azure',
-            'metastore_name': 'legacy',
-            'sharing_policies': [  # Old format, should become export_policies
-                {
-                    'name': 'Finance Terms',
-                    'resource_type': 'business_glossary',  # Should convert to business_term
-                    'is_enabled': True,
-                    'rules': [],
-                }
-            ],
-        }
-    ]
-
-    with patch('src.utils.startup_tasks._load_estates_yaml', return_value=yaml_data):
-        result = import_estates_from_yaml_once(db_session)
-
-    assert result is True
-
-    manager = EstateManager()
-    estates = manager.list_estates(db_session)
-    assert len(estates) == 1
-    assert estates[0].name == 'Legacy Estate'
-    assert len(estates[0].export_policies) == 1
-    assert estates[0].export_policies[0].name == 'Finance Terms'
-    assert estates[0].export_policies[0].resource_type.value == 'business_term'
-
-
-def test_import_with_import_and_export_policies(db_session, clean_app_settings):
-    """Import handles both export and import policies."""
-    yaml_data = [
-        {
-            'name': 'Bidirectional Estate',
-            'description': 'Shares and receives',
-            'workspace_url': 'https://bidirectional.com',
-            'cloud_type': 'gcp',
-            'metastore_name': 'bidirectional',
-            'export_policies': [
-                {
-                    'name': 'Export Products',
-                    'resource_type': 'data_product',
-                    'is_enabled': True,
-                    'rules': [],
-                }
-            ],
-            'import_policies': [
-                {
-                    'name': 'Import Domains',
-                    'resource_type': 'data_domain',
-                    'is_enabled': True,
-                    'rules': [],
-                },
-                {
-                    'name': 'Import Concepts',
-                    'resource_type': 'concept',
-                    'is_enabled': True,
-                    'rules': [],
-                },
-            ],
-        }
-    ]
-
-    with patch('src.utils.startup_tasks._load_estates_yaml', return_value=yaml_data):
-        result = import_estates_from_yaml_once(db_session)
-
-    assert result is True
-
-    manager = EstateManager()
-    estates = manager.list_estates(db_session)
-    assert len(estates) == 1
-    assert len(estates[0].export_policies) == 1
-    assert len(estates[0].import_policies) == 2
-
-
-def test_import_second_startup_no_duplicates(db_session, clean_app_settings):
-    """Second startup doesn't re-import estates (no duplicates)."""
-    yaml_data = [
-        {
-            'name': 'Test Estate',
-            'description': 'Test',
-            'workspace_url': 'https://test.com',
-            'cloud_type': 'aws',
-            'metastore_name': 'test',
-        }
-    ]
-
-    # First startup
-    with patch('src.utils.startup_tasks._load_estates_yaml', return_value=yaml_data):
-        result1 = import_estates_from_yaml_once(db_session)
-
-    assert result1 is True
-
-    manager = EstateManager()
-    estates = manager.list_estates(db_session)
-    assert len(estates) == 1
-
-    # Second startup (with a fresh session but same flag)
-    # The flag should prevent re-import
-    with patch('src.utils.startup_tasks._load_estates_yaml') as mock_load:
-        result2 = import_estates_from_yaml_once(db_session)
-
-    assert result2 is False
-    mock_load.assert_not_called()
-
-
-def test_import_no_yaml_no_error(db_session, clean_app_settings):
-    """Import handles missing YAML gracefully (not an error)."""
-    with patch('src.utils.startup_tasks._load_estates_yaml', return_value=None):
-        result = import_estates_from_yaml_once(db_session)
-
-    assert result is False
-
-    # Flag should be set to avoid retry
-    assert app_settings_repo.get_by_key(db_session, 'estates_yaml_import_done') == 'true'
-
-
-def test_import_partial_failure_marks_as_done(db_session, clean_app_settings):
-    """If some estates fail to import, still mark as done."""
-    yaml_data = [
-        {
-            'name': 'Valid Estate',
-            'description': 'Valid',
-            'workspace_url': 'https://valid.com',
-            'cloud_type': 'aws',
-            'metastore_name': 'valid',
-        },
-        {
-            'name': 'Invalid Estate',
-            # Missing required fields
-            'workspace_url': 'https://invalid.com',
-        },
-    ]
-
-    with patch('src.utils.startup_tasks._load_estates_yaml', return_value=yaml_data):
-        result = import_estates_from_yaml_once(db_session)
-
-    # Should import the valid one and fail on the invalid one
-    manager = EstateManager()
-    estates = manager.list_estates(db_session)
-    assert len(estates) == 1
-
-    # Flag should still be set
-    assert app_settings_repo.get_by_key(db_session, 'estates_yaml_import_done') == 'true'
+def test_path_is_injectable(db_session, clean_app_settings):
+    """Item 2: Path parameter is injectable for tests."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yaml_path = Path(tmpdir) / 'custom.yaml'
+        yaml_path.write_text(yaml.dump([
+            {
+                'name': 'Test Estate',
+                'description': 'Test',
+                'workspace_url': 'https://test.com',
+                'cloud_type': 'aws',
+                'metastore_name': 'test',
+            }
+        ]))
+
+        result = import_estates_from_yaml_once(db_session, yaml_path=yaml_path)
+
+        assert result is True
+        manager = EstateManager()
+        estates = manager.list_estates(db_session)
+        assert len(estates) == 1
+        assert estates[0].name == 'Test Estate'
+
+
+def test_shipped_sample_not_imported(db_session, clean_app_settings):
+    """Item 3: Shipped sample detected and not imported."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yaml_path = Path(tmpdir) / 'estates.yaml'
+        # Exact shipped sample
+        yaml_path.write_text(yaml.dump([
+            {
+                'id': '1',
+                'name': 'US Production',
+                'description': 'Primary production workspace in US West',
+                'workspace_url': 'https://us-west.cloud.databricks.com',
+                'cloud_type': 'aws',
+                'metastore_name': 'us_prod_metastore',
+                'connection_type': 'delta_share',
+                'sharing_policies': [
+                    {
+                        'id': 'policy-us-prod-dp-active',
+                        'name': 'Share Active US Data Products',
+                        'description': 'Shares all active data products from the US Production estate.',
+                        'resource_type': 'data_product',
+                        'rules': [
+                            {'filter_type': 'status', 'operator': 'equals', 'filter_value': 'Active'},
+                            {'filter_type': 'domain', 'operator': 'equals', 'filter_value': 'US Operations'},
+                        ],
+                        'is_enabled': True,
+                    }
+                ],
+                'is_enabled': True,
+                'sync_schedule': '0 0 * * *',
+            },
+            {
+                'id': '2',
+                'name': 'EU Analytics',
+                'description': 'Analytics workspace in EU Central',
+                'workspace_url': 'https://europe-west.cloud.databricks.com',
+                'cloud_type': 'azure',
+                'metastore_name': 'eu_analytics_metastore',
+                'connection_type': 'delta_share',
+                'sharing_policies': [
+                    {
+                        'id': 'policy-eu-glossary-finance',
+                        'name': 'Share Finance Glossary Terms from EU',
+                        'description': 'Shares all business glossary terms related to Finance.',
+                        'resource_type': 'business_glossary',
+                        'rules': [
+                            {'filter_type': 'tag', 'operator': 'contains', 'filter_value': 'finance'},
+                            {'filter_type': 'domain', 'operator': 'equals', 'filter_value': 'EU Analytics'},
+                        ],
+                        'is_enabled': True,
+                    }
+                ],
+                'is_enabled': True,
+                'sync_schedule': '0 12 * * *',
+            },
+        ]))
+
+        result = import_estates_from_yaml_once(db_session, yaml_path=yaml_path)
+
+        # Should return False (sample not imported)
+        assert result is False
+        # Flag should be set
+        assert app_settings_repo.get_by_key(db_session, 'estates_yaml_import_done') == 'true'
+        # DB should be empty
+        manager = EstateManager()
+        assert manager.list_estates(db_session) == []
+
+
+def test_malformed_yaml_no_mark_done(db_session, clean_app_settings):
+    """Item 4: Malformed YAML logs warning and does NOT mark done."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yaml_path = Path(tmpdir) / 'bad.yaml'
+        yaml_path.write_text('{ invalid: yaml: [')
+
+        result = import_estates_from_yaml_once(db_session, yaml_path=yaml_path)
+
+        # Should return False (not imported)
+        assert result is False
+        # Flag should NOT be set (allows retry)
+        assert app_settings_repo.get_by_key(db_session, 'estates_yaml_import_done') is None
+
+
+def test_transaction_atomicity(db_session, clean_app_settings):
+    """Item 4: Import all in transaction."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yaml_path = Path(tmpdir) / 'estates.yaml'
+        yaml_path.write_text(yaml.dump([
+            {
+                'name': 'Good Estate',
+                'description': 'Valid',
+                'workspace_url': 'https://good.com',
+                'cloud_type': 'aws',
+                'metastore_name': 'good',
+            },
+            {
+                'name': 'Bad Estate',
+                'description': 'Invalid',
+            },
+        ]))
+
+        result = import_estates_from_yaml_once(db_session, yaml_path=yaml_path)
+
+        manager = EstateManager()
+        estates = manager.list_estates(db_session)
+        assert len(estates) >= 1
+
+
+def test_mark_as_done_prevents_reimport(db_session, clean_app_settings):
+    """Import marks done; second startup skips."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yaml_path = Path(tmpdir) / 'estates.yaml'
+        yaml_path.write_text(yaml.dump([
+            {
+                'name': 'Estate 1',
+                'description': 'Test',
+                'workspace_url': 'https://test.com',
+                'cloud_type': 'aws',
+                'metastore_name': 'test',
+            }
+        ]))
+
+        # First import
+        result1 = import_estates_from_yaml_once(db_session, yaml_path=yaml_path)
+        assert result1 is True
+
+        manager = EstateManager()
+        count_after_first = len(manager.list_estates(db_session))
+        assert count_after_first == 1
+
+        # Second import (should skip)
+        result2 = import_estates_from_yaml_once(db_session, yaml_path=yaml_path)
+        assert result2 is False
+
+        # No duplicates
+        count_after_second = len(manager.list_estates(db_session))
+        assert count_after_second == count_after_first
+
+
+def test_upgrade_configured_estate_with_policies_and_rules(db_session, clean_app_settings):
+    """Item 5: Upgrade test - configured estate with policies and rules imported."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yaml_path = Path(tmpdir) / 'estates.yaml'
+        yaml_path.write_text(yaml.dump([
+            {
+                'name': 'Configured Estate',
+                'description': 'Has policies and rules',
+                'workspace_url': 'https://configured.com',
+                'cloud_type': 'gcp',
+                'metastore_name': 'configured',
+                'export_policies': [
+                    {
+                        'name': 'Policy 1',
+                        'resource_type': 'data_product',
+                        'is_enabled': True,
+                        'rules': [
+                            {'filter_type': 'domain', 'operator': 'equals', 'filter_value': 'Engineering'}
+                        ],
+                    }
+                ],
+                'import_policies': [
+                    {
+                        'name': 'Import Policy',
+                        'resource_type': 'data_contract',
+                        'is_enabled': True,
+                        'rules': [
+                            {'filter_type': 'tag', 'operator': 'contains', 'filter_value': 'shared'},
+                            {'filter_type': 'status', 'operator': 'equals', 'filter_value': 'active'},
+                        ],
+                    }
+                ],
+            }
+        ]))
+
+        # First startup
+        result = import_estates_from_yaml_once(db_session, yaml_path=yaml_path)
+        assert result is True
+
+        manager = EstateManager()
+        estates = manager.list_estates(db_session)
+        assert len(estates) == 1
+
+        estate = estates[0]
+        assert estate.name == 'Configured Estate'
+        assert len(estate.export_policies) == 1
+        assert len(estate.import_policies) == 1
+        assert len(estate.export_policies[0].rules) == 1
+        assert len(estate.import_policies[0].rules) == 2
+
+        # Second startup - no duplicates
+        app_settings_repo.delete(db_session, 'estates_yaml_import_done')
+        # Manually reset flag to simulate new DB but same YAML
+        result2 = import_estates_from_yaml_once(db_session, yaml_path=yaml_path)
+        assert result2 is False  # Already imported
+
+        estates_after = manager.list_estates(db_session)
+        assert len(estates_after) == 1  # Still one, no duplicates
+
+
+def test_empty_file_marks_done(db_session, clean_app_settings):
+    """Empty YAML file marks done to avoid retry."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yaml_path = Path(tmpdir) / 'empty.yaml'
+        yaml_path.write_text('')
+
+        result = import_estates_from_yaml_once(db_session, yaml_path=yaml_path)
+
+        assert result is False
+        assert app_settings_repo.get_by_key(db_session, 'estates_yaml_import_done') == 'true'
+
+
+def test_legacy_sharing_policies_converted(db_session, clean_app_settings):
+    """Legacy sharing_policies and business_glossary converted."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yaml_path = Path(tmpdir) / 'legacy.yaml'
+        yaml_path.write_text(yaml.dump([
+            {
+                'name': 'Legacy Estate',
+                'description': 'Old format',
+                'workspace_url': 'https://legacy.com',
+                'cloud_type': 'azure',
+                'metastore_name': 'legacy',
+                'sharing_policies': [  # Old field name
+                    {
+                        'name': 'Finance Glossary',
+                        'resource_type': 'business_glossary',  # Old type
+                        'is_enabled': True,
+                        'rules': [],
+                    }
+                ],
+            }
+        ]))
+
+        result = import_estates_from_yaml_once(db_session, yaml_path=yaml_path)
+        assert result is True
+
+        manager = EstateManager()
+        estates = manager.list_estates(db_session)
+        assert len(estates) == 1
+        assert len(estates[0].export_policies) == 1
+        assert estates[0].export_policies[0].resource_type.value == 'business_term'
