@@ -147,7 +147,10 @@ import {
 import { PrincipalPicker } from '@/components/common/principal-picker';
 import { WorkflowCanvasSkeleton } from '@/components/common/list-view-skeleton';
 import {
+  CONTRACT_APPROVER_TOKEN,
+  DOMAIN_OWNER_TOKEN,
   joinRoleAndPrincipals,
+  roleSelectValue,
   splitRoleAndPrincipals,
 } from '@/lib/workflow-principals';
 
@@ -852,14 +855,12 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
   const [triggerToStatus, setTriggerToStatus] = useState('');
   const [triggerOnError, setTriggerOnError] = useState<GateErrorMode>('fail_open');
   const [triggerDisabledFor, setTriggerDisabledFor] = useState<GateExemptions>(EMPTY_GATE_EXEMPTIONS);
-  // Selected exemptions whose entity was deleted: the backend refuses to save them
-  const [missingExemptions, setMissingExemptions] = useState<string[]>([]);
   const [isActive, setIsActive] = useState(true);
   const [steps, setSteps] = useState<WorkflowStepCreate[]>([]);
   const [workflowType, setWorkflowType] = useState<WorkflowTypeValue | null>(isNew ? (initialType || null) : null);
 
   // Helper to render roles grouped by source type
-  const renderGroupedRoles = (roles: typeof availableRoles, includeSpecialItems?: { requester?: boolean; owner?: boolean }) => {
+  const renderGroupedRoles = (roles: typeof availableRoles, includeSpecialItems?: { requester?: boolean; owner?: boolean; ownerTokens?: boolean }) => {
     const appRoles = roles.filter(r => r.source === 'app');
     const businessRoles = roles.filter(r => r.source === 'business');
 
@@ -871,6 +872,12 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
             <SelectItem value="requester">{t('workflows:designer.roles.requesterOriginalUser')}</SelectItem>
             {includeSpecialItems?.owner && (
               <SelectItem value="owner">{t('workflows:designer.roles.ownerEntityOwner')}</SelectItem>
+            )}
+            {includeSpecialItems?.ownerTokens && (
+              <>
+                <SelectItem value={DOMAIN_OWNER_TOKEN}>{t('workflows:designer.roles.domainOwners')}</SelectItem>
+                <SelectItem value={CONTRACT_APPROVER_TOKEN}>{t('workflows:designer.roles.contractApprovers')}</SelectItem>
+              </>
             )}
           </SelectGroup>
         )}
@@ -1477,17 +1484,6 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
       });
       return;
     }
-
-    if (triggerType === 'before_status_change' && missingExemptions.length > 0) {
-      toast({
-        title: t('workflows:designer.messages.validationError'),
-        description: t('workflows:designer.triggerConfig.disabledFor.missingOnSave', {
-          count: missingExemptions.length,
-        }),
-        variant: 'destructive',
-      });
-      return;
-    }
     setInvalidStepId(null);
 
     setIsSaving(true);
@@ -1500,9 +1496,7 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
           entity_types: entityTypes,
           ...(triggerFromStatus ? { from_status: triggerFromStatus } : {}),
           ...(triggerToStatus ? { to_status: triggerToStatus } : {}),
-          ...(triggerType === 'before_status_change'
-            ? { on_error: triggerOnError, disabled_for: triggerDisabledFor }
-            : {}),
+          ...(triggerType === 'before_status_change' ? { on_error: triggerOnError, disabled_for: triggerDisabledFor } : {}),
         },
         workflow_type: workflowType || 'process',
         is_active: isActive,
@@ -1830,29 +1824,15 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
                       </div>
                     </div>
                   )}
+
                   {triggerType === 'before_status_change' && (
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="space-y-1">
-                        <Label htmlFor="trigger-on-error">
-                          {t('workflows:designer.triggerConfig.failClosed')}
-                        </Label>
-                        <p className="text-xs text-muted-foreground">
-                          {t('workflows:designer.triggerConfig.failClosedHint')}
-                        </p>
-                      </div>
-                      <Switch
-                        id="trigger-on-error"
-                        checked={triggerOnError === 'fail_closed'}
-                        onCheckedChange={(on) => setTriggerOnError(on ? 'fail_closed' : 'fail_open')}
+                    <div>
+                      <GateExemptionsField
+                        value={triggerDisabledFor}
+                        onChange={setTriggerDisabledFor}
+                        onMissingChange={setMissingExemptions}
                       />
                     </div>
-                  )}
-                  {triggerType === 'before_status_change' && (
-                    <GateExemptionsField
-                      value={triggerDisabledFor}
-                      onChange={setTriggerDisabledFor}
-                      onMissingChange={setMissingExemptions}
-                    />
                   )}
 
                   <div>
@@ -2193,7 +2173,7 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
                     <>
                       {(() => {
                         const raw = (selectedStep.config as { recipients?: string })?.recipients || '';
-                        const split = splitRoleAndPrincipals(raw);
+                        const split = splitRoleAndPrincipals(raw, availableRoles);
                         const customOn =
                           (selectedStep.config as { recipients_custom?: boolean })?.recipients_custom
                             ?? split.principals.length > 0;
@@ -2232,12 +2212,12 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
                           <>
                             <div>
                               <Label>{t('workflows:designer.notification.recipientsRole')}</Label>
-                              <Select value={split.roleToken} onValueChange={setRole}>
+                              <Select value={roleSelectValue(split.roleToken, availableRoles)} onValueChange={setRole}>
                                 <SelectTrigger>
                                   <SelectValue placeholder={t('workflows:designer.notification.recipientsPlaceholder')} />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {renderGroupedRoles(availableRoles, { requester: true, owner: true })}
+                                  {renderGroupedRoles(availableRoles, { requester: true, owner: true, ownerTokens: true })}
                                 </SelectContent>
                               </Select>
                             </div>
@@ -2367,7 +2347,7 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
                     <>
                       {(() => {
                         const raw = (selectedStep.config as { approvers?: string })?.approvers || '';
-                        const split = splitRoleAndPrincipals(raw);
+                        const split = splitRoleAndPrincipals(raw, availableRoles);
                         const customOn =
                           (selectedStep.config as { approvers_custom?: boolean })?.approvers_custom
                             ?? split.principals.length > 0;
@@ -2402,12 +2382,12 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
                           <>
                             <div>
                               <Label>{t('workflows:designer.approval.approversRole')}</Label>
-                              <Select value={split.roleToken} onValueChange={setRole}>
+                              <Select value={roleSelectValue(split.roleToken, approverRoles)} onValueChange={setRole}>
                                 <SelectTrigger>
                                   <SelectValue placeholder={t('workflows:designer.approval.selectRole')} />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {renderGroupedRoles(approverRoles, { requester: true })}
+                                  {renderGroupedRoles(approverRoles, { requester: true, ownerTokens: true })}
                                 </SelectContent>
                               </Select>
                             </div>
