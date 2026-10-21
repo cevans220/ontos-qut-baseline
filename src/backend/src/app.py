@@ -6,6 +6,7 @@ settings = get_settings()
 setup_logging(level=settings.LOG_LEVEL, log_file=settings.LOG_FILE)
 logger = get_logger(__name__)
 
+import asyncio
 import mimetypes
 import os
 import time
@@ -18,6 +19,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 from fastapi import HTTPException, status
 
@@ -88,6 +90,7 @@ from src.controller.data_contracts_manager import DataContractsManager
 from src.controller.semantic_models_manager import SemanticModelsManager
 from src.controller.search_manager import SearchManager
 from src.common.workspace_client import get_workspace_client
+from src.common.health_status import add_health_warning, health_issue, set_db_error
 from src.controller.settings_manager import SettingsManager
 from src.controller.users_manager import UsersManager
 from src.controller.authorization_manager import AuthorizationManager
@@ -141,8 +144,11 @@ async def startup_event():
         "ws_ok": False,
         "seed_ok": True,
         "warnings": [],
+        "warning_details": [],
         "db_error": None,
+        "db_error_code": None,
         "seed_error": None,
+        "seed_error_code": None,
     }
     
     # Skip startup tasks if running tests
@@ -159,7 +165,7 @@ async def startup_event():
         initialize_database()
         app.state.health["db_ok"] = True
     except Exception as e:
-        app.state.health["db_error"] = str(e)
+        set_db_error(app.state.health)
         logger.critical(f"Database init failed — entering maintenance mode: {e}", exc_info=True)
         return  # Skip manager init; MaintenanceMiddleware will serve the maintenance page
 
@@ -348,7 +354,8 @@ app = FastAPI(
     openapi_tags=openapi_tags
 )
 
-# Errors with a code (CodedValueError) are answered as {code, message, params}
+# Errors with a code (CodedValueError) are answered as {code, message, params};
+# server errors that repeat an exception's text get a generic message instead
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from src.common.api_errors import coded_http_exception_handler
 app.add_exception_handler(StarletteHTTPException, coded_http_exception_handler)
@@ -505,9 +512,14 @@ async def health_check():
     """Return application health state."""
     return app.state.health
 
+# Serializes retries: a second click waits for the running one instead of
+# initializing the managers a second time in parallel.
+_retry_lock = asyncio.Lock()
+
+
 @app.post("/api/health/retry", tags=["System"])
 async def retry_startup():
-    """Re-attempt database init + manager init after a maintenance-mode failure.
+    """Re-attempt what failed at startup: the database, the managers, or only the workspace.
 
     NOTE: intentionally NOT gated by ``PermissionChecker``:
       1. Any authenticated user hitting the UI during a DB outage gets
@@ -519,32 +531,102 @@ async def retry_startup():
          broken — so gating would create a chicken-and-egg failure mode.
 
     Edge authentication by the Databricks Apps platform still blocks
-    anonymous callers in prod. The operation is idempotent.
+    anonymous callers in prod.
+
+    When the managers are already running (only the workspace was unavailable),
+    a retry first checks the workspace alone and re-initializes the managers
+    only once it is reachable, stopping the old job poller first. Retries are
+    serialized and run off the event loop, so a click never blocks other
+    requests or starts a second poller.
     """
-    settings = get_settings()
+    async with _retry_lock:
+        return await run_in_threadpool(_retry_startup_blocking)
+
+
+def _managers_running() -> bool:
+    """True when startup got past the database and the managers without a failure."""
+    health = app.state.health
+    if not health.get("db_ok") or getattr(app.state, "settings_manager", None) is None:
+        return False
+    codes = {d.get("code") for d in health.get("warning_details", [])}
+    return "manager_init_failed" not in codes and health.get("seed_ok", True)
+
+
+def _stop_job_polling() -> None:
+    """Stop the running managers' job poller before they are replaced."""
+    jobs_manager = getattr(app.state, "jobs_manager", None)
+    if jobs_manager is not None:
+        try:
+            jobs_manager.stop_background_polling()
+        except Exception as e:
+            logger.warning(f"Could not stop the job poller before re-initializing: {e}")
+
+
+def _close_replaced_manager_session(old_session) -> None:
+    """Close the DB session of managers a re-initialization just replaced.
+
+    ``initialize_managers`` opens a long-lived session for the manager
+    singletons. When the retry rebuilds them, the previous session would stay
+    open (``idle in transaction``, holding its locks) until the process exits.
+    """
+    if old_session is None or old_session is getattr(app.state, "manager_db_session", None):
+        return
     try:
-        initialize_database()
-        app.state.health["db_ok"] = True
-        app.state.health["db_error"] = None
+        old_session.rollback()
     except Exception as e:
-        app.state.health["db_error"] = str(e)
-        logger.critical(f"Database retry failed: {e}", exc_info=True)
-        return JSONResponse({"status": "error", "detail": str(e)}, status_code=503)
+        logger.warning(f"Could not roll back the replaced managers' DB session: {e}")
+    try:
+        old_session.close()
+    except Exception as e:
+        logger.warning(f"Could not close the replaced managers' DB session: {e}")
+
+
+def _retry_startup_blocking():
+    if _managers_running():
+        if app.state.health.get("ws_ok"):
+            return {"status": "ok", "health": app.state.health}
+        try:
+            if not get_workspace_client(settings=get_settings()):
+                raise RuntimeError("WorkspaceClient returned None.")
+        except Exception as e:
+            logger.warning(f"Workspace client still unavailable on retry: {e}", exc_info=True)
+            return {"status": "ok", "health": app.state.health}
+        logger.info("Workspace client reachable again; re-initializing the managers with it.")
+    elif not app.state.health.get("db_ok"):
+        try:
+            initialize_database()
+            app.state.health["db_ok"] = True
+            app.state.health["db_error"] = None
+            app.state.health["db_error_code"] = None
+        except Exception as e:
+            set_db_error(app.state.health)
+            logger.critical(f"Database retry failed: {e}", exc_info=True)
+            return JSONResponse(
+                {"status": "error", "detail": health_issue("database_unavailable")},
+                status_code=503,
+            )
 
     try:
         app.state.health["warnings"] = []  # Reset warnings before retry
+        app.state.health["warning_details"] = []
         app.state.health["seed_ok"] = True  # Reset seed health; initialize_managers will flip if it fails
         app.state.health["seed_error"] = None
+        app.state.health["seed_error_code"] = None
+        old_manager_session = getattr(app.state, "manager_db_session", None)
+        _stop_job_polling()
         initialize_managers(app)  # Sets health["ws_ok"] / health["seed_ok"] internally
+        if _managers_running():
+            # Only when every manager was rebuilt: after a partial failure some
+            # of the old managers may still be using the old session.
+            _close_replaced_manager_session(old_manager_session)
         _seed_default_workflows()
     except Exception as e:
-        app.state.health["warnings"].append(f"Manager init failed on retry: {e}")
+        add_health_warning(app.state.health, "manager_init_failed")
         logger.error(f"Manager init failed on retry: {e}", exc_info=True)
 
     if not app.state.health.get("seed_ok", True):
         return JSONResponse(
-            {"status": "error", "detail": app.state.health.get("seed_error") or "seeding failed"},
-            status_code=503,
+            {"status": "error", "detail": health_issue("seeding_failed")}, status_code=503
         )
 
     return {"status": "ok", "health": app.state.health}

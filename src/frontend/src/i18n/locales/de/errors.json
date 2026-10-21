@@ -23,5 +23,6 @@
     "title": "Fehler",
     "message": "Ein unerwarteter Fehler ist aufgetreten.",
     "retry": "Erneut versuchen"
-  }
+  },
+  "internalError": "Ein unerwarteter Fehler ist aufgetreten. Die Details stehen im Serverprotokoll (Fehler-ID {{errorId}})."
 }
