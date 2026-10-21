@@ -144,6 +144,8 @@ import {
 import { PrincipalPicker } from '@/components/common/principal-picker';
 import { WorkflowCanvasSkeleton } from '@/components/common/list-view-skeleton';
 import {
+  CONTRACT_APPROVER_TOKEN,
+  DOMAIN_OWNER_TOKEN,
   joinRoleAndPrincipals,
   roleSelectValue,
   splitRoleAndPrincipals,
@@ -853,7 +855,7 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
   const [workflowType, setWorkflowType] = useState<WorkflowTypeValue | null>(isNew ? (initialType || null) : null);
 
   // Helper to render roles grouped by source type
-  const renderGroupedRoles = (roles: typeof availableRoles, includeSpecialItems?: { requester?: boolean; owner?: boolean }) => {
+  const renderGroupedRoles = (roles: typeof availableRoles, includeSpecialItems?: { requester?: boolean; owner?: boolean; ownerTokens?: boolean }) => {
     const appRoles = roles.filter(r => r.source === 'app');
     const businessRoles = roles.filter(r => r.source === 'business');
 
@@ -865,6 +867,12 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
             <SelectItem value="requester">{t('workflows:designer.roles.requesterOriginalUser')}</SelectItem>
             {includeSpecialItems?.owner && (
               <SelectItem value="owner">{t('workflows:designer.roles.ownerEntityOwner')}</SelectItem>
+            )}
+            {includeSpecialItems?.ownerTokens && (
+              <>
+                <SelectItem value={DOMAIN_OWNER_TOKEN}>{t('workflows:designer.roles.domainOwners')}</SelectItem>
+                <SelectItem value={CONTRACT_APPROVER_TOKEN}>{t('workflows:designer.roles.contractApprovers')}</SelectItem>
+              </>
             )}
           </SelectGroup>
         )}
@@ -2191,7 +2199,7 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
                                   <SelectValue placeholder={t('workflows:designer.notification.recipientsPlaceholder')} />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {renderGroupedRoles(availableRoles, { requester: true, owner: true })}
+                                  {renderGroupedRoles(availableRoles, { requester: true, owner: true, ownerTokens: true })}
                                 </SelectContent>
                               </Select>
                             </div>
@@ -2361,7 +2369,7 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
                                   <SelectValue placeholder={t('workflows:designer.approval.selectRole')} />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {renderGroupedRoles(approverRoles, { requester: true })}
+                                  {renderGroupedRoles(approverRoles, { requester: true, ownerTokens: true })}
                                 </SelectContent>
                               </Select>
                             </div>

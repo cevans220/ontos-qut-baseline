@@ -143,14 +143,18 @@ describe('shipped role names', () => {
     });
   });
 
-  it('leaves owner tokens as principals, as before', () => {
-    for (const tok of ['DomainOwner', 'ContractApprover']) {
-      expect(splitRoleAndPrincipals(tok, roles)).toEqual({ roleToken: '', principals: [tok] });
+  it('treats owner-derived tokens as roles, whatever their spelling', () => {
+    for (const tok of ['DomainOwner', 'domain_owners', 'ContractApprover']) {
+      expect(splitRoleAndPrincipals(tok, roles)).toEqual({ roleToken: tok, principals: [] });
     }
+    expect(splitRoleAndPrincipals('DomainOwner,alice@x.com', roles)).toEqual({
+      roleToken: 'DomainOwner',
+      principals: ['alice@x.com'],
+    });
   });
 
   it('keeps the stored value when re-joined without edits', () => {
-    for (const stored of ['DomainOwner', 'DataSteward']) {
+    for (const stored of ['DomainOwner', 'domain_owners', 'ContractApprover', 'DataSteward']) {
       const split = splitRoleAndPrincipals(stored, roles);
       expect(joinRoleAndPrincipals(split.roleToken, split.principals)).toBe(stored);
     }
@@ -170,5 +174,11 @@ describe('shipped role names', () => {
     expect(roleSelectValue('requester', roles)).toBe('requester');
     expect(roleSelectValue('', roles)).toBe('');
     expect(roleSelectValue('DataSteward', undefined)).toBe('DataSteward');
+  });
+
+  it('maps owner-derived tokens to their option', () => {
+    expect(roleSelectValue('DomainOwner', roles)).toBe('DomainOwner');
+    expect(roleSelectValue('domain_owners', roles)).toBe('DomainOwner');
+    expect(roleSelectValue('ContractApprover', undefined)).toBe('ContractApprover');
   });
 });

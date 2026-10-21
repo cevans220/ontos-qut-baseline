@@ -31,6 +31,8 @@
       "special": "Speciale",
       "requesterOriginalUser": "Richiedente (utente originale)",
       "ownerEntityOwner": "Proprietario (proprietario dell'entità)",
+      "domainOwners": "Responsabili del dominio",
+      "contractApprovers": "Approvatori del contratto",
       "appRoles": "Ruoli dell'app",
       "businessRoles": "Ruoli aziendali",
       "noGroups": "Nessun gruppo"

@@ -39,6 +39,25 @@ export interface NamedRole {
   name: string;
 }
 
+/**
+ * Tokens the backend resolves from the entity's owners (``_OWNER_APPROVER_TOKENS``
+ * in ``workflow_executor.py``). The role Select has an option for each, valued
+ * with the canonical token; spellings the backend treats the same (compared
+ * without case, spaces or underscores) are shown on that option.
+ */
+export const DOMAIN_OWNER_TOKEN = 'DomainOwner';
+export const CONTRACT_APPROVER_TOKEN = 'ContractApprover';
+
+const OWNER_TOKEN_BY_NORMALIZED: Record<string, string> = {
+  domainowner: DOMAIN_OWNER_TOKEN,
+  domainowners: DOMAIN_OWNER_TOKEN,
+  contractapprover: CONTRACT_APPROVER_TOKEN,
+};
+
+function ownerOptionToken(token: string): string | undefined {
+  return OWNER_TOKEN_BY_NORMALIZED[normalizeRoleName(token)];
+}
+
 function findRoleByName(token: string, roles: NamedRole[] | undefined): NamedRole | undefined {
   if (!roles || !token) return undefined;
   const wanted = normalizeRoleName(token);
@@ -51,12 +70,13 @@ function findRoleByName(token: string, roles: NamedRole[] | undefined): NamedRol
  * keyed by role id, so a name is mapped to its option; anything else is kept.
  */
 export function roleSelectValue(token: string, roles: NamedRole[] | undefined): string {
-  return findRoleByName(token, roles)?.id ?? token;
+  return findRoleByName(token, roles)?.id ?? ownerOptionToken(token) ?? token;
 }
 
 function looksLikeRoleToken(token: string, roles?: NamedRole[]): boolean {
   if (!token) return false;
   if (findRoleByName(token, roles)) return true;
+  if (ownerOptionToken(token)) return true;
   if (KNOWN_ROLE_LITERALS.has(token)) return true;
   if (token.startsWith('business:')) return true;
   if (UUID_RE.test(token)) return true;
