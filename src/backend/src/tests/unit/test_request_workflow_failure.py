@@ -55,9 +55,9 @@ def test_a_failed_workflow_reports_a_code(caplog):
         steps=[('ask', 'Could not resolve any approvers'), ('rejected', 'Request was rejected')],
     )
 
-    # Another matching workflow paused: the request still did not reach everyone
+    # Only this workflow failed (total failure)
     with caplog.at_level('WARNING'):
-        outcome = request_workflow_outcome([_execution(ExecutionStatus.PAUSED), failed])
+        outcome = request_workflow_outcome([failed])
 
     assert outcome == {
         'workflow_triggered': False, 'execution_id': failed.id, 'workflow_status': 'failed',
@@ -135,6 +135,91 @@ def test_a_contract_review_whose_approval_cannot_be_routed(db_session):
     [change] = change_log_manager.get_changes_for_entity(db_session, 'data_contract', contract.id)
     assert change.details['workflow_triggered'] is False
     assert change.details['workflow_error_code'] == 'request_workflow_failed'
+
+
+def test_partial_failure_paused_and_failed(caplog):
+    """When one workflow is paused (waiting for approval) and another failed,
+    it's a partial failure: the request reached at least one approver."""
+    failed = _execution(
+        ExecutionStatus.FAILED, error='Some step error',
+        steps=[('step1', 'Some step error')],
+    )
+    paused = _execution(ExecutionStatus.PAUSED)
+
+    with caplog.at_level('WARNING'):
+        outcome = request_workflow_outcome([paused, failed])
+
+    assert outcome == {
+        'workflow_triggered': True, 'execution_id': paused.id, 'workflow_status': 'partially_failed',
+        'workflow_error_code': 'request_workflow_partially_failed',
+        'workflow_error_params': {'failed_workflows': ['Review']},
+    }
+    # The failed step's error stays in the server log
+    assert 'Some step error' in caplog.text
+
+
+def test_partial_failure_succeeded_and_failed(caplog):
+    """When one workflow succeeded and another failed, it's a partial failure."""
+    failed = _execution(
+        ExecutionStatus.FAILED, error='Some step error',
+        steps=[('step1', 'Some step error')],
+    )
+    succeeded = _execution(ExecutionStatus.SUCCEEDED)
+
+    with caplog.at_level('WARNING'):
+        outcome = request_workflow_outcome([succeeded, failed])
+
+    assert outcome == {
+        'workflow_triggered': True, 'execution_id': succeeded.id, 'workflow_status': 'partially_failed',
+        'workflow_error_code': 'request_workflow_partially_failed',
+        'workflow_error_params': {'failed_workflows': ['Review']},
+    }
+
+
+def test_partial_failure_multiple_failed_and_paused(caplog):
+    """Multiple failed workflows and one paused: partial failure."""
+    failed1 = _execution(
+        ExecutionStatus.FAILED, error='Error 1',
+        steps=[('s1', 'Error 1')],
+    )
+    failed1.workflow_name = 'Review'
+    failed2 = _execution(
+        ExecutionStatus.FAILED, error='Error 2',
+        steps=[('s2', 'Error 2')],
+    )
+    failed2.workflow_name = 'Audit'
+    paused = _execution(ExecutionStatus.PAUSED)
+    paused.workflow_name = 'Approval'
+
+    with caplog.at_level('WARNING'):
+        outcome = request_workflow_outcome([paused, failed1, failed2])
+
+    assert outcome['workflow_triggered'] is True
+    assert outcome['workflow_status'] == 'partially_failed'
+    assert set(outcome['workflow_error_params']['failed_workflows']) == {'Review', 'Audit'}
+
+
+def test_all_failed_workflows(caplog):
+    """When all workflows fail, it's total failure."""
+    failed1 = _execution(
+        ExecutionStatus.FAILED, error='Error 1',
+        steps=[('s1', 'Error 1')],
+    )
+    failed1.workflow_name = 'Review'
+    failed2 = _execution(
+        ExecutionStatus.FAILED, error='Error 2',
+        steps=[('s2', 'Error 2')],
+    )
+    failed2.workflow_name = 'Audit'
+
+    with caplog.at_level('WARNING'):
+        outcome = request_workflow_outcome([failed1, failed2])
+
+    assert outcome == {
+        'workflow_triggered': False, 'execution_id': failed1.id, 'workflow_status': 'failed',
+        'workflow_error_code': 'request_workflow_failed',
+        'workflow_error_params': {'workflow': 'Review'},
+    }
 
 
 def test_a_product_publication_request_returns_the_workflow_failure():

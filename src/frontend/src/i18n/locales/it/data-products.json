@@ -693,7 +693,9 @@
         "publish": "pubblicazione",
         "certify": "certificazione",
         "status_change": "cambio di stato"
-      }
+      },
+      "workflowPartiallyFailed": "Alcuni workflow di richiesta non sono riusciti",
+      "workflowPartiallyFailedDesc": "Uno dei workflow di richiesta {{type}} non è riuscito: {{workflows}}. Altre approvazioni potrebbero essere ancora in sospeso."
     },
     "labels": {
       "requestType": "Tipo di richiesta",

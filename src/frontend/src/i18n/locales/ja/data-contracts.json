@@ -1182,7 +1182,9 @@
         "publish": "公開",
         "certify": "認定",
         "status_change": "ステータス変更"
-      }
+      },
+      "workflowPartiallyFailedTitle": "いくつかのリクエストワークフローが失敗しました",
+      "workflowPartiallyFailedDescription": "{{type}}リクエストワークフローの1つが失敗しました: {{workflows}}。他の承認はまだ保留中である可能性があります。"
     },
     "errors": {
       "submitFailed": "リクエストの送信に失敗しました",

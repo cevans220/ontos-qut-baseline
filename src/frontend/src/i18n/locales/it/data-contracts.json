@@ -1182,7 +1182,9 @@
         "publish": "pubblicazione",
         "certify": "certificazione",
         "status_change": "cambio di stato"
-      }
+      },
+      "workflowPartiallyFailedTitle": "Alcuni workflow di richiesta non sono riusciti",
+      "workflowPartiallyFailedDescription": "Uno dei workflow di richiesta {{type}} non è riuscito: {{workflows}}. Altre approvazioni potrebbero essere ancora in sospeso."
     },
     "errors": {
       "submitFailed": "Impossibile inviare la richiesta",

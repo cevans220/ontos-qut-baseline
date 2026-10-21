@@ -1182,7 +1182,9 @@
         "publish": "publicação",
         "certify": "certificação",
         "status_change": "mudança de status"
-      }
+      },
+      "workflowPartiallyFailedTitle": "Alguns workflows de solicitação falharam",
+      "workflowPartiallyFailedDescription": "Um dos workflows de solicitação de {{type}} falhou: {{workflows}}. Outras aprovações podem ainda estar pendentes."
     },
     "errors": {
       "submitFailed": "Falha ao enviar solicitação",

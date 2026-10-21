@@ -1182,7 +1182,9 @@
         "publish": "Veröffentlichungs",
         "certify": "Zertifizierungs",
         "status_change": "Statusänderungs"
-      }
+      },
+      "workflowPartiallyFailedTitle": "Einige Anfrage-Workflows sind fehlgeschlagen",
+      "workflowPartiallyFailedDescription": "Einer der {{type}}-Anfrage-Workflows ist fehlgeschlagen: {{workflows}}. Andere Genehmigungen stehen möglicherweise noch aus."
     },
     "errors": {
       "submitFailed": "Anfrage konnte nicht eingereicht werden",

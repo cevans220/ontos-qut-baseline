@@ -693,7 +693,9 @@
         "publish": "Veröffentlichungs",
         "certify": "Zertifizierungs",
         "status_change": "Statusänderungs"
-      }
+      },
+      "workflowPartiallyFailed": "Einige Anfrage-Workflows sind fehlgeschlagen",
+      "workflowPartiallyFailedDesc": "Einer der {{type}}-Anfrage-Workflows ist fehlgeschlagen: {{workflows}}. Andere Genehmigungen stehen möglicherweise noch aus."
     },
     "labels": {
       "requestType": "Anfragetyp",

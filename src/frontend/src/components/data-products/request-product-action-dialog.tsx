@@ -350,13 +350,21 @@ export default function RequestProductActionDialog({
       const typeName = t(`data-products:requestAction.toast.requestTypes.${type}`, { defaultValue: type });
       // The request was recorded; a failed workflow means nobody was asked to decide
       const outcome = response.data as
-        | { workflow_status?: string; workflow_error_params?: { workflow?: string } }
+        | { workflow_status?: string; workflow_error_params?: { workflow?: string; failed_workflows?: string[] } }
         | undefined;
       if (outcome?.workflow_status === 'failed') {
         // The step's own error stays with the execution (admins open it in Workflows)
         toast({
           title: t('data-products:requestAction.toast.workflowFailed'),
           description: t('data-products:requestAction.toast.workflowFailedDesc', { type: typeName, workflow: outcome.workflow_error_params?.workflow ?? '' }),
+          variant: 'destructive',
+        });
+      } else if (outcome?.workflow_status === 'partially_failed') {
+        // Some workflows succeeded/paused but at least one failed
+        const failedWorkflows = outcome.workflow_error_params?.failed_workflows ?? [];
+        toast({
+          title: t('data-products:requestAction.toast.workflowPartiallyFailed'),
+          description: t('data-products:requestAction.toast.workflowPartiallyFailedDesc', { type: typeName, workflows: failedWorkflows.join(', ') }),
           variant: 'destructive',
         });
       } else if (type === 'status_change' && canDirectStatusChange) {

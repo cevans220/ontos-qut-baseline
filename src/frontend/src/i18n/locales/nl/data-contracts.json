@@ -1182,7 +1182,9 @@
         "publish": "publicatie",
         "certify": "certificerings",
         "status_change": "statuswijzigings"
-      }
+      },
+      "workflowPartiallyFailedTitle": "Sommige aanvraagworkflows zijn mislukt",
+      "workflowPartiallyFailedDescription": "Een van de {{type}}-aanvraagworkflows is mislukt: {{workflows}}. Andere goedkeuringen kunnen nog in behandeling zijn."
     },
     "errors": {
       "submitFailed": "Indienen van verzoek mislukt",

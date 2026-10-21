@@ -1239,20 +1239,25 @@ def request_workflow_outcome(executions: List[WorkflowExecution]) -> Dict[str, A
     that has already failed means nobody was asked to decide (e.g. no
     approver could be resolved) and the request goes no further.
 
+    Distinguishes three cases:
+    - Total failure: ALL matching executions failed → workflow_triggered=false, status=failed
+    - Partial failure: ANY paused/succeeded AND at least one failed → workflow_triggered=true,
+      status=partially_failed, plus failed workflow names
+    - No failures: workflow_triggered=true, status=execution's actual status
+
     The requester gets ``workflow_error_code`` and ``workflow_error_params``
     only: a step's error can be an exception's text (SQL, identifiers), so it
     stays in the server log and in the execution, where admins can open it.
     """
     if not executions:
         return {"workflow_triggered": False}
-    failed = next((e for e in executions if e.status == ExecutionStatus.FAILED), None)
-    execution = failed or executions[0]
-    outcome: Dict[str, Any] = {
-        "workflow_triggered": failed is None,
-        "execution_id": execution.id,
-        "workflow_status": execution.status.value,
-    }
-    if failed:
+
+    failed_execs = [e for e in executions if e.status == ExecutionStatus.FAILED]
+    non_failed_execs = [e for e in executions if e.status != ExecutionStatus.FAILED]
+
+    # Total failure: all executions failed
+    if failed_execs and not non_failed_execs:
+        failed = failed_execs[0]
         step_error = next(
             (s.error_message for s in failed.step_executions
              if s.passed is False and s.error_message),
@@ -1262,8 +1267,45 @@ def request_workflow_outcome(executions: List[WorkflowExecution]) -> Dict[str, A
             f"Request workflow '{failed.workflow_name}' failed (execution {failed.id}): "
             f"{step_error or failed.error_message}"
         )
-        outcome["workflow_error_code"] = "request_workflow_failed"
-        outcome["workflow_error_params"] = {"workflow": failed.workflow_name}
+        outcome: Dict[str, Any] = {
+            "workflow_triggered": False,
+            "execution_id": failed.id,
+            "workflow_status": failed.status.value,
+            "workflow_error_code": "request_workflow_failed",
+            "workflow_error_params": {"workflow": failed.workflow_name},
+        }
+        return outcome
+
+    # Partial failure: some paused/succeeded AND at least one failed
+    if failed_execs and non_failed_execs:
+        # Log the failures but don't block the request
+        for failed in failed_execs:
+            step_error = next(
+                (s.error_message for s in failed.step_executions
+                 if s.passed is False and s.error_message),
+                None,
+            )
+            logger.warning(
+                f"Request workflow '{failed.workflow_name}' failed (execution {failed.id}): "
+                f"{step_error or failed.error_message}"
+            )
+        failed_names = [e.workflow_name for e in failed_execs]
+        outcome: Dict[str, Any] = {
+            "workflow_triggered": True,
+            "execution_id": non_failed_execs[0].id,
+            "workflow_status": "partially_failed",
+            "workflow_error_code": "request_workflow_partially_failed",
+            "workflow_error_params": {"failed_workflows": failed_names},
+        }
+        return outcome
+
+    # No failures: use the first execution (should be paused or succeeded)
+    execution = executions[0]
+    outcome = {
+        "workflow_triggered": True,
+        "execution_id": execution.id,
+        "workflow_status": execution.status.value,
+    }
     return outcome
 
 
