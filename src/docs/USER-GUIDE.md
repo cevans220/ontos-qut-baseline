@@ -2230,6 +2230,8 @@ Click on a run to see:
 
 Process Workflows enable automated, configurable multi-step processes that trigger on entity lifecycle events. They replace hardcoded business logic with flexible, user-editable flows that can be customized per organization.
 
+To build your own workflows, read the [Workflow Authoring Guide](/user-docs/workflow-authoring-guide): it explains how an execution moves between steps, which triggers fire where, the variables you can use, how approvals pause and resume a workflow, and how to read Recent Executions.
+
 ### What are Process Workflows?
 
 Process Workflows are:
