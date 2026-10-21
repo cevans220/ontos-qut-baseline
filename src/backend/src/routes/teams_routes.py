@@ -148,6 +148,25 @@ def get_teams_summary(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to fetch teams summary")
 
 
+# Before /teams/{team_id}, which would otherwise take "standalone" as a team id.
+@router.get(
+    "/teams/standalone",
+    response_model=List[TeamRead],
+    dependencies=[Depends(PermissionChecker(TEAMS_FEATURE_ID, FeatureAccessLevel.READ_ONLY))]
+)
+def get_standalone_teams(
+    db: DBSessionDep,
+    manager = Depends(get_teams_manager)
+):
+    """Gets all standalone teams (not assigned to a domain)."""
+    logger.debug("Fetching standalone teams")
+    try:
+        return manager.get_standalone_teams(db=db)
+    except Exception as e:
+        logger.exception(f"Failed to fetch standalone teams: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to fetch standalone teams")
+
+
 @router.get(
     "/teams/{team_id}",
     response_model=TeamRead,
@@ -507,24 +526,6 @@ def get_teams_by_domain(
     except Exception as e:
         logger.exception(f"Failed to fetch teams for domain: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to fetch teams for domain")
-
-
-@router.get(
-    "/teams/standalone",
-    response_model=List[TeamRead],
-    dependencies=[Depends(PermissionChecker(TEAMS_FEATURE_ID, FeatureAccessLevel.READ_ONLY))]
-)
-def get_standalone_teams(
-    db: DBSessionDep,
-    manager = Depends(get_teams_manager)
-):
-    """Gets all standalone teams (not assigned to a domain)."""
-    logger.debug("Fetching standalone teams")
-    try:
-        return manager.get_standalone_teams(db=db)
-    except Exception as e:
-        logger.exception(f"Failed to fetch standalone teams: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to fetch standalone teams")
 
 
 def register_routes(app):

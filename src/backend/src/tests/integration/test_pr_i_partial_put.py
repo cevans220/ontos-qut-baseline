@@ -46,6 +46,7 @@ class TestPartialPutPreservesUnmodifiedFields:
             "description": {"purpose": "exercise partial PUT semantics"},
             "version": "1.0.0",
             "productType": "sourceAligned",
+            "status": "draft",
             "owner": "test@example.com",
             "tags": ["pr-i"],
             "outputPorts": [port_payload],
@@ -176,6 +177,7 @@ class TestRoutePartialDumpSemantics:
             "name": "minimal",
             "version": "1.0.0",
             "productType": "sourceAligned",
+            "status": "draft",
             "outputPorts": [
                 {"name": "p", "version": "1.0.0"}
             ],
