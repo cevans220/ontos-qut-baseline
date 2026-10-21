@@ -1060,82 +1060,305 @@ def mark_cleanup_legacy_done(engine: Engine) -> None:
         pass
 
 
+def _build_desired_set(
+    datasets: List[DatasetTagInfo],
+    direct: "DirectLinkInfos",
+) -> Dict[Tuple[str, str], bool]:
+    """Build set of (object_type, fqn) pairs that currently have desired tags.
+
+    Returns dict mapping (object_type, fqn) -> True for quick lookup.
+    """
+    desired: Dict[Tuple[str, str], bool] = {}
+
+    # Tables from datasets
+    for d in datasets:
+        desired[(("TABLE", d.fqn.lower()))] = True
+
+    # Tables from direct links
+    for d in direct.tables:
+        desired[("TABLE", d.fqn.lower())] = True
+
+    # Schemas from direct links
+    for schema_fqn in direct.schemas.keys():
+        desired[("SCHEMA", schema_fqn.lower())] = True
+
+    # Catalogs from direct links
+    for catalog_fqn in direct.catalogs.keys():
+        desired[("CATALOG", catalog_fqn.lower())] = True
+
+    # Columns from direct links
+    for col in direct.columns:
+        desired[("COLUMN", col.fqn.lower())] = True
+
+    return desired
+
+
+def _bulk_read_prefixed_tags_per_catalog(
+    spark: SparkSession,
+    catalog: str,
+    prefix: str,
+) -> Dict[Tuple[str, str], Dict[str, Optional[str]]]:
+    """Bulk read prefixed tags at all four levels for a catalog.
+
+    Returns dict mapping (object_type, fqn) -> {tag_key: tag_value, ...}
+    for all objects in this catalog with the given prefix.
+    """
+    result: Dict[Tuple[str, str], Dict[str, Optional[str]]] = {}
+
+    # Read CATALOG tags
+    try:
+        catalog_tags = get_existing_prefixed_tags(spark, "CATALOG", catalog, prefix)
+        if catalog_tags:
+            result[("CATALOG", catalog.lower())] = catalog_tags
+    except Exception:
+        pass
+
+    # Read SCHEMA tags - need to query information_schema
+    try:
+        q = (
+            f"SELECT schema_name, tag_name, tag_value "
+            f"FROM `{catalog}`.information_schema.schema_tags "
+            f"WHERE catalog_name = '{catalog}'"
+        )
+        rows = spark.sql(q).collect()
+        schemas_by_tag: Dict[str, Dict[str, Dict[str, Optional[str]]]] = {}
+        for r in rows:
+            schema_name = str(r["schema_name"]).lower()
+            tag_name = str(r["tag_name"])
+            if tag_name.startswith(prefix):
+                tag_value = r["tag_value"]
+                schema_fqn = f"{catalog.lower()}.{schema_name}"
+                if (("SCHEMA", schema_fqn)) not in result:
+                    result[("SCHEMA", schema_fqn)] = {}
+                result[("SCHEMA", schema_fqn)][tag_name] = tag_value
+    except Exception:
+        pass
+
+    # Read TABLE tags
+    try:
+        q = (
+            f"SELECT schema_name, table_name, tag_name, tag_value "
+            f"FROM `{catalog}`.information_schema.table_tags "
+            f"WHERE catalog_name = '{catalog}'"
+        )
+        rows = spark.sql(q).collect()
+        for r in rows:
+            schema_name = str(r["schema_name"]).lower()
+            table_name = str(r["table_name"]).lower()
+            tag_name = str(r["tag_name"])
+            if tag_name.startswith(prefix):
+                tag_value = r["tag_value"]
+                table_fqn = f"{catalog.lower()}.{schema_name}.{table_name}"
+                if (("TABLE", table_fqn)) not in result:
+                    result[("TABLE", table_fqn)] = {}
+                result[("TABLE", table_fqn)][tag_name] = tag_value
+    except Exception:
+        pass
+
+    # Read COLUMN tags
+    try:
+        q = (
+            f"SELECT schema_name, table_name, column_name, tag_name, tag_value "
+            f"FROM `{catalog}`.information_schema.column_tags "
+            f"WHERE catalog_name = '{catalog}'"
+        )
+        rows = spark.sql(q).collect()
+        for r in rows:
+            schema_name = str(r["schema_name"]).lower()
+            table_name = str(r["table_name"]).lower()
+            column_name = str(r["column_name"]).lower()
+            tag_name = str(r["tag_name"])
+            if tag_name.startswith(prefix):
+                tag_value = r["tag_value"]
+                column_fqn = (
+                    f"{catalog.lower()}.{schema_name}."
+                    f"{table_name}.{column_name}"
+                )
+                if (("COLUMN", column_fqn)) not in result:
+                    result[("COLUMN", column_fqn)] = {}
+                result[("COLUMN", column_fqn)][tag_name] = tag_value
+    except Exception:
+        pass
+
+    return result
+
+
 def handle_legacy_tag_cleanup(
     spark: SparkSession,
     engine: Engine,
     datasets: List[DatasetTagInfo],
+    direct: "DirectLinkInfos",
     prefix: str,
+    previous: Optional[DeliveryState],
     cleanup_enabled: bool,
+    is_partial_read: bool,
     dry_run: bool = False,
 ) -> Tuple[int, List[str]]:
     """Handle optional cleanup of legacy tags (delivered before this feature).
 
-    When cleanup_enabled is False, log candidates for operator review.
-    When True, remove tags from unlinked objects (only default prefix, only in
-    catalogs this instance links). Mark cleanup done in app_settings.
+    When cleanup_enabled is False and this is first full run, log candidates
+    for operator review and mark "checked" so we don't repeat.
+    When cleanup_enabled is True, remove legacy tags from unlinked objects
+    (only default prefix, only in catalogs this instance links, only when not
+    already done, only on full run).
 
-    Returns (removed, errors).
+    Returns (removed_count, errors).
+    Errors mean cleanup did not complete; caller should not mark done.
     """
     default_prefix = "x_ontos_"
+
+    # Only works with default prefix
     if cleanup_enabled and prefix != default_prefix:
         msg = f"[WARN] --cleanup_legacy_tags only works with default prefix "
         msg += f"'{default_prefix}', not '{prefix}'. Refusing cleanup."
         print(msg)
         return (0, [msg])
 
-    # Collect linked catalogs this instance knows about
+    # Collect linked catalogs
     linked_catalogs = set()
     for d in datasets:
         linked_catalogs.add(d.catalog.lower())
 
+    if not linked_catalogs:
+        return (0, [])
+
     removed_count = 0
     errors: List[str] = []
 
-    # Find objects with our prefix tags but no current link
     cleanup_status = read_cleanup_legacy_status(engine)
-    if not cleanup_enabled and not cleanup_status.get("checked_first_run"):
-        # First run without cleanup: scan and log candidates
-        candidates_found = 0
-        candidate_samples: List[str] = []
+
+    # Only proceed if: cleanup_enabled && full run && not already done && previous is readable
+    if cleanup_enabled:
+        if is_partial_read:
+            print("[INFO] --limit is set: legacy tag cleanup skipped on partial runs")
+            return (0, [])
+        if previous is None:
+            print("[INFO] Previous delivery state unavailable: legacy cleanup skipped")
+            return (0, [])
+        if cleanup_status.get("cleanup_done"):
+            print("[INFO] Legacy cleanup already completed; skipping")
+            return (0, [])
+
+        # Build current desired set
+        desired = _build_desired_set(datasets, direct)
+
+        print(f"[INFO] Cleaning up legacy tags with prefix '{default_prefix}'...")
+
+        # For each catalog, find and remove candidates
         for cat in linked_catalogs:
             try:
-                existing = get_existing_prefixed_tags(
-                    spark, "CATALOG", cat, default_prefix
+                # Bulk read all prefixed tags at all levels
+                existing_tags = _bulk_read_prefixed_tags_per_catalog(
+                    spark, cat, default_prefix
                 )
-                if existing:
-                    candidates_found += len(existing)
-                    if len(candidate_samples) < 5:
-                        candidate_samples.extend(list(existing.keys())[:5])
-            except Exception:
-                pass  # Catalog might not exist
-        if candidates_found > 0:
-            sample_str = ", ".join(candidate_samples[:5])
-            print(f"[INFO] Found {candidates_found} legacy tags with prefix "
-                  f"'{default_prefix}' (samples: {sample_str})")
-            print(f"[INFO] Run with --cleanup_legacy_tags=true to remove them")
-            mark_cleanup_legacy_checked(engine, dry_run=dry_run)
-    elif cleanup_enabled:
-        # Actually perform cleanup
-        for cat in linked_catalogs:
-            try:
-                existing = get_existing_prefixed_tags(
-                    spark, "CATALOG", cat, default_prefix
-                )
-                for key in existing:
-                    try:
-                        unassign_tag(spark, "CATALOG", cat, key)
-                        removed_count += 1
-                    except Exception as e:
-                        msg = f"Failed to remove legacy tag {key} from "
-                        msg += f"CATALOG {cat}: {e}"
-                        print(f"[WARN] {msg}")
-                        errors.append(msg)
-            except Exception:
-                # Catalog might not exist
-                pass
-        # Mark cleanup done
-        if not dry_run:
+
+                # Find candidates: objects with prefix tags but NO current link
+                # and tags NOT already recorded in delivery state
+                for (obj_type, fqn), tags_dict in existing_tags.items():
+                    for tag_key in tags_dict.keys():
+                        # Skip if object has current link (is in desired set)
+                        if (obj_type, fqn) in desired:
+                            continue
+
+                        # Skip if tag already recorded in delivery state
+                        # (those are handled by normal cleanup)
+                        if (
+                            obj_type in previous
+                            and fqn in previous[obj_type]
+                            and tag_key in previous[obj_type][fqn]
+                        ):
+                            continue
+
+                        # This is a candidate for removal
+                        try:
+                            if dry_run:
+                                print(
+                                    f"[DRY-RUN] {obj_type} {fqn} remove="
+                                    f"['{tag_key}']"
+                                )
+                            else:
+                                unassign_tag(spark, obj_type, fqn, tag_key)
+                                removed_count += 1
+                                print(
+                                    f"[INFO] Removed legacy tag '{tag_key}' "
+                                    f"from {obj_type} {fqn}"
+                                )
+                        except Exception as e:
+                            if not dry_run:
+                                msg = (
+                                    f"Failed to remove legacy tag '{tag_key}' from "
+                                    f"{obj_type} {fqn}: {e}"
+                                )
+                                print(f"[WARN] {msg}")
+                                errors.append(msg)
+
+            except Exception as e:
+                # Catalog might not exist, log but continue
+                msg = f"Error reading tags for catalog {cat}: {e}"
+                print(f"[WARN] {msg}")
+                errors.append(msg)
+
+        # Mark done only if no errors
+        if not dry_run and not errors:
             mark_cleanup_legacy_done(engine)
+            print(
+                f"[INFO] Legacy cleanup complete: {removed_count} tags removed"
+            )
+        elif errors:
+            print(
+                f"[WARN] Legacy cleanup had {len(errors)} error(s); will retry "
+                f"next run"
+            )
+
+    # Flag off: log candidates on first full run and mark "checked"
+    elif not cleanup_enabled and not is_partial_read and previous is not None:
+        if not cleanup_status.get("checked_first_run"):
+            # First full run without cleanup: scan and log candidates
+            desired = _build_desired_set(datasets, direct)
+            candidates_found = 0
+            candidate_samples: List[str] = []
+
+            for cat in linked_catalogs:
+                try:
+                    existing_tags = _bulk_read_prefixed_tags_per_catalog(
+                        spark, cat, default_prefix
+                    )
+
+                    for (obj_type, fqn), tags_dict in existing_tags.items():
+                        for tag_key in tags_dict.keys():
+                            # Skip if in desired set or already in delivery state
+                            if (obj_type, fqn) in desired:
+                                continue
+                            if (
+                                obj_type in previous
+                                and fqn in previous[obj_type]
+                                and tag_key in previous[obj_type][fqn]
+                            ):
+                                continue
+
+                            candidates_found += 1
+                            if len(candidate_samples) < 5:
+                                candidate_samples.append(
+                                    f"{obj_type} {fqn}: {tag_key}"
+                                )
+
+                except Exception:
+                    pass
+
+            if candidates_found > 0:
+                sample_str = ", ".join(candidate_samples[:5])
+                print(
+                    f"[INFO] Found {candidates_found} legacy tags with prefix "
+                    f"'{default_prefix}'"
+                )
+                print(f"[INFO]   Samples: {sample_str}")
+                print(
+                    f"[INFO] Run with --cleanup_legacy_tags=true to remove them"
+                )
+
+            # Mark "checked" so we don't repeat this scan
+            if not dry_run:
+                mark_cleanup_legacy_checked(engine, dry_run=dry_run)
 
     return (removed_count, errors)
 
@@ -1544,6 +1767,22 @@ def main() -> None:
                                          not is_partial_read)
         if save_error:
             all_errors.append(save_error)
+
+    # Handle optional cleanup of legacy tags (from before delivery state tracking)
+    print("\nHandling legacy tag cleanup...")
+    legacy_removed, legacy_errors = handle_legacy_tag_cleanup(
+        spark,
+        engine,
+        datasets,
+        direct,
+        prefix,
+        previous=None if is_partial_read else previous,
+        cleanup_enabled=cleanup_legacy,
+        is_partial_read=is_partial_read,
+        dry_run=dry_run,
+    )
+    removed_total += legacy_removed
+    all_errors.extend(legacy_errors)
 
     print("\n" + "=" * 80)
     msg = f"Summary: updated={updated_total} removed={removed_total} errors="

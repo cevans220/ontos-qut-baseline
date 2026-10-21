@@ -396,93 +396,440 @@ def test_limit_skips_cleanup(tag_sync, uc):
     assert second.delivered["COLUMN"] == {}
 
 
-def test_legacy_cleanup_off_logs_candidates(tag_sync, db, uc, capsys,
-                                            monkeypatch):
-    """Legacy cleanup off: logs candidates on first run."""
-    # Pre-populate UC with legacy tags
-    uc[("CATALOG", "main")] = {OPEX_KEY: OPEX}
+# Legacy cleanup tests (handle_legacy_tag_cleanup with new spec)
 
-    # Monkeypatch get_existing_prefixed_tags to return the UC tags
-    def fake_get_with_tags(spark, obj_type, obj_name, prefix):
-        if obj_type == "CATALOG" and obj_name == "main":
-            return uc.get(("CATALOG", "main"), {})
-        return {}
-
-    monkeypatch.setattr(tag_sync, "get_existing_prefixed_tags", fake_get_with_tags)
-
-    # Status should not be checked yet
-    status_before = tag_sync.read_cleanup_legacy_status(db)
-    assert not status_before.get("checked_first_run")
-
-    # Create a dataset linking to "main" catalog
-    dataset = _asset_dataset(tag_sync, "main.schema.table", [OPEX])
-
-    # Run cleanup with flag off
-    removed, errors = tag_sync.handle_legacy_tag_cleanup(
-        MagicMock(), db, [dataset], PREFIX, cleanup_enabled=False, dry_run=False
-    )
-
-    assert removed == 0
-    assert len(errors) == 0
-    out = capsys.readouterr().out
-    assert "legacy" in out.lower() or "Found" in out or "INFO" in out
-
-    # Status should be marked as checked
-    status_after = tag_sync.read_cleanup_legacy_status(db)
-    assert status_after.get("checked_first_run")
-
-
-def test_legacy_cleanup_on_removes_default_prefix_only(tag_sync, db, uc,
-                                                       monkeypatch):
-    """Legacy cleanup on: removes default-prefix tags only."""
-    # Setup a dataset linking to "main" catalog
-    dataset = _asset_dataset(tag_sync, "main.schema.table", [OPEX])
-
-    # Pre-populate UC with legacy tags using default prefix
-    default_prefix = "x_ontos_"
-    default_key = f"{default_prefix}legacy_tag"
-    uc[("CATALOG", "main")] = {default_key: OPEX, "user_tag": "value"}
-
-    def fake_get_tags(spark, obj_type, obj_name, prefix):
-        if obj_type == "CATALOG" and obj_name == "main":
-            return {k: v for k, v in uc.get(("CATALOG", "main"), {}).items()
-                    if k.startswith(prefix)}
-        return {}
-
-    def fake_unassign(spark, obj_type, obj_name, key):
-        if obj_type == "CATALOG" and obj_name == "main":
-            uc[("CATALOG", "main")].pop(key, None)
-
-    monkeypatch.setattr(tag_sync, "get_existing_prefixed_tags", fake_get_tags)
-    monkeypatch.setattr(tag_sync, "unassign_tag", fake_unassign)
-
-    # Run cleanup with flag on, using default prefix
-    removed, errors = tag_sync.handle_legacy_tag_cleanup(
-        MagicMock(), db, [dataset], default_prefix, cleanup_enabled=True,
-        dry_run=False
-    )
-
-    # Should remove default_key (has default prefix) but not user_tag
-    assert removed == 1
-    assert uc[("CATALOG", "main")] == {"user_tag": "value"}
-
-    # Status should be marked done
-    status = tag_sync.read_cleanup_legacy_status(db)
-    assert status.get("cleanup_done")
-
-
-def test_legacy_cleanup_non_default_prefix_refuses(tag_sync, db, uc, capsys):
-    """Legacy cleanup with non-default prefix: refuses and warns."""
-    dataset = _asset_dataset(tag_sync, "main.schema.table", [OPEX])
-    custom_prefix = "custom_"
+def test_legacy_cleanup_custom_prefix_refuses(tag_sync, db):
+    """Custom prefix: refuses cleanup."""
+    dataset = _asset_dataset(tag_sync, "main.s.t", [OPEX])
+    direct = tag_sync.DirectLinkInfos()
 
     removed, errors = tag_sync.handle_legacy_tag_cleanup(
-        MagicMock(), db, [dataset], custom_prefix, cleanup_enabled=True,
-        dry_run=False
+        MagicMock(), db, [dataset], direct,
+        prefix="custom_",
+        previous={},
+        cleanup_enabled=True,
+        is_partial_read=False,
+        dry_run=False,
     )
 
     assert removed == 0
     assert len(errors) == 1
     assert "default prefix" in errors[0].lower()
+
+
+def test_legacy_cleanup_partial_run_skipped(tag_sync, db):
+    """Partial run (--limit): skips cleanup."""
+    dataset = _asset_dataset(tag_sync, "main.s.t", [OPEX])
+    direct = tag_sync.DirectLinkInfos()
+
+    removed, errors = tag_sync.handle_legacy_tag_cleanup(
+        MagicMock(), db, [dataset], direct,
+        prefix="x_ontos_",
+        previous={},
+        cleanup_enabled=True,
+        is_partial_read=True,
+        dry_run=False,
+    )
+
+    assert removed == 0
+    assert errors == []
+
+
+def test_legacy_cleanup_unreadable_state_skipped(tag_sync, db):
+    """Unreadable previous state: skips cleanup."""
+    dataset = _asset_dataset(tag_sync, "main.s.t", [OPEX])
+    direct = tag_sync.DirectLinkInfos()
+
+    removed, errors = tag_sync.handle_legacy_tag_cleanup(
+        MagicMock(), db, [dataset], direct,
+        prefix="x_ontos_",
+        previous=None,
+        cleanup_enabled=True,
+        is_partial_read=False,
+        dry_run=False,
+    )
+
+    assert removed == 0
+    assert errors == []
+
+
+def test_legacy_cleanup_already_done_skipped(tag_sync, db):
+    """Already marked done: skips cleanup."""
+    dataset = _asset_dataset(tag_sync, "main.s.t", [OPEX])
+    direct = tag_sync.DirectLinkInfos()
+
+    # Mark cleanup as already done
+    with Session(db) as session:
+        setting = AppSettingDb(
+            key="uc_tag_sync_cleanup_legacy_status",
+            value=json.dumps({"cleanup_done": True})
+        )
+        session.add(setting)
+        session.commit()
+
+    removed, errors = tag_sync.handle_legacy_tag_cleanup(
+        MagicMock(), db, [dataset], direct,
+        prefix="x_ontos_",
+        previous={},
+        cleanup_enabled=True,
+        is_partial_read=False,
+        dry_run=False,
+    )
+
+    assert removed == 0
+    assert errors == []
+
+
+def test_legacy_cleanup_linked_table_keeps_tag(tag_sync, uc, db, monkeypatch):
+    """Linked table with desired tag: keeps it."""
+    default_prefix = "x_ontos_"
+    default_key = f"{default_prefix}legacy_tag"
+
+    # Table in UC with legacy tag
+    uc[("TABLE", "main.s.t")] = {default_key: OPEX}
+
+    # Mock the bulk reader
+    def fake_bulk_read(spark, catalog, prefix):
+        result = {}
+        for (obj_type, fqn), tags in uc.items():
+            if fqn.lower().startswith(catalog.lower()):
+                result[(obj_type, fqn)] = {k: v for k, v in tags.items()
+                                           if k.startswith(prefix)}
+        return result
+
+    monkeypatch.setattr(tag_sync, "_bulk_read_prefixed_tags_per_catalog",
+                        fake_bulk_read)
+
+    # Dataset linking to the table
+    dataset = _asset_dataset(tag_sync, "main.s.t", [OPEX])
+    direct = tag_sync.DirectLinkInfos(
+        tables=[dataset],
+    )
+
+    # No previous delivery state (legacy cleanup only)
+    previous = {}
+
+    removed, errors = tag_sync.handle_legacy_tag_cleanup(
+        MagicMock(), db, [dataset], direct,
+        prefix=default_prefix,
+        previous=previous,
+        cleanup_enabled=True,
+        is_partial_read=False,
+        dry_run=False,
+    )
+
+    # Tag should NOT be removed (table is in desired set)
+    assert uc[("TABLE", "main.s.t")] == {default_key: OPEX}
+    assert removed == 0
+    assert errors == []
+
+
+def test_legacy_cleanup_unlinked_table_loses_tag(tag_sync, uc, db, monkeypatch):
+    """Unlinked table with legacy tag: loses it."""
+    default_prefix = "x_ontos_"
+    default_key = f"{default_prefix}legacy_tag"
+
+    # Unlinked table in UC with legacy tag
+    uc[("TABLE", "main.s.unlinked")] = {default_key: OPEX}
+
+    def fake_bulk_read(spark, catalog, prefix):
+        result = {}
+        for (obj_type, fqn), tags in uc.items():
+            if fqn.lower().startswith(catalog.lower()):
+                result[(obj_type, fqn)] = {k: v for k, v in tags.items()
+                                           if k.startswith(prefix)}
+        return result
+
+    def fake_unassign(spark, obj_type, fqn, key):
+        uc.get((obj_type, fqn), {}).pop(key, None)
+
+    monkeypatch.setattr(tag_sync, "_bulk_read_prefixed_tags_per_catalog",
+                        fake_bulk_read)
+    monkeypatch.setattr(tag_sync, "unassign_tag", fake_unassign)
+
+    # No direct links (empty)
+    dataset = _asset_dataset(tag_sync, "main.s.other", [OPEX])
+    direct = tag_sync.DirectLinkInfos(tables=[dataset])
+
+    # Previous is empty (no delivered tags)
+    previous = {}
+
+    removed, errors = tag_sync.handle_legacy_tag_cleanup(
+        MagicMock(), db, [dataset], direct,
+        prefix=default_prefix,
+        previous=previous,
+        cleanup_enabled=True,
+        is_partial_read=False,
+        dry_run=False,
+    )
+
+    # Unlinked table's tag should be removed
+    assert uc.get(("TABLE", "main.s.unlinked"), {}) == {}
+    assert removed == 1
+    assert errors == []
+
+    # Cleanup should be marked done
+    status = tag_sync.read_cleanup_legacy_status(db)
+    assert status.get("cleanup_done")
+
+
+def test_legacy_cleanup_tag_in_delivery_state_skipped(tag_sync, uc, db,
+                                                      monkeypatch):
+    """Tag already in delivery state: skipped (handled by normal cleanup)."""
+    default_prefix = "x_ontos_"
+    default_key = f"{default_prefix}legacy_tag"
+
+    uc[("TABLE", "main.s.unlinked")] = {default_key: OPEX}
+
+    def fake_bulk_read(spark, catalog, prefix):
+        result = {}
+        for (obj_type, fqn), tags in uc.items():
+            if fqn.lower().startswith(catalog.lower()):
+                result[(obj_type, fqn)] = {k: v for k, v in tags.items()
+                                           if k.startswith(prefix)}
+        return result
+
+    monkeypatch.setattr(tag_sync, "_bulk_read_prefixed_tags_per_catalog",
+                        fake_bulk_read)
+
+    dataset = _asset_dataset(tag_sync, "main.s.other", [OPEX])
+    direct = tag_sync.DirectLinkInfos(tables=[dataset])
+
+    # Tag already in delivery state (will be handled by normal cleanup)
+    previous = {
+        "TABLE": {
+            "main.s.unlinked": {default_key: OPEX}
+        }
+    }
+
+    removed, errors = tag_sync.handle_legacy_tag_cleanup(
+        MagicMock(), db, [dataset], direct,
+        prefix=default_prefix,
+        previous=previous,
+        cleanup_enabled=True,
+        is_partial_read=False,
+        dry_run=False,
+    )
+
+    # Tag should NOT be removed (already in delivery state)
+    assert uc[("TABLE", "main.s.unlinked")] == {default_key: OPEX}
+    assert removed == 0
+
+
+def test_legacy_cleanup_failed_removal_not_marked_done(tag_sync, uc, db,
+                                                       monkeypatch):
+    """Failed removal: not marked done, retried next run."""
+    default_prefix = "x_ontos_"
+    default_key = f"{default_prefix}legacy_tag"
+
+    uc[("TABLE", "main.s.unlinked")] = {default_key: OPEX}
+
+    def fake_bulk_read(spark, catalog, prefix):
+        result = {}
+        for (obj_type, fqn), tags in uc.items():
+            if fqn.lower().startswith(catalog.lower()):
+                result[(obj_type, fqn)] = {k: v for k, v in tags.items()
+                                           if k.startswith(prefix)}
+        return result
+
+    def fake_unassign_fails(spark, obj_type, fqn, key):
+        raise RuntimeError("PERMISSION_DENIED")
+
+    monkeypatch.setattr(tag_sync, "_bulk_read_prefixed_tags_per_catalog",
+                        fake_bulk_read)
+    monkeypatch.setattr(tag_sync, "unassign_tag", fake_unassign_fails)
+
+    dataset = _asset_dataset(tag_sync, "main.s.other", [OPEX])
+    direct = tag_sync.DirectLinkInfos(tables=[dataset])
+    previous = {}
+
+    removed, errors = tag_sync.handle_legacy_tag_cleanup(
+        MagicMock(), db, [dataset], direct,
+        prefix=default_prefix,
+        previous=previous,
+        cleanup_enabled=True,
+        is_partial_read=False,
+        dry_run=False,
+    )
+
+    # Should have error
+    assert len(errors) == 1
+    assert "PERMISSION_DENIED" in errors[0]
+
+    # Should NOT be marked done
+    status = tag_sync.read_cleanup_legacy_status(db)
+    assert not status.get("cleanup_done")
+
+    # Tag should still be there
+    assert uc[("TABLE", "main.s.unlinked")] == {default_key: OPEX}
+
+
+def test_legacy_cleanup_dry_run_lists_no_remove(tag_sync, uc, db, monkeypatch,
+                                                capsys):
+    """Dry run: lists candidates but removes nothing, marks nothing."""
+    default_prefix = "x_ontos_"
+    default_key = f"{default_prefix}legacy_tag"
+
+    uc[("TABLE", "main.s.unlinked")] = {default_key: OPEX}
+
+    def fake_bulk_read(spark, catalog, prefix):
+        result = {}
+        for (obj_type, fqn), tags in uc.items():
+            if fqn.lower().startswith(catalog.lower()):
+                result[(obj_type, fqn)] = {k: v for k, v in tags.items()
+                                           if k.startswith(prefix)}
+        return result
+
+    monkeypatch.setattr(tag_sync, "_bulk_read_prefixed_tags_per_catalog",
+                        fake_bulk_read)
+
+    dataset = _asset_dataset(tag_sync, "main.s.other", [OPEX])
+    direct = tag_sync.DirectLinkInfos(tables=[dataset])
+    previous = {}
+
+    removed, errors = tag_sync.handle_legacy_tag_cleanup(
+        MagicMock(), db, [dataset], direct,
+        prefix=default_prefix,
+        previous=previous,
+        cleanup_enabled=True,
+        is_partial_read=False,
+        dry_run=True,
+    )
+
+    # Nothing removed in dry run
+    assert removed == 0
+    assert uc[("TABLE", "main.s.unlinked")] == {default_key: OPEX}
+
+    # Not marked done in dry run
+    status = tag_sync.read_cleanup_legacy_status(db)
+    assert not status.get("cleanup_done")
+
+
+def test_legacy_cleanup_flag_off_logs_samples(tag_sync, uc, db, monkeypatch,
+                                              capsys):
+    """Flag off: logs count + samples on first full run."""
+    default_prefix = "x_ontos_"
+    default_key = f"{default_prefix}legacy_tag"
+
+    uc[("TABLE", "main.s.unlinked")] = {default_key: OPEX}
+
+    def fake_bulk_read(spark, catalog, prefix):
+        result = {}
+        for (obj_type, fqn), tags in uc.items():
+            if fqn.lower().startswith(catalog.lower()):
+                result[(obj_type, fqn)] = {k: v for k, v in tags.items()
+                                           if k.startswith(prefix)}
+        return result
+
+    monkeypatch.setattr(tag_sync, "_bulk_read_prefixed_tags_per_catalog",
+                        fake_bulk_read)
+
+    dataset = _asset_dataset(tag_sync, "main.s.other", [OPEX])
+    direct = tag_sync.DirectLinkInfos(tables=[dataset])
+    previous = {}
+
+    removed, errors = tag_sync.handle_legacy_tag_cleanup(
+        MagicMock(), db, [dataset], direct,
+        prefix=default_prefix,
+        previous=previous,
+        cleanup_enabled=False,
+        is_partial_read=False,
+        dry_run=False,
+    )
+
+    assert removed == 0
+    assert errors == []
+
+    # Should be marked "checked"
+    status = tag_sync.read_cleanup_legacy_status(db)
+    assert status.get("checked_first_run")
+
+    # Should have logged
     out = capsys.readouterr().out
-    assert "Refusing" in out
+    assert "Found" in out or "legacy" in out.lower()
+
+
+def test_legacy_cleanup_flag_off_second_run_silent(tag_sync, uc, db,
+                                                   monkeypatch, capsys):
+    """Flag off: second run is silent (checked marker prevents repeat)."""
+    default_prefix = "x_ontos_"
+
+    # Mark as already checked
+    with Session(db) as session:
+        setting = AppSettingDb(
+            key="uc_tag_sync_cleanup_legacy_status",
+            value=json.dumps({"checked_first_run": True})
+        )
+        session.add(setting)
+        session.commit()
+
+    def fake_bulk_read(spark, catalog, prefix):
+        return {}
+
+    monkeypatch.setattr(tag_sync, "_bulk_read_prefixed_tags_per_catalog",
+                        fake_bulk_read)
+
+    dataset = _asset_dataset(tag_sync, "main.s.other", [OPEX])
+    direct = tag_sync.DirectLinkInfos(tables=[dataset])
+    previous = {}
+
+    removed, errors = tag_sync.handle_legacy_tag_cleanup(
+        MagicMock(), db, [dataset], direct,
+        prefix=default_prefix,
+        previous=previous,
+        cleanup_enabled=False,
+        is_partial_read=False,
+        dry_run=False,
+    )
+
+    assert removed == 0
+    assert errors == []
+
+
+def test_legacy_cleanup_multi_level_objects(tag_sync, uc, db, monkeypatch):
+    """Cleanup finds and removes candidates at all four levels."""
+    default_prefix = "x_ontos_"
+    default_key = f"{default_prefix}legacy"
+
+    # Unlinked objects at all 4 levels
+    uc[("CATALOG", "unlinked_cat")] = {default_key: OPEX}
+    uc[("SCHEMA", "main.unlinked_sch")] = {default_key: OPEX}
+    uc[("TABLE", "main.s.unlinked_t")] = {default_key: OPEX}
+    uc[("COLUMN", "main.s.t.unlinked_col")] = {default_key: OPEX}
+
+    def fake_bulk_read(spark, catalog, prefix):
+        result = {}
+        for (obj_type, fqn), tags in uc.items():
+            if fqn.lower().startswith(catalog.lower()):
+                result[(obj_type, fqn)] = {k: v for k, v in tags.items()
+                                           if k.startswith(prefix)}
+        return result
+
+    def fake_unassign(spark, obj_type, fqn, key):
+        uc.get((obj_type, fqn), {}).pop(key, None)
+
+    monkeypatch.setattr(tag_sync, "_bulk_read_prefixed_tags_per_catalog",
+                        fake_bulk_read)
+    monkeypatch.setattr(tag_sync, "unassign_tag", fake_unassign)
+
+    # Only one linked table
+    dataset = _asset_dataset(tag_sync, "main.s.t", [OPEX])
+    direct = tag_sync.DirectLinkInfos(tables=[dataset])
+    previous = {}
+
+    removed, errors = tag_sync.handle_legacy_tag_cleanup(
+        MagicMock(), db, [dataset], direct,
+        prefix=default_prefix,
+        previous=previous,
+        cleanup_enabled=True,
+        is_partial_read=False,
+        dry_run=False,
+    )
+
+    # Only unlinked objects in the linked catalog (main) should be removed (3, not the catalog)
+    # The CATALOG "unlinked_cat" won't be scanned because it has no linked datasets
+    assert removed == 3
+    assert errors == []
+    assert uc.get(("SCHEMA", "main.unlinked_sch"), {}) == {}
+    assert uc.get(("TABLE", "main.s.unlinked_t"), {}) == {}
+    assert uc.get(("COLUMN", "main.s.t.unlinked_col"), {}) == {}
