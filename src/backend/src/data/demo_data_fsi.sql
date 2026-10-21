@@ -731,7 +731,7 @@ INSERT INTO process_workflows (id, name, description, trigger_config, scope_conf
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO workflow_steps (id, workflow_id, step_id, name, step_type, config, on_pass, on_fail, "order", position, created_at, updated_at) VALUES
-('02b00101-0002-4000-8000-000000000001', '02a00101-0002-4000-8000-000000000001', 'lineage_check',     'BCBS 239 Lineage Coverage',
+('02b00101-0002-4000-8000-000000000001', '02a00101-0002-4000-8000-000000000001', 'lineage_check',     'BCBS 239 Risk Tier Tagged',
  'policy_check',
  '{"policy_id": "01100001-0002-4000-8000-000000000001"}',
  'cro_attest', 'reject', 1, '{"x": 100, "y": 100}', NOW(), NOW()),
@@ -745,20 +745,35 @@ INSERT INTO workflow_steps (id, workflow_id, step_id, name, step_type, config, o
  'approve', 'reject', 1, '{"x": 100, "y": 100}', NOW(), NOW())
 ON CONFLICT (id) DO NOTHING;
 
+-- Installs that loaded an earlier version of this preset keep their workflow rows
+-- (ON CONFLICT DO NOTHING above). Rename those in place, but only the texts that
+-- still have their shipped value, so a step an admin renamed is left alone.
+UPDATE workflow_steps SET name = CASE
+  WHEN id = '02b00101-0002-4000-8000-000000000001' AND name = 'BCBS 239 Lineage Coverage' THEN 'BCBS 239 Risk Tier Tagged'
+  ELSE name END
+WHERE id IN ('02b00101-0002-4000-8000-000000000001');
+
 
 -- ============================================================================
 -- 19. COMPLIANCE RUNS + RESULTS (FSI)
 -- ============================================================================
 
 INSERT INTO compliance_runs (id, policy_id, status, started_at, finished_at, success_count, failure_count, score) VALUES
-('01200101-0002-4000-8000-000000000001', '01100001-0002-4000-8000-000000000001', 'completed', NOW() - INTERVAL '4 days', NOW() - INTERVAL '4 days' + INTERVAL '15 minutes', 5, 1, 0.833),
-('01200102-0002-4000-8000-000000000002', '01100002-0002-4000-8000-000000000002', 'completed', NOW() - INTERVAL '2 days', NOW() - INTERVAL '2 days' + INTERVAL '6 minutes',  3, 0, 1.000)
-ON CONFLICT (id) DO NOTHING;
+('01200101-0002-4000-8000-000000000001', '01100001-0002-4000-8000-000000000001', 'succeeded', NOW() - INTERVAL '4 days', NOW() - INTERVAL '4 days' + INTERVAL '15 minutes', 1, 1, 50),
+('01200102-0002-4000-8000-000000000002', '01100002-0002-4000-8000-000000000002', 'succeeded', NOW() - INTERVAL '2 days', NOW() - INTERVAL '2 days' + INTERVAL '6 minutes', 2, 1, 66.67)
+ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, success_count = EXCLUDED.success_count,
+  failure_count = EXCLUDED.failure_count, score = EXCLUDED.score;
+
+-- Sample results of a real run of each policy above. A load replaces the ones an earlier
+-- version of this preset inserted for the same sample runs.
+DELETE FROM compliance_results WHERE run_id IN ('01200101-0002-4000-8000-000000000001', '01200102-0002-4000-8000-000000000002');
 
 INSERT INTO compliance_results (id, run_id, object_type, object_id, object_name, passed, message, created_at) VALUES
-('01300101-0002-4000-8000-000000000001', '01200101-0002-4000-8000-000000000001', 'data_product', '00700002-0002-4000-8000-000000000002', 'Enterprise Risk Aggregation v1', true,  'Risk aggregation lineage covers all 11 BCBS 239 principles.', NOW() - INTERVAL '4 days'),
-('01300102-0002-4000-8000-000000000002', '01200101-0002-4000-8000-000000000001', 'data_product', '00700001-0002-4000-8000-000000000001', 'Trading Analytics Dashboard v1', false, 'Reconciliation lineage missing between FIX feed and EOD positions snapshot.', NOW() - INTERVAL '4 days'),
-('01300103-0002-4000-8000-000000000003', '01200102-0002-4000-8000-000000000002', 'data_product', '00700003-0002-4000-8000-000000000003', 'AML Transaction Monitoring v1', true,  'Sanctions screening cycle within 1-day SLA.', NOW() - INTERVAL '2 days')
+('01300101-0002-4000-8000-000000000001', '01200101-0002-4000-8000-000000000001', 'data_product', '00700002-0002-4000-8000-000000000002', 'Enterprise Risk Aggregation v1', true, NULL, NOW() - INTERVAL '4 days'),
+('01300102-0002-4000-8000-000000000002', '01200101-0002-4000-8000-000000000001', 'data_product', '00700004-0002-4000-8000-000000000004', 'Regulatory Reporting Hub v1', false, 'Assertion failed for data_product Regulatory Reporting Hub v1', NOW() - INTERVAL '4 days'),
+('01300103-0002-4000-8000-000000000003', '01200102-0002-4000-8000-000000000002', 'data_product', '00700003-0002-4000-8000-000000000003', 'AML Transaction Monitoring v1', true, NULL, NOW() - INTERVAL '2 days'),
+('01300104-0002-4000-8000-000000000004', '01200102-0002-4000-8000-000000000002', 'data_product', '00700005-0002-4000-8000-000000000005', 'Customer 360 Banking v1', true, NULL, NOW() - INTERVAL '2 days'),
+('01300105-0002-4000-8000-000000000005', '01200102-0002-4000-8000-000000000002', 'data_product', '00700004-0002-4000-8000-000000000004', 'Regulatory Reporting Hub v1', false, 'Assertion failed for data_product Regulatory Reporting Hub v1', NOW() - INTERVAL '2 days')
 ON CONFLICT (id) DO NOTHING;
 
 

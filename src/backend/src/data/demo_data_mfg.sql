@@ -738,14 +738,19 @@ ON CONFLICT (id) DO NOTHING;
 -- ============================================================================
 
 INSERT INTO compliance_runs (id, policy_id, status, started_at, finished_at, success_count, failure_count, score) VALUES
-('01200101-0003-4000-8000-000000000001', '01100001-0003-4000-8000-000000000001', 'completed', NOW() - INTERVAL '3 days', NOW() - INTERVAL '3 days' + INTERVAL '7 minutes', 4, 1, 0.800),
-('01200102-0003-4000-8000-000000000002', '01100002-0003-4000-8000-000000000002', 'completed', NOW() - INTERVAL '1 days', NOW() - INTERVAL '1 days' + INTERVAL '5 minutes', 3, 0, 1.000)
-ON CONFLICT (id) DO NOTHING;
+('01200101-0003-4000-8000-000000000001', '01100001-0003-4000-8000-000000000001', 'succeeded', NOW() - INTERVAL '3 days', NOW() - INTERVAL '3 days' + INTERVAL '7 minutes', 1, 1, 50),
+('01200102-0003-4000-8000-000000000002', '01100002-0003-4000-8000-000000000002', 'succeeded', NOW() - INTERVAL '1 days', NOW() - INTERVAL '1 days' + INTERVAL '5 minutes', 1, 0, 100)
+ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, success_count = EXCLUDED.success_count,
+  failure_count = EXCLUDED.failure_count, score = EXCLUDED.score;
+
+-- Sample results of a real run of each policy above. A load replaces the ones an earlier
+-- version of this preset inserted for the same sample runs.
+DELETE FROM compliance_results WHERE run_id IN ('01200101-0003-4000-8000-000000000001', '01200102-0003-4000-8000-000000000002');
 
 INSERT INTO compliance_results (id, run_id, object_type, object_id, object_name, passed, message, created_at) VALUES
-('01300101-0003-4000-8000-000000000001', '01200101-0003-4000-8000-000000000001', 'data_product', '00700002-0003-4000-8000-000000000002', 'Quality Analytics Platform v1', true,  'SPC rules and Cpk thresholds documented and current.', NOW() - INTERVAL '3 days'),
-('01300102-0003-4000-8000-000000000002', '01200101-0003-4000-8000-000000000001', 'data_product', '00700003-0003-4000-8000-000000000003', 'Predictive Maintenance v1',    false, 'Vibration sensors on 3 critical assets show 12+ hours of missing data.', NOW() - INTERVAL '3 days'),
-('01300103-0003-4000-8000-000000000003', '01200102-0003-4000-8000-000000000002', 'data_product', '00700005-0003-4000-8000-000000000005', 'EHS Safety Analytics v1',     true,  'OSHA 300 log reconciles with HRIS injury records.', NOW() - INTERVAL '1 days')
+('01300101-0003-4000-8000-000000000001', '01200101-0003-4000-8000-000000000001', 'data_product', '00700001-0003-4000-8000-000000000001', 'Production KPI Dashboard v1', true, NULL, NOW() - INTERVAL '3 days'),
+('01300102-0003-4000-8000-000000000002', '01200101-0003-4000-8000-000000000001', 'data_product', '00700002-0003-4000-8000-000000000002', 'Quality Analytics Platform v1', false, 'Assertion failed for data_product Quality Analytics Platform v1', NOW() - INTERVAL '3 days'),
+('01300103-0003-4000-8000-000000000003', '01200102-0003-4000-8000-000000000002', 'data_product', '00700002-0003-4000-8000-000000000002', 'Quality Analytics Platform v1', true, NULL, NOW() - INTERVAL '1 days')
 ON CONFLICT (id) DO NOTHING;
 
 
