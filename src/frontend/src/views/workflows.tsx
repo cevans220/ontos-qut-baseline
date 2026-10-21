@@ -59,8 +59,9 @@ import type {
   WorkflowListResponse,
   WorkflowExecution,
   ExecutionStatus,
+  EntityType,
 } from '@/types/process-workflow';
-import { getTriggerDisplay } from '@/lib/workflow-labels';
+import { getTriggerDisplay, getEntityTypeLabel, getStepTypeLabel } from '@/lib/workflow-labels';
 import { WorkflowExecutionDialog } from '@/components/workflows/workflow-execution-dialog';
 import { useDefaultWorkflowText } from '@/lib/workflow-default-texts';
 import ApprovalWizardDialog from '@/components/workflows/approval-wizard-dialog';
@@ -816,7 +817,7 @@ export default function Workflows() {
       cell: ({ row }) => (
         <div className="flex items-center gap-1">
           {row.original.steps.slice(0, 4).map((step, i) => (
-            <span key={i} className="text-muted-foreground" title={step.step_type}>
+            <span key={i} className="text-muted-foreground" title={getStepTypeLabel(step.step_type, t)}>
               {getStepTypeIcon(step.step_type)}
             </span>
           ))}
@@ -934,7 +935,7 @@ export default function Workflows() {
           <div className="flex flex-col">
             <span className="text-sm font-medium">{entity_name || entity_id || '-'}</span>
             {entity_type && (
-              <span className="text-xs text-muted-foreground capitalize">{entity_type}</span>
+              <span className="text-xs text-muted-foreground">{getEntityTypeLabel(entity_type as EntityType, t)}</span>
             )}
           </div>
         );
