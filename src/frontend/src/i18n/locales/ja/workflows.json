@@ -500,6 +500,25 @@
     "endpointHint": "JSON を返すバックエンドエンドポイント",
     "addField": "フィールドを追加"
   },
+  "runDialog": {
+    "menuLabel": "実行",
+    "title": "「{{name}}」を実行",
+    "description": "この手動ワークフローをエンティティに対して開始します。今すぐ、あなたとして実行されます。",
+    "entityType": "エンティティタイプ",
+    "entity": "エンティティ",
+    "selectEntity": "エンティティを選択",
+    "loading": "読み込み中...",
+    "noEntities": "選択できる項目がありません。",
+    "listFailed": "一覧を読み込めませんでした。IDを入力してください。",
+    "entityId": "エンティティID",
+    "entityIdPlaceholder": "例: main.sales.orders",
+    "entityIdHelp": "ワークフローを実行する対象エンティティのIDまたは完全名。",
+    "run": "実行",
+    "failed": "ワークフローを開始できませんでした。",
+    "resultStatus": "結果",
+    "viewExecution": "実行を表示",
+    "resultEntity": "{{type}}: {{name}}"
+  },
   "templateVars": {
     "copiedToClipboard": "{{placeholder}} をクリップボードにコピーしました。",
     "copyFailed": "コピーに失敗しました",

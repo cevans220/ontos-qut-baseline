@@ -63,6 +63,7 @@ import { WorkflowExecutionDialog } from '@/components/workflows/workflow-executi
 import { useDefaultWorkflowText } from '@/lib/workflow-default-texts';
 import ApprovalWizardDialog from '@/components/workflows/approval-wizard-dialog';
 import { RelativeDate } from '@/components/common/relative-date';
+import { WorkflowRunDialog } from '@/components/workflows/workflow-run-dialog';
 
 interface WorkflowExecutionsResponse {
   executions: WorkflowExecution[];
@@ -113,6 +114,8 @@ export default function Workflows() {
   
   // Check if user has admin access
   const canEdit = hasPermission('process-workflows', FeatureAccessLevel.ADMIN);
+  // POST /api/workflows/{id}/execute requires settings-workflows READ_WRITE
+  const canRun = hasPermission('settings-workflows', FeatureAccessLevel.READ_WRITE);
   
   // Workflow type filter: process (event-driven) | approval (wizard-driven)
   const [workflowTypeFilter, setWorkflowTypeFilter] = useState<'all' | 'process' | 'approval'>('all');
@@ -145,6 +148,8 @@ export default function Workflows() {
   // Preview wizard (issue #405): launched from the row-action menu on any
   // approval workflow. Pure FE dry-run — no API session, no audit.
   const [previewingWorkflow, setPreviewingWorkflow] = useState<ProcessWorkflow | null>(null);
+  // Manual run dialog: launched from the row-action menu on manual workflows.
+  const [runningWorkflow, setRunningWorkflow] = useState<ProcessWorkflow | null>(null);
 
   const loadWorkflows = useCallback(async () => {
     setIsLoadingWorkflows(true);
@@ -869,6 +874,12 @@ export default function Workflows() {
                 {t('workflows:view.actions.previewWizard')}
               </DropdownMenuItem>
             )}
+            {canRun && row.original.trigger.type === 'manual' && (
+              <DropdownMenuItem onClick={() => setRunningWorkflow(row.original)}>
+                <Play className="h-4 w-4 mr-2" />
+                {t('workflows:runDialog.menuLabel')}
+              </DropdownMenuItem>
+            )}
             {canEdit && (
               <>
                 <DropdownMenuItem onClick={() => {
@@ -1526,6 +1537,19 @@ export default function Workflows() {
         execution={selectedExecution}
         open={executionDialogOpen}
         onOpenChange={setExecutionDialogOpen}
+      />
+
+      {/* Run a manual workflow against an entity */}
+      <WorkflowRunDialog
+        workflow={runningWorkflow}
+        open={!!runningWorkflow}
+        onOpenChange={(open) => { if (!open) setRunningWorkflow(null); }}
+        onExecuted={() => loadExecutions()}
+        onViewExecution={(execution) => {
+          setRunningWorkflow(null);
+          setSelectedExecution(execution);
+          setExecutionDialogOpen(true);
+        }}
       />
 
       {/* Approval Wizard Preview (issue #405) — synthetic dry-run, no API

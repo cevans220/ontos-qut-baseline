@@ -500,6 +500,25 @@
     "endpointHint": "Backend endpoint returning JSON",
     "addField": "Add field"
   },
+  "runDialog": {
+    "menuLabel": "Run",
+    "title": "Run \"{{name}}\"",
+    "description": "Start this manual workflow for an entity. It runs now, as you.",
+    "entityType": "Entity type",
+    "entity": "Entity",
+    "selectEntity": "Select an entity",
+    "loading": "Loading...",
+    "noEntities": "Nothing to select.",
+    "listFailed": "Could not load the list; enter the id instead.",
+    "entityId": "Entity id",
+    "entityIdPlaceholder": "e.g. main.sales.orders",
+    "entityIdHelp": "The id or full name of the entity the workflow should run for.",
+    "run": "Run",
+    "failed": "The workflow could not be started.",
+    "resultStatus": "Result",
+    "viewExecution": "View execution",
+    "resultEntity": "{{type}}: {{name}}"
+  },
   "templateVars": {
     "copiedToClipboard": "{{placeholder}} copied to clipboard.",
     "copyFailed": "Copy failed",

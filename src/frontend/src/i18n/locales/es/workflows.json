@@ -500,6 +500,25 @@
     "endpointHint": "Endpoint de backend que devuelve JSON",
     "addField": "Añadir campo"
   },
+  "runDialog": {
+    "menuLabel": "Ejecutar",
+    "title": "Ejecutar \"{{name}}\"",
+    "description": "Inicia este flujo de trabajo manual para una entidad. Se ejecuta ahora, como tú.",
+    "entityType": "Tipo de entidad",
+    "entity": "Entidad",
+    "selectEntity": "Selecciona una entidad",
+    "loading": "Cargando...",
+    "noEntities": "No hay nada que seleccionar.",
+    "listFailed": "No se pudo cargar la lista; introduce el ID.",
+    "entityId": "ID de la entidad",
+    "entityIdPlaceholder": "p. ej., main.sales.orders",
+    "entityIdHelp": "El ID o nombre completo de la entidad para la que se ejecutará el flujo de trabajo.",
+    "run": "Ejecutar",
+    "failed": "No se pudo iniciar el flujo de trabajo.",
+    "resultStatus": "Resultado",
+    "viewExecution": "Ver ejecución",
+    "resultEntity": "{{type}}: {{name}}"
+  },
   "templateVars": {
     "copiedToClipboard": "{{placeholder}} copiado al portapapeles.",
     "copyFailed": "Error al copiar",

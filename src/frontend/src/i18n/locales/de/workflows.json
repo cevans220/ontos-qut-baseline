@@ -500,6 +500,25 @@
     "endpointHint": "Backend-Endpunkt, der JSON zurückgibt",
     "addField": "Feld hinzufügen"
   },
+  "runDialog": {
+    "menuLabel": "Ausführen",
+    "title": "„{{name}}“ ausführen",
+    "description": "Startet diesen manuellen Workflow für eine Entität. Er läuft jetzt, in Ihrem Namen.",
+    "entityType": "Entitätstyp",
+    "entity": "Entität",
+    "selectEntity": "Entität auswählen",
+    "loading": "Wird geladen...",
+    "noEntities": "Keine Einträge zur Auswahl vorhanden.",
+    "listFailed": "Die Liste konnte nicht geladen werden. Geben Sie stattdessen die ID ein.",
+    "entityId": "Entitäts-ID",
+    "entityIdPlaceholder": "z. B. main.sales.orders",
+    "entityIdHelp": "Die ID oder der vollständige Name der Entität, für die der Workflow laufen soll.",
+    "run": "Ausführen",
+    "failed": "Der Workflow konnte nicht gestartet werden.",
+    "resultStatus": "Ergebnis",
+    "viewExecution": "Ausführung anzeigen",
+    "resultEntity": "{{type}}: {{name}}"
+  },
   "templateVars": {
     "copiedToClipboard": "{{placeholder}} in die Zwischenablage kopiert.",
     "copyFailed": "Kopieren fehlgeschlagen",
