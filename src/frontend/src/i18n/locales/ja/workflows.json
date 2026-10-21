@@ -31,6 +31,8 @@
       "special": "特別",
       "requesterOriginalUser": "リクエスト者（元のユーザー）",
       "ownerEntityOwner": "所有者（エンティティ所有者）",
+      "domainOwners": "ドメインオーナー",
+      "contractApprovers": "契約承認者",
       "appRoles": "アプリロール",
       "businessRoles": "ビジネスロール",
       "noGroups": "グループがありません"
@@ -43,7 +45,8 @@
       "createdSuccess": "ワークフローを正常に作成しました",
       "updatedSuccess": "ワークフローを正常に更新しました",
       "createFailed": "ワークフローの作成に失敗しました: {{error}}",
-      "updateFailed": "ワークフローの更新に失敗しました: {{error}}"
+      "updateFailed": "ワークフローの更新に失敗しました: {{error}}",
+      "stepConfigInvalid": "ステップ \"{{step}}\": {{issue}}"
     },
     "badges": {
       "default": "デフォルト",
@@ -241,6 +244,58 @@
       "timeoutSeconds": "タイムアウト（秒）",
       "retryCount": "リトライ回数",
       "retryHelp": "失敗時のリトライ回数（0～5）。"
+    },
+    "conditional": {
+      "condition": "条件",
+      "placeholder": "obj.status = 'active' AND NOT HAS_TAG('pii')",
+      "branchHelp": "条件が true のときワークフローは Pass の分岐に、false のときは Fail の分岐に進みます。",
+      "fieldsHelp": "MATCH や ASSERT を含まない Compliance DSL の式を書きます。エンティティのフィールドは obj.<field> で参照し、比較には == ではなく = を使います。",
+      "examplesTitle": "例",
+      "errors": {
+        "condition_required": "条件を入力してください。",
+        "condition_syntax_error": "条件を解析できません（{{line}} 行 {{column}} 列）。",
+        "condition_trailing_input": "条件の後に予期しない \"{{token}}\" があります（{{line}} 行 {{column}} 列）。条件は AND または OR でつなぎます。",
+        "condition_too_long": "条件が {{maximum}} 文字を超えています。短くするか、複数のステップに分けてください。",
+        "condition_too_complex": "条件の入れ子が深すぎるためチェックできません。括弧を減らすか、複数のステップに分けてください。"
+      }
+    },
+    "script": {
+      "language": "言語",
+      "languages": {
+        "python": "Python",
+        "sql": "SQL"
+      },
+      "code": "コード",
+      "pythonPlaceholder": "if not entity.get('description'):\n    result = {'passed': False, 'message': 'Missing description'}",
+      "sqlPlaceholder": "SELECT COUNT(*) FROM ${entity_id}",
+      "timeout": "タイムアウト（秒）",
+      "timeoutHelp": "スクリプトの実行がこれより長くなるとステップは失敗します。",
+      "variablesTitle": "使用できる変数",
+      "pythonVariables": {
+        "entity": "エンティティのデータ（辞書）",
+        "entity_type": "エンティティの種類",
+        "entity_id": "エンティティの ID",
+        "entity_name": "エンティティの名前",
+        "user_email": "ワークフローを起動したユーザーのメール",
+        "step_results": "実行済みのステップの結果（ステップ ID ごと）"
+      },
+      "pythonResultHelp": "result を設定して分岐を選びます。result = {'passed': False, 'message': '...'} は Fail の分岐に進み、result がなければステップは成功します。使えるのは基本的な組み込み関数だけで、import、ファイル、ネットワークは使えません。",
+      "sqlHelp": "設定で指定した SQL ウェアハウスで実行されます。${variable} のプレースホルダーは実行前に置き換えられ、ステートメントが成功するとステップは成功します。ステートメントの待機は最大 50 秒です。",
+      "errors": {
+        "script_code_required": "スクリプトのコードを入力してください。",
+        "script_timeout_invalid": "{{minimum}} 以上の整数（秒）を入力してください。",
+        "script_language_unsupported": "言語 \"{{language}}\" はサポートされていません。サポート対象: {{supported}}。"
+      }
+    },
+    "validationIssues": {
+      "stepsRequired": "ワークフローには少なくとも1つのステップが必要です。",
+      "duplicateStepIds": "2つのステップのIDが同じです。",
+      "stepUnknownReference": "ステップ「{{step}}」の{{branch}}の分岐先「{{target}}」はワークフロー内にありません。",
+      "stepConfigMissing": "ステップ「{{step}}」に必須の設定がありません: {{fields}}。",
+      "branch": {
+        "on_pass": "成功時",
+        "on_fail": "失敗時"
+      }
     }
   },
   "approvalResponse": {

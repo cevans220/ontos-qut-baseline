@@ -31,6 +31,8 @@
       "special": "Special",
       "requesterOriginalUser": "Requester (Original User)",
       "ownerEntityOwner": "Owner (Entity Owner)",
+      "domainOwners": "Domain owners",
+      "contractApprovers": "Contract approvers",
       "appRoles": "App Roles",
       "businessRoles": "Business Roles",
       "noGroups": "No groups"
@@ -43,7 +45,8 @@
       "createdSuccess": "Workflow created successfully",
       "updatedSuccess": "Workflow updated successfully",
       "createFailed": "Failed to create workflow: {{error}}",
-      "updateFailed": "Failed to update workflow: {{error}}"
+      "updateFailed": "Failed to update workflow: {{error}}",
+      "stepConfigInvalid": "Step \"{{step}}\": {{issue}}"
     },
     "badges": {
       "default": "Default",
@@ -241,6 +244,58 @@
       "timeoutSeconds": "Timeout (seconds)",
       "retryCount": "Retry Count",
       "retryHelp": "Number of retries on failure (0-5)."
+    },
+    "conditional": {
+      "condition": "Condition",
+      "placeholder": "obj.status = 'active' AND NOT HAS_TAG('pii')",
+      "branchHelp": "When the condition is true the workflow follows the Pass branch; when it is false, the Fail branch.",
+      "fieldsHelp": "Write a Compliance DSL expression without MATCH or ASSERT. Fields of the entity are read as obj.<field>; compare with =, not ==.",
+      "examplesTitle": "Examples",
+      "errors": {
+        "condition_required": "Enter a condition.",
+        "condition_syntax_error": "The condition doesn't parse (line {{line}}, column {{column}}).",
+        "condition_trailing_input": "Unexpected \"{{token}}\" after the condition (line {{line}}, column {{column}}). Join conditions with AND or OR.",
+        "condition_too_long": "The condition is longer than {{maximum}} characters. Shorten it or split it into several steps.",
+        "condition_too_complex": "The condition is nested too deeply to check. Remove some parentheses or split it into several steps."
+      }
+    },
+    "script": {
+      "language": "Language",
+      "languages": {
+        "python": "Python",
+        "sql": "SQL"
+      },
+      "code": "Code",
+      "pythonPlaceholder": "if not entity.get('description'):\n    result = {'passed': False, 'message': 'Missing description'}",
+      "sqlPlaceholder": "SELECT COUNT(*) FROM ${entity_id}",
+      "timeout": "Timeout (seconds)",
+      "timeoutHelp": "The step fails when the script runs longer than this.",
+      "variablesTitle": "Available variables",
+      "pythonVariables": {
+        "entity": "The entity's data (a dictionary)",
+        "entity_type": "The entity's type",
+        "entity_id": "The entity's ID",
+        "entity_name": "The entity's name",
+        "user_email": "Email of the user who triggered the workflow",
+        "step_results": "Results of the steps that already ran, by step ID"
+      },
+      "pythonResultHelp": "Set result to choose the branch: result = {'passed': False, 'message': '...'} follows the Fail branch; without result the step passes. Only basic built-ins are available: no imports, files or network.",
+      "sqlHelp": "Runs on the SQL warehouse set in Settings. ${variable} placeholders are replaced before the statement runs; the step passes when the statement succeeds. The statement waits up to 50 seconds.",
+      "errors": {
+        "script_code_required": "Enter the script's code.",
+        "script_timeout_invalid": "Enter a whole number of seconds, at least {{minimum}}.",
+        "script_language_unsupported": "The language \"{{language}}\" is not supported. Supported: {{supported}}."
+      }
+    },
+    "validationIssues": {
+      "stepsRequired": "A workflow needs at least one step.",
+      "duplicateStepIds": "Two steps have the same ID.",
+      "stepUnknownReference": "Step \"{{step}}\" points its {{branch}} branch at \"{{target}}\", which is not in the workflow.",
+      "stepConfigMissing": "Step \"{{step}}\" is missing required settings: {{fields}}.",
+      "branch": {
+        "on_pass": "pass",
+        "on_fail": "fail"
+      }
     }
   },
   "approvalResponse": {

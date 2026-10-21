@@ -31,6 +31,8 @@
       "special": "Speciale",
       "requesterOriginalUser": "Richiedente (utente originale)",
       "ownerEntityOwner": "Proprietario (proprietario dell'entità)",
+      "domainOwners": "Responsabili del dominio",
+      "contractApprovers": "Approvatori del contratto",
       "appRoles": "Ruoli dell'app",
       "businessRoles": "Ruoli aziendali",
       "noGroups": "Nessun gruppo"
@@ -43,7 +45,8 @@
       "createdSuccess": "Workflow creato correttamente",
       "updatedSuccess": "Workflow aggiornato correttamente",
       "createFailed": "Impossibile creare il workflow: {{error}}",
-      "updateFailed": "Impossibile aggiornare il workflow: {{error}}"
+      "updateFailed": "Impossibile aggiornare il workflow: {{error}}",
+      "stepConfigInvalid": "Passaggio \"{{step}}\": {{issue}}"
     },
     "badges": {
       "default": "Predefinito",
@@ -241,6 +244,58 @@
       "timeoutSeconds": "Timeout (secondi)",
       "retryCount": "Numero di tentativi",
       "retryHelp": "Numero di nuovi tentativi in caso di errore (0-5)."
+    },
+    "conditional": {
+      "condition": "Condizione",
+      "placeholder": "obj.status = 'active' AND NOT HAS_TAG('pii')",
+      "branchHelp": "Quando la condizione è vera, il workflow segue il ramo Pass; quando è falsa, il ramo Fail.",
+      "fieldsHelp": "Scrivi un'espressione della Compliance DSL senza MATCH né ASSERT. I campi dell'entità si leggono come obj.<campo>; confronta con =, non ==.",
+      "examplesTitle": "Esempi",
+      "errors": {
+        "condition_required": "Inserisci una condizione.",
+        "condition_syntax_error": "La condizione non può essere interpretata (riga {{line}}, colonna {{column}}).",
+        "condition_trailing_input": "\"{{token}}\" inatteso dopo la condizione (riga {{line}}, colonna {{column}}). Unisci le condizioni con AND o OR.",
+        "condition_too_long": "La condizione supera i {{maximum}} caratteri. Accorciala o dividila in più passaggi.",
+        "condition_too_complex": "La condizione è troppo annidata per essere verificata. Rimuovi alcune parentesi o dividila in più passaggi."
+      }
+    },
+    "script": {
+      "language": "Linguaggio",
+      "languages": {
+        "python": "Python",
+        "sql": "SQL"
+      },
+      "code": "Codice",
+      "pythonPlaceholder": "if not entity.get('description'):\n    result = {'passed': False, 'message': 'Missing description'}",
+      "sqlPlaceholder": "SELECT COUNT(*) FROM ${entity_id}",
+      "timeout": "Timeout (secondi)",
+      "timeoutHelp": "Il passaggio fallisce quando lo script dura più a lungo.",
+      "variablesTitle": "Variabili disponibili",
+      "pythonVariables": {
+        "entity": "I dati dell'entità (un dizionario)",
+        "entity_type": "Il tipo dell'entità",
+        "entity_id": "L'ID dell'entità",
+        "entity_name": "Il nome dell'entità",
+        "user_email": "Email dell'utente che ha avviato il workflow",
+        "step_results": "Risultati dei passaggi già eseguiti, per ID del passaggio"
+      },
+      "pythonResultHelp": "Imposta result per scegliere il ramo: result = {'passed': False, 'message': '...'} segue il ramo Fail; senza result il passaggio riesce. Sono disponibili solo i built-in di base: niente import, file o rete.",
+      "sqlHelp": "Viene eseguito sul SQL warehouse impostato nelle Impostazioni. I segnaposto ${variable} vengono sostituiti prima dell'esecuzione; il passaggio riesce quando l'istruzione riesce. L'istruzione attende fino a 50 secondi.",
+      "errors": {
+        "script_code_required": "Inserisci il codice dello script.",
+        "script_timeout_invalid": "Inserisci un numero intero di secondi, almeno {{minimum}}.",
+        "script_language_unsupported": "Il linguaggio \"{{language}}\" non è supportato. Supportati: {{supported}}."
+      }
+    },
+    "validationIssues": {
+      "stepsRequired": "Un workflow richiede almeno un passaggio.",
+      "duplicateStepIds": "Due passaggi hanno lo stesso ID.",
+      "stepUnknownReference": "Il passaggio \"{{step}}\" indirizza il ramo di {{branch}} a \"{{target}}\", che non è nel workflow.",
+      "stepConfigMissing": "Al passaggio \"{{step}}\" mancano impostazioni obbligatorie: {{fields}}.",
+      "branch": {
+        "on_pass": "successo",
+        "on_fail": "errore"
+      }
     }
   },
   "approvalResponse": {
