@@ -855,7 +855,8 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
   const [triggerToStatus, setTriggerToStatus] = useState('');
   const [triggerOnError, setTriggerOnError] = useState<GateErrorMode>('fail_open');
   const [triggerDisabledFor, setTriggerDisabledFor] = useState<GateExemptions>(EMPTY_GATE_EXEMPTIONS);
-  const [, setMissingExemptions] = useState<string[]>([]);
+  // Selected exemptions whose entity was deleted: the backend refuses to save them
+  const [missingExemptions, setMissingExemptions] = useState<string[]>([]);
   const [isActive, setIsActive] = useState(true);
   const [steps, setSteps] = useState<WorkflowStepCreate[]>([]);
   const [workflowType, setWorkflowType] = useState<WorkflowTypeValue | null>(isNew ? (initialType || null) : null);
@@ -1487,6 +1488,17 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
     }
     setInvalidStepId(null);
 
+    if (triggerType === 'before_status_change' && missingExemptions.length > 0) {
+      toast({
+        title: t('workflows:designer.messages.validationError'),
+        description: t('workflows:designer.triggerConfig.disabledFor.missingOnSave', {
+          count: missingExemptions.length,
+        }),
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setIsSaving(true);
     try {
       const workflowData: ProcessWorkflowCreate = {
@@ -1826,6 +1838,23 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
                     </div>
                   )}
 
+                  {triggerType === 'before_status_change' && (
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="trigger-on-error">
+                          {t('workflows:designer.triggerConfig.failClosed')}
+                        </Label>
+                        <p className="text-xs text-muted-foreground">
+                          {t('workflows:designer.triggerConfig.failClosedHint')}
+                        </p>
+                      </div>
+                      <Switch
+                        id="trigger-on-error"
+                        checked={triggerOnError === 'fail_closed'}
+                        onCheckedChange={(on) => setTriggerOnError(on ? 'fail_closed' : 'fail_open')}
+                      />
+                    </div>
+                  )}
                   {triggerType === 'before_status_change' && (
                     <div>
                       <GateExemptionsField
