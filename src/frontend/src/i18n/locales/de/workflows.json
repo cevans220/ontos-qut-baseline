@@ -461,7 +461,8 @@
     "run": "Ausführen",
     "failed": "Der Workflow konnte nicht gestartet werden.",
     "resultStatus": "Ergebnis",
-    "viewExecution": "Ausführung anzeigen"
+    "viewExecution": "Ausführung anzeigen",
+    "resultEntity": "{{type}}: {{name}}"
   },
   "templateVars": {
     "copiedToClipboard": "{{placeholder}} in die Zwischenablage kopiert.",

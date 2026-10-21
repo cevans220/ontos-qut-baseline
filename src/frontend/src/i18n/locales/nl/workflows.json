@@ -461,7 +461,8 @@
     "run": "Uitvoeren",
     "failed": "De workflow kon niet worden gestart.",
     "resultStatus": "Resultaat",
-    "viewExecution": "Uitvoering bekijken"
+    "viewExecution": "Uitvoering bekijken",
+    "resultEntity": "{{type}}: {{name}}"
   },
   "templateVars": {
     "copiedToClipboard": "{{placeholder}} gekopieerd naar klembord.",

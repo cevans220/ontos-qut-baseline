@@ -461,7 +461,8 @@
     "run": "Run",
     "failed": "The workflow could not be started.",
     "resultStatus": "Result",
-    "viewExecution": "View execution"
+    "viewExecution": "View execution",
+    "resultEntity": "{{type}}: {{name}}"
   },
   "templateVars": {
     "copiedToClipboard": "{{placeholder}} copied to clipboard.",

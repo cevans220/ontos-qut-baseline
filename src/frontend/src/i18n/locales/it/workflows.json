@@ -461,7 +461,8 @@
     "run": "Esegui",
     "failed": "Non è stato possibile avviare il workflow.",
     "resultStatus": "Risultato",
-    "viewExecution": "Visualizza esecuzione"
+    "viewExecution": "Visualizza esecuzione",
+    "resultEntity": "{{type}}: {{name}}"
   },
   "templateVars": {
     "copiedToClipboard": "{{placeholder}} copiato negli appunti.",

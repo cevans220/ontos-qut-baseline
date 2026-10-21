@@ -461,7 +461,8 @@
     "run": "Ejecutar",
     "failed": "No se pudo iniciar el flujo de trabajo.",
     "resultStatus": "Resultado",
-    "viewExecution": "Ver ejecución"
+    "viewExecution": "Ver ejecución",
+    "resultEntity": "{{type}}: {{name}}"
   },
   "templateVars": {
     "copiedToClipboard": "{{placeholder}} copiado al portapapeles.",

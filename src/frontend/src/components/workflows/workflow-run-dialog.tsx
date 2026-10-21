@@ -211,7 +211,10 @@ export function WorkflowRunDialog({
             </div>
             {result.entity_name || result.entity_id ? (
               <div className="text-sm text-muted-foreground">
-                {getEntityTypeLabel(entityType, t)}: {result.entity_name || result.entity_id}
+                {t('workflows:runDialog.resultEntity', {
+                  type: getEntityTypeLabel(entityType, t),
+                  name: result.entity_name || result.entity_id,
+                })}
               </div>
             ) : null}
             {result.error_message ? (

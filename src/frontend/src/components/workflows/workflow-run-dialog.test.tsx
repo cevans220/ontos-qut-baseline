@@ -12,7 +12,7 @@ vi.mock('@/hooks/use-api', () => ({ useApi: () => ({ get: api.get, post: api.pos
 const toast = vi.hoisted(() => vi.fn());
 vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast }) }));
 
-import '@/i18n/config';
+import i18n from '@/i18n/config';
 import { WorkflowRunDialog } from './workflow-run-dialog';
 
 function workflow(entityTypes: string[]): ProcessWorkflow {
@@ -84,5 +84,22 @@ describe('WorkflowRunDialog', () => {
     expect(alert).not.toHaveTextContent('Forbidden');
     expect(toast).toHaveBeenCalledWith(expect.objectContaining({ variant: 'destructive' }));
     expect(screen.queryByTestId('run-result')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['en', 'Table: main.sales.orders'],
+    ['fr', 'Table : main.sales.orders'],
+    ['ja', 'テーブル: main.sales.orders'],
+  ])('formats the result entity line with the %s label/value separator', async (lng, expected) => {
+    api.post.mockResolvedValue({ data: EXECUTION });
+    await i18n.changeLanguage(lng);
+    try {
+      render(<WorkflowRunDialog workflow={workflow(['table'])} open onOpenChange={vi.fn()} />);
+      await userEvent.type(screen.getByRole('textbox'), 'main.sales.orders');
+      await userEvent.click(screen.getAllByRole('button').find((b) => b.textContent === i18n.t('workflows:runDialog.run'))!);
+      expect(await screen.findByTestId('run-result')).toHaveTextContent(expected);
+    } finally {
+      await i18n.changeLanguage('en');
+    }
   });
 });

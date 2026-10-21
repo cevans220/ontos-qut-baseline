@@ -880,6 +880,11 @@ class NotificationStepHandler(StepHandler):
                 )
                 channels = [c for c in channels if c != 'email']
             
+            # Typed-ID manual runs have no entity name: fall back to the id and
+            # leave the subtitle out when neither is known.
+            subtitle_ref = context.entity_name or context.entity_id
+            subtitle = f"{context.entity_type}: {subtitle_ref}" if subtitle_ref else None
+
             created_count = 0
             email_count = 0
 
@@ -892,7 +897,7 @@ class NotificationStepHandler(StepHandler):
                             created_at=datetime.utcnow(),
                             type=notification_type,
                             title=title,
-                            subtitle=f"{context.entity_type}: {context.entity_name}",
+                            subtitle=subtitle,
                             description=message,
                             recipient=recipient_id,
                             recipient_role_id=role_uuid,

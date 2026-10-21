@@ -461,7 +461,8 @@
     "run": "実行",
     "failed": "ワークフローを開始できませんでした。",
     "resultStatus": "結果",
-    "viewExecution": "実行を表示"
+    "viewExecution": "実行を表示",
+    "resultEntity": "{{type}}: {{name}}"
   },
   "templateVars": {
     "copiedToClipboard": "{{placeholder}} をクリップボードにコピーしました。",
