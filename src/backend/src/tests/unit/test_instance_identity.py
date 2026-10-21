@@ -187,3 +187,11 @@ class TestCodedErrors:
         detail = r.json()["detail"]
         assert detail["code"] == "instance_name_invalid"
         assert detail["params"] == {"max_length": 128}
+
+    def test_control_characters_in_name_use_the_same_coded_detail(self, client):
+        r = client.put("/api/settings", json={"ontos_instance_name": "bad\x07name"})
+        assert r.status_code == 400
+        detail = r.json()["detail"]
+        assert detail["code"] == "instance_name_invalid"
+        assert detail["params"] == {"max_length": 128}
+        assert "control characters" in detail["message"]

@@ -32,11 +32,13 @@ interface AppSettings {
 // Mirrors the backend rule for ONTOS_INSTANCE_ID (settings_manager.INSTANCE_ID_PATTERN)
 const INSTANCE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const INSTANCE_NAME_MAX_LENGTH = 128;
+// Mirrors the backend rule: no control characters (code point < 32) in the name
+const hasControlChars = (value: string) => Array.from(value).some((c) => c.charCodeAt(0) < 32);
 
 // Backend error codes (CodedValueError) -> the same i18n keys as the inline validation
 const SERVER_ERROR_KEYS: Record<string, string> = {
   instance_id_invalid: 'settings:general.instanceIdentity.id.invalid',
-  instance_name_invalid: 'settings:general.instanceIdentity.name.tooLong',
+  instance_name_invalid: 'settings:general.instanceIdentity.name.invalid',
 };
 
 export default function GeneralSettings() {
@@ -108,8 +110,8 @@ export default function GeneralSettings() {
         )
       : null;
   const instanceNameError =
-    instanceName.length > INSTANCE_NAME_MAX_LENGTH
-      ? t('settings:general.instanceIdentity.name.tooLong', 'Use at most 128 characters.')
+    instanceName.length > INSTANCE_NAME_MAX_LENGTH || hasControlChars(instanceName)
+      ? t('settings:general.instanceIdentity.name.invalid', 'Use at most 128 characters, without control characters.')
       : null;
 
   const handleSave = async () => {

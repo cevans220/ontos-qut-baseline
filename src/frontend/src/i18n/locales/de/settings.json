@@ -150,7 +150,7 @@
       "name": {
         "label": "Instanzname",
         "help": "Lesbarer Name dieser Instanz. Standard: {{default}}. Feld leeren, um den Standard wiederherzustellen.",
-        "tooLong": "Verwenden Sie höchstens 128 Zeichen."
+        "invalid": "Verwenden Sie höchstens 128 Zeichen, ohne Steuerzeichen."
       }
     },
     "auditLog": {

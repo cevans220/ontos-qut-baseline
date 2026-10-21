@@ -150,7 +150,7 @@
       "name": {
         "label": "Nombre de la instancia",
         "help": "Nombre legible de esta instancia. Valor predeterminado: {{default}}. Vacíe el campo para restaurar el valor predeterminado.",
-        "tooLong": "Use como máximo 128 caracteres."
+        "invalid": "Use como máximo 128 caracteres, sin caracteres de control."
       }
     },
     "auditLog": {

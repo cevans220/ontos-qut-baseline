@@ -119,6 +119,31 @@ describe('GeneralSettings - instance identity', () => {
     );
   });
 
+  it('maps instance_name_invalid to the length and control-character message', async () => {
+    fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'PUT') {
+        return {
+          ok: false,
+          json: async () => ({
+            detail: { code: 'instance_name_invalid', message: 'english fallback', params: { max_length: 128 } },
+          }),
+        } as Response;
+      }
+      return { ok: true, json: async () => baseResponse } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<GeneralSettings />);
+    await screen.findByLabelText('Instance Name');
+    await userEvent.click(screen.getByRole('button', { name: /save settings/i }));
+    await waitFor(() => expect(toastMock).toHaveBeenCalled());
+    expect(toastMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        variant: 'destructive',
+        description: 'Use at most 128 characters, without control characters.',
+      })
+    );
+  });
+
   it('is read-only for users without write access', async () => {
     canWrite = false;
     mockFetch();

@@ -150,7 +150,7 @@
       "name": {
         "label": "Nom de l'instance",
         "help": "Nom lisible de cette instance. Par défaut : {{default}}. Videz le champ pour rétablir la valeur par défaut.",
-        "tooLong": "Utilisez 128 caractères au maximum."
+        "invalid": "Utilisez 128 caractères au maximum, sans caractères de contrôle."
       }
     },
     "auditLog": {

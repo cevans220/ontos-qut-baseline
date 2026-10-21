@@ -150,7 +150,7 @@
       "name": {
         "label": "Instantienaam",
         "help": "Leesbare naam van deze instantie. Standaard: {{default}}. Maak het veld leeg om de standaardwaarde te herstellen.",
-        "tooLong": "Gebruik maximaal 128 tekens."
+        "invalid": "Gebruik maximaal 128 tekens, zonder besturingstekens."
       }
     },
     "auditLog": {

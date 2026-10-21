@@ -150,7 +150,7 @@
       "name": {
         "label": "Instance Name",
         "help": "Human-readable name of this instance. Default: {{default}}. Clear the field to restore the default.",
-        "tooLong": "Use at most 128 characters."
+        "invalid": "Use at most 128 characters, without control characters."
       }
     },
     "auditLog": {

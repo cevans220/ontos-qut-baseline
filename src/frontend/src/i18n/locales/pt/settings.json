@@ -150,7 +150,7 @@
       "name": {
         "label": "Nome da instância",
         "help": "Nome legível desta instância. Padrão: {{default}}. Limpe o campo para restaurar o padrão.",
-        "tooLong": "Use no máximo 128 caracteres."
+        "invalid": "Use no máximo 128 caracteres, sem caracteres de controle."
       }
     },
     "auditLog": {

@@ -150,7 +150,7 @@
       "name": {
         "label": "Nome istanza",
         "help": "Nome leggibile di questa istanza. Predefinito: {{default}}. Svuota il campo per ripristinare il valore predefinito.",
-        "tooLong": "Usa al massimo 128 caratteri."
+        "invalid": "Usa al massimo 128 caratteri, senza caratteri di controllo."
       }
     },
     "auditLog": {
