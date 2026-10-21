@@ -18,6 +18,7 @@ import { DataAssetReviewRequest, ReviewRequestStatus } from '@/types/data-asset-
 // Import the Create Dialog
 import CreateReviewRequestDialog from '@/components/data-asset-reviews/create-review-request-dialog';
 import { useProjectContext } from '@/stores/project-store';
+import { deleteOrThrow } from '@/lib/delete-or-throw';
 
 // Helper function to check API response (reuse if available globally)
 const checkApiResponse = <T,>(response: { data?: T | { detail?: string }, error?: string | null }, name: string): T => {
@@ -90,7 +91,7 @@ export default function DataAssetReviews() {
             return;
         }
         try {
-            await deleteApi(`/api/data-asset-reviews/${id}`);
+            await deleteOrThrow(deleteApi, `/api/data-asset-reviews/${id}`);
             toast({ title: t('common:toast.success'), description: t('data-asset-reviews:toast.requestDeleted') });
             fetchRequests(); // Refresh list
         } catch (err: any) {

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { deleteOrThrow } from '@/lib/delete-or-throw';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -326,7 +327,7 @@ export default function DataProducts() {
           return;
       }
       try {
-          await deleteApi(`/api/data-products/${id}`);
+          await deleteOrThrow(deleteApi, `/api/data-products/${id}`);
           toast({ title: t('messages.success'), description: t('messages.deleteSuccess') });
           fetchProducts();
       } catch (err: any) {
@@ -350,10 +351,7 @@ export default function DataProducts() {
       // Track individual delete statuses
       const results = await Promise.allSettled(selectedIds.map(async (id) => {
           try {
-              await deleteApi(`/api/data-products/${id}`);
-              // If deleteApi throws on error, we won't reach here on failure
-              // If it returns an object like { error: string } on failure, 
-              // we need to check that, but the current structure assumes throw.
+              await deleteOrThrow(deleteApi, `/api/data-products/${id}`);
               return id; // Return ID on success
           } catch (err: any) {
               // Re-throw the error with the ID for better context in the main handler
