@@ -76,7 +76,7 @@
       },
       "pii_detected": {
         "title": "PII detectado",
-        "message": "Possível PII detectado em {{entity_type}} '{{entity_name}}'. Revise, por favor."
+        "message": "Possível PII detectado em {{entity_type}} '{{entity_name}}'. Revise."
       },
       "default": {
         "title": "Notificação de workflow",
@@ -127,7 +127,7 @@
       "data-asset-review-request": {
         "notify-reviewer": "Uma nova solicitação de revisão de ativo de dados foi atribuída a você.",
         "notify-approved": "A revisão do seu ativo de dados foi concluída e aprovada.",
-        "notify-rejected": "A revisão do seu ativo de dados pede alterações. Revise o feedback."
+        "notify-rejected": "A revisão do seu ativo de dados exige alterações. Revise o feedback."
       },
       "project-access-request": {
         "notify-requester": "Sua solicitação de acesso ao projeto foi enviada à equipe do projeto.",
@@ -151,10 +151,10 @@
         "notify-grantee": "Seu acesso foi revogado. Entre em contato com um administrador se acredita que isso foi um erro."
       },
       "on-publish-notification": {
-        "notify-owner": "{{entity_type}} '{{entity_name}}' foi publicado no marketplace."
+        "notify-owner": "Publicado no marketplace: {{entity_type}} '{{entity_name}}'"
       },
       "on-unpublish-notification": {
-        "notify-owner": "{{entity_type}} '{{entity_name}}' foi removido do marketplace."
+        "notify-owner": "Removido do marketplace: {{entity_type}} '{{entity_name}}'"
       },
       "certification-request-review": {
         "notify-owner": "{{user_email}} solicitou a certificação de {{entity_type}} '{{entity_name}}'.",

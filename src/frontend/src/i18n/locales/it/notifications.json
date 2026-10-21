@@ -75,8 +75,8 @@
         "message": "Il dataset '{{entity_name}}' è stato aggiornato."
       },
       "pii_detected": {
-        "title": "PII rilevati",
-        "message": "Possibili PII rilevati in {{entity_type}} '{{entity_name}}'. Verifica, per favore."
+        "title": "PII rilevate",
+        "message": "Possibili PII rilevate in {{entity_type}} '{{entity_name}}'. Da verificare."
       },
       "default": {
         "title": "Notifica del workflow",
@@ -85,7 +85,7 @@
     },
     "messages": {
       "naming-convention-check": {
-        "notify-naming-failure": "Il nome dell'oggetto non segue le convenzioni di denominazione. I nomi devono contenere solo lettere minuscole e underscore.",
+        "notify-naming-failure": "Il nome dell'oggetto non segue le convenzioni di denominazione. I nomi devono contenere solo lettere minuscole e trattini bassi.",
         "notify-tag-failure": "Impossibile assegnare automaticamente il tag owner. Aggiungi il tag owner manualmente."
       },
       "data-product-approval": {
@@ -97,7 +97,7 @@
         "notify-no-schema": "Il contratto dati deve avere una definizione di schema. Aggiungi lo schema prima di procedere."
       },
       "pii-detection": {
-        "notify-pii-detected": "Possibili PII rilevati nella tabella. Alla tabella è stato assegnato un tag per la revisione."
+        "notify-pii-detected": "Possibili PII rilevate nella tabella. Alla tabella è stato assegnato un tag per la revisione."
       },
       "contract-review-request": {
         "notify-requester": "La tua richiesta di revisione del contratto dati è stata inviata. Un Data Steward la esaminerà a breve.",
@@ -145,16 +145,16 @@
         "notify-requester": "Il tuo job in background è stato completato correttamente."
       },
       "access-expiring-warning": {
-        "notify-grantee": "Il tuo accesso scadrà presto. Contatta il responsabile della risorsa se devi prolungarlo."
+        "notify-grantee": "Il tuo accesso scadrà presto. Contatta il proprietario della risorsa se devi prolungarlo."
       },
       "access-revoked-notification": {
         "notify-grantee": "Il tuo accesso è stato revocato. Contatta un amministratore se ritieni che si tratti di un errore."
       },
       "on-publish-notification": {
-        "notify-owner": "{{entity_type}} '{{entity_name}}' è stato pubblicato nel marketplace."
+        "notify-owner": "Pubblicato nel marketplace: {{entity_type}} '{{entity_name}}'"
       },
       "on-unpublish-notification": {
-        "notify-owner": "{{entity_type}} '{{entity_name}}' è stato rimosso dal marketplace."
+        "notify-owner": "Rimosso dal marketplace: {{entity_type}} '{{entity_name}}'"
       },
       "certification-request-review": {
         "notify-owner": "{{user_email}} ha richiesto la certificazione di {{entity_type}} '{{entity_name}}'.",
@@ -189,7 +189,7 @@
         "data_product": "Prodotto dati",
         "data_contract": "Contratto dati",
         "data_domain": "Dominio dati",
-        "data_asset_review": "Revisione asset dati",
+        "data_asset_review": "Revisione asset di dati",
         "access_grant": "Concessione di accesso",
         "asset": "Asset",
         "entity": "Entità"

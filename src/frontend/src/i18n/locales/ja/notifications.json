@@ -40,43 +40,43 @@
     "templates": {
       "validation_failed": {
         "title": "検証に失敗しました",
-        "message": "{{entity_type}} '{{entity_name}}' の検証に失敗しました"
+        "message": "{{entity_type}}「{{entity_name}}」の検証に失敗しました"
       },
       "validation_passed": {
         "title": "検証に合格しました",
-        "message": "{{entity_type}} '{{entity_name}}' の検証に合格しました"
+        "message": "{{entity_type}}「{{entity_name}}」の検証に合格しました"
       },
       "product_approved": {
         "title": "データプロダクトが承認されました",
-        "message": "データプロダクト '{{entity_name}}' が承認されました"
+        "message": "データプロダクト「{{entity_name}}」が承認されました"
       },
       "product_rejected": {
         "title": "データプロダクトが却下されました",
-        "message": "データプロダクト '{{entity_name}}' が却下されました"
+        "message": "データプロダクト「{{entity_name}}」が却下されました"
       },
       "approval_requested": {
         "title": "承認がリクエストされました",
-        "message": "{{entity_type}} '{{entity_name}}' の承認がリクエストされました"
+        "message": "{{entity_type}}「{{entity_name}}」の承認がリクエストされました"
       },
       "request_submitted": {
         "title": "リクエストを送信しました",
-        "message": "{{entity_type}} '{{entity_name}}' のリクエストを送信しました。レビュー待ちです。"
+        "message": "{{entity_type}}「{{entity_name}}」のリクエストを送信しました。レビュー待ちです。"
       },
       "request_approved": {
         "title": "リクエストが承認されました",
-        "message": "{{entity_type}} '{{entity_name}}' のリクエストが承認されました。"
+        "message": "{{entity_type}}「{{entity_name}}」のリクエストが承認されました。"
       },
       "request_rejected": {
         "title": "リクエストが拒否されました",
-        "message": "{{entity_type}} '{{entity_name}}' のリクエストが拒否されました。"
+        "message": "{{entity_type}}「{{entity_name}}」のリクエストが拒否されました。"
       },
       "dataset_updated": {
         "title": "データセットが更新されました",
-        "message": "データセット '{{entity_name}}' が更新されました。"
+        "message": "データセット「{{entity_name}}」が更新されました。"
       },
       "pii_detected": {
         "title": "PII が検出されました",
-        "message": "{{entity_type}} '{{entity_name}}' で PII の可能性があるデータが検出されました。確認してください。"
+        "message": "{{entity_type}}「{{entity_name}}」で PII の可能性があるデータが検出されました。確認してください。"
       },
       "default": {
         "title": "ワークフロー通知",
@@ -105,9 +105,9 @@
         "notify-rejected": "データコントラクトのレビューリクエストが拒否されました。フィードバックを確認してください。"
       },
       "contract-deploy-request": {
-        "notify-requester": "データコントラクト '{{entity_name}}' を Unity Catalog にデプロイするリクエストを送信しました。",
-        "notify-approved": "データコントラクト '{{entity_name}}' をデプロイするリクエストが承認されました。",
-        "notify-rejected": "データコントラクト '{{entity_name}}' をデプロイするリクエストが拒否されました。フィードバックを確認してください。"
+        "notify-requester": "データコントラクト「{{entity_name}}」を Unity Catalog にデプロイするリクエストを送信しました。",
+        "notify-approved": "データコントラクト「{{entity_name}}」をデプロイするリクエストが承認されました。",
+        "notify-rejected": "データコントラクト「{{entity_name}}」をデプロイするリクエストが拒否されました。フィードバックを確認してください。"
       },
       "product-review-request": {
         "notify-requester": "データプロダクトのレビューリクエストを送信しました。",
@@ -151,29 +151,29 @@
         "notify-grantee": "アクセスが取り消されました。誤りだと思われる場合は管理者に連絡してください。"
       },
       "on-publish-notification": {
-        "notify-owner": "{{entity_type}} '{{entity_name}}' がマーケットプレイスに公開されました。"
+        "notify-owner": "{{entity_type}}「{{entity_name}}」がマーケットプレイスに公開されました。"
       },
       "on-unpublish-notification": {
-        "notify-owner": "{{entity_type}} '{{entity_name}}' がマーケットプレイスから公開停止されました。"
+        "notify-owner": "{{entity_type}}「{{entity_name}}」がマーケットプレイスから公開停止されました。"
       },
       "certification-request-review": {
-        "notify-owner": "{{user_email}} が {{entity_type}} '{{entity_name}}' の認定をリクエストしました。",
-        "notify-approved": "'{{entity_name}}' の認定リクエストが承認されました。",
-        "notify-denied": "'{{entity_name}}' の認定リクエストが拒否されました。",
-        "notify-error": "'{{entity_name}}' の認定の処理中にエラーが発生しました。"
+        "notify-owner": "{{user_email}} が {{entity_type}}「{{entity_name}}」の認定をリクエストしました。",
+        "notify-approved": "「{{entity_name}}」の認定リクエストが承認されました。",
+        "notify-denied": "「{{entity_name}}」の認定リクエストが拒否されました。",
+        "notify-error": "「{{entity_name}}」の認定の処理中にエラーが発生しました。"
       },
       "publication-request-review": {
-        "notify-owner": "{{user_email}} が {{entity_type}} '{{entity_name}}' の公開をリクエストしました。",
-        "notify-approved": "'{{entity_name}}' の公開リクエストが承認され、公開されました。",
-        "notify-denied": "'{{entity_name}}' の公開リクエストが拒否されました。",
-        "notify-invalid": "'{{entity_name}}' の公開リクエストは却下されました。公開できるのは承認済みのデータコントラクトとアクティブなデータプロダクトのみです。",
-        "notify-error": "'{{entity_name}}' の公開中にエラーが発生しました。"
+        "notify-owner": "{{user_email}} が {{entity_type}}「{{entity_name}}」の公開をリクエストしました。",
+        "notify-approved": "「{{entity_name}}」の公開リクエストが承認され、公開されました。",
+        "notify-denied": "「{{entity_name}}」の公開リクエストが拒否されました。",
+        "notify-invalid": "「{{entity_name}}」の公開リクエストは却下されました。公開できるのは承認済みのデータコントラクトとアクティブなデータプロダクトのみです。",
+        "notify-error": "「{{entity_name}}」の公開中にエラーが発生しました。"
       }
     },
     "approval": {
       "title": "承認が必要です",
       "lines": {
-        "requester": "申請者: {{requester}}",
+        "requester": "リクエスト元: {{requester}}",
         "unknownRequester": "不明",
         "resource": "リソース: {{resourceType}} · {{resourceName}}",
         "resourceType": "リソース: {{resourceType}}",
@@ -183,7 +183,7 @@
         "reason": "理由: {{reason}}",
         "workflowMessage": "ワークフローのメッセージ: {{message}}",
         "message": "メッセージ: {{message}}",
-        "justification": "正当な理由: {{justification}}"
+        "justification": "正当性の説明: {{justification}}"
       },
       "entityTypes": {
         "data_product": "データプロダクト",
@@ -197,10 +197,10 @@
     },
     "approvalMessages": {
       "certification-request-review": {
-        "approval-gate": "{{entity_type}} '{{entity_name}}' の認定リクエストを確認してください。"
+        "approval-gate": "{{entity_type}}「{{entity_name}}」の認定リクエストを確認してください。"
       },
       "publication-request-review": {
-        "approval-gate": "{{entity_type}} '{{entity_name}}' の公開リクエストを確認してください。"
+        "approval-gate": "{{entity_type}}「{{entity_name}}」の公開リクエストを確認してください。"
       }
     }
   }

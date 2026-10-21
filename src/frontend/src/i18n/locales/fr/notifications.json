@@ -40,43 +40,43 @@
     "templates": {
       "validation_failed": {
         "title": "Échec de la validation",
-        "message": "La validation a échoué pour {{entity_type}} '{{entity_name}}'"
+        "message": "{{entity_type}} « {{entity_name}} » : la validation a échoué"
       },
       "validation_passed": {
         "title": "Validation réussie",
-        "message": "La validation a réussi pour {{entity_type}} '{{entity_name}}'"
+        "message": "{{entity_type}} « {{entity_name}} » : la validation a réussi"
       },
       "product_approved": {
         "title": "Produit de données approuvé",
-        "message": "Le produit de données '{{entity_name}}' a été approuvé"
+        "message": "Le produit de données « {{entity_name}} » a été approuvé"
       },
       "product_rejected": {
         "title": "Produit de données rejeté",
-        "message": "Le produit de données '{{entity_name}}' a été rejeté"
+        "message": "Le produit de données « {{entity_name}} » a été rejeté"
       },
       "approval_requested": {
         "title": "Approbation demandée",
-        "message": "Approbation demandée pour {{entity_type}} '{{entity_name}}'"
+        "message": "Approbation demandée : {{entity_type}} « {{entity_name}} »"
       },
       "request_submitted": {
         "title": "Demande envoyée",
-        "message": "Votre demande pour {{entity_type}} '{{entity_name}}' a été envoyée et attend une revue."
+        "message": "Votre demande pour {{entity_type}} « {{entity_name}} » a été envoyée et attend une revue."
       },
       "request_approved": {
         "title": "Demande approuvée",
-        "message": "Votre demande pour {{entity_type}} '{{entity_name}}' a été approuvée."
+        "message": "Votre demande pour {{entity_type}} « {{entity_name}} » a été approuvée."
       },
       "request_rejected": {
         "title": "Demande refusée",
-        "message": "Votre demande pour {{entity_type}} '{{entity_name}}' a été refusée."
+        "message": "Votre demande pour {{entity_type}} « {{entity_name}} » a été refusée."
       },
       "dataset_updated": {
         "title": "Dataset mis à jour",
-        "message": "Le dataset '{{entity_name}}' a été mis à jour."
+        "message": "Le dataset « {{entity_name}} » a été mis à jour."
       },
       "pii_detected": {
-        "title": "PII détectées",
-        "message": "Des PII potentielles ont été détectées dans {{entity_type}} '{{entity_name}}'. Veuillez vérifier."
+        "title": "Données personnelles détectées",
+        "message": "Données personnelles potentielles détectées : {{entity_type}} « {{entity_name}} ». Veuillez les examiner."
       },
       "default": {
         "title": "Notification de workflow",
@@ -94,10 +94,10 @@
         "notify-rejected": "Votre demande de publication du produit de données a été rejetée. Veuillez consulter les commentaires et la renvoyer."
       },
       "data-contract-validation": {
-        "notify-no-schema": "Le contrat de données doit avoir une définition de schema. Veuillez ajouter le schema avant de continuer."
+        "notify-no-schema": "Le contrat de données doit avoir une définition de schéma. Veuillez ajouter le schéma avant de continuer."
       },
       "pii-detection": {
-        "notify-pii-detected": "Des PII potentielles ont été détectées dans la table. La table a été taguée pour revue."
+        "notify-pii-detected": "Des données personnelles potentielles ont été détectées dans la table. La table a été taguée pour revue."
       },
       "contract-review-request": {
         "notify-requester": "Votre demande de revue du contrat de données a été envoyée. Un steward des données l'examinera sous peu.",
@@ -105,9 +105,9 @@
         "notify-rejected": "Votre demande de revue du contrat de données a été refusée. Veuillez consulter les commentaires."
       },
       "contract-deploy-request": {
-        "notify-requester": "Votre demande de déploiement du contrat de données '{{entity_name}}' dans Unity Catalog a été envoyée.",
-        "notify-approved": "Votre demande de déploiement du contrat de données '{{entity_name}}' a été approuvée.",
-        "notify-rejected": "Votre demande de déploiement du contrat de données '{{entity_name}}' a été refusée. Veuillez consulter les commentaires."
+        "notify-requester": "Votre demande de déploiement du contrat de données « {{entity_name}} » dans Unity Catalog a été envoyée.",
+        "notify-approved": "Votre demande de déploiement du contrat de données « {{entity_name}} » a été approuvée.",
+        "notify-rejected": "Votre demande de déploiement du contrat de données « {{entity_name}} » a été refusée. Veuillez consulter les commentaires."
       },
       "product-review-request": {
         "notify-requester": "Votre demande de revue du produit de données a été envoyée.",
@@ -139,35 +139,35 @@
         "notify-rejected": "Votre demande d'accès au rôle a été refusée."
       },
       "job-failure-notification": {
-        "notify-admins": "Un job en arrière-plan a échoué. Consultez les logs du job pour plus de détails."
+        "notify-admins": "Consultez les journaux du job pour plus de détails."
       },
       "job-success-notification": {
         "notify-requester": "Votre job en arrière-plan s'est terminé avec succès."
       },
       "access-expiring-warning": {
-        "notify-grantee": "Votre accès expire bientôt. Contactez le responsable de la ressource si vous devez le prolonger."
+        "notify-grantee": "Votre accès expire bientôt. Contactez le propriétaire de la ressource si vous devez le prolonger."
       },
       "access-revoked-notification": {
         "notify-grantee": "Votre accès a été révoqué. Contactez un administrateur si vous pensez qu'il s'agit d'une erreur."
       },
       "on-publish-notification": {
-        "notify-owner": "{{entity_type}} '{{entity_name}}' a été publié sur le marketplace."
+        "notify-owner": "Publié sur le marketplace : {{entity_type}} « {{entity_name}} »."
       },
       "on-unpublish-notification": {
-        "notify-owner": "{{entity_type}} '{{entity_name}}' a été retiré du marketplace."
+        "notify-owner": "Retiré du marketplace : {{entity_type}} « {{entity_name}} »."
       },
       "certification-request-review": {
-        "notify-owner": "{{user_email}} a demandé la certification de {{entity_type}} '{{entity_name}}'.",
-        "notify-approved": "Votre demande de certification de '{{entity_name}}' a été approuvée.",
-        "notify-denied": "Votre demande de certification de '{{entity_name}}' a été refusée.",
-        "notify-error": "Une erreur s'est produite lors du traitement de la certification de '{{entity_name}}'."
+        "notify-owner": "{{user_email}} a demandé la certification : {{entity_type}} « {{entity_name}} ».",
+        "notify-approved": "Votre demande de certification de « {{entity_name}} » a été approuvée.",
+        "notify-denied": "Votre demande de certification de « {{entity_name}} » a été refusée.",
+        "notify-error": "Une erreur s'est produite lors du traitement de la certification de « {{entity_name}} »."
       },
       "publication-request-review": {
-        "notify-owner": "{{user_email}} a demandé la publication de {{entity_type}} '{{entity_name}}'.",
-        "notify-approved": "Votre demande de publication de '{{entity_name}}' a été approuvée et publiée.",
-        "notify-denied": "Votre demande de publication de '{{entity_name}}' a été refusée.",
-        "notify-invalid": "La demande de publication de '{{entity_name}}' a été rejetée : seuls les contrats de données approuvés et les produits de données actifs peuvent être publiés.",
-        "notify-error": "Une erreur s'est produite lors de la publication de '{{entity_name}}'."
+        "notify-owner": "{{user_email}} a demandé la publication : {{entity_type}} « {{entity_name}} ».",
+        "notify-approved": "Votre demande de publication de « {{entity_name}} » a été approuvée et publiée.",
+        "notify-denied": "Votre demande de publication de « {{entity_name}} » a été refusée.",
+        "notify-invalid": "La demande de publication de « {{entity_name}} » a été rejetée : seuls les contrats de données approuvés et les produits de données actifs peuvent être publiés.",
+        "notify-error": "Une erreur s'est produite lors de la publication de « {{entity_name}} »."
       }
     },
     "approval": {
@@ -177,7 +177,7 @@
         "unknownRequester": "Inconnu",
         "resource": "Ressource : {{resourceType}} · {{resourceName}}",
         "resourceType": "Ressource : {{resourceType}}",
-        "permission": "Autorisation : {{permission}}",
+        "permission": "Permission : {{permission}}",
         "duration_one": "Durée : {{count}} jour",
         "duration_other": "Durée : {{count}} jours",
         "reason": "Motif : {{reason}}",
@@ -197,10 +197,10 @@
     },
     "approvalMessages": {
       "certification-request-review": {
-        "approval-gate": "Veuillez examiner la demande de certification pour {{entity_type}} '{{entity_name}}'."
+        "approval-gate": "Veuillez examiner la demande de certification pour {{entity_type}} « {{entity_name}} »."
       },
       "publication-request-review": {
-        "approval-gate": "Veuillez examiner la demande de publication pour {{entity_type}} '{{entity_name}}'."
+        "approval-gate": "Veuillez examiner la demande de publication pour {{entity_type}} « {{entity_name}} »."
       }
     }
   }
