@@ -141,39 +141,37 @@ def _count_estates(db: Session) -> int:
     return db.query(EstateDb).count()
 
 
-def _normalize_estates(data: List) -> str:
-    """Normalize estates data (removing timestamps) and return hash for comparison."""
-    import hashlib
-    normalized = json.loads(json.dumps(data))  # Deep copy
-    for e in normalized:
-        for key in ['created_at', 'updated_at', 'last_sync_time', 'last_sync_status']:
-            e.pop(key, None)
-        for p in e.get('sharing_policies', []) + e.get('export_policies', []) + e.get('import_policies', []):
-            for key in ['created_at', 'updated_at', 'id']:
-                p.pop(key, None)
-    return hashlib.sha256(json.dumps(normalized, sort_keys=True).encode()).hexdigest()
-
-
 def _is_shipped_sample(data: List) -> bool:
-    """Check if data matches the shipped sample estates (never configured)."""
-    if not isinstance(data, list) or len(data) < 2:
+    """Check if data matches the shipped sample estates (never configured).
+
+    Returns True only if this is exactly the shipped sample (both estates with their
+    default policies/rules), so deployments that never configured estates stay empty.
+    """
+    if not isinstance(data, list) or len(data) != 2:
         return False
-    # Shipped samples have these exact names
-    names = {e.get('name') for e in data if isinstance(e, dict)}
-    return names == {'US Production', 'EU Analytics'} and _normalize_estates(data) == _normalize_estates([
-        {'name': 'US Production', 'cloud_type': 'aws', 'sharing_policies': [
-            {'name': 'Share Active US Data Products', 'resource_type': 'data_product', 'rules': [
-                {'filter_type': 'status', 'operator': 'equals', 'filter_value': 'Active'},
-                {'filter_type': 'domain', 'operator': 'equals', 'filter_value': 'US Operations'},
-            ]}
-        ]},
-        {'name': 'EU Analytics', 'cloud_type': 'azure', 'sharing_policies': [
-            {'name': 'Share Finance Glossary Terms from EU', 'resource_type': 'business_glossary', 'rules': [
-                {'filter_type': 'tag', 'operator': 'contains', 'filter_value': 'finance'},
-                {'filter_type': 'domain', 'operator': 'equals', 'filter_value': 'EU Analytics'},
-            ]}
-        ]},
-    ])
+
+    # Shipped samples have exactly these two names and cloud types
+    names_clouds = {(e.get('name'), e.get('cloud_type')) for e in data if isinstance(e, dict)}
+    if names_clouds != {('US Production', 'aws'), ('EU Analytics', 'azure')}:
+        return False
+
+    # Check that each has exactly one sharing_policy with the expected structure
+    for e in data:
+        if not isinstance(e, dict):
+            continue
+        policies = e.get('sharing_policies', [])
+        if len(policies) != 1:
+            return False
+        policy = policies[0]
+        # Check high-level structure - must have name, resource_type, rules
+        if not all(k in policy for k in ['name', 'resource_type', 'rules']):
+            return False
+        # US Production: data_product policy with 2 rules (status & domain)
+        # EU Analytics: business_glossary policy with 2 rules (tag & domain)
+        if len(policy.get('rules', [])) != 2:
+            return False
+
+    return True
 
 
 def _load_estates_yaml(yaml_path: Optional[Path] = None) -> Optional[List]:
