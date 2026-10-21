@@ -5846,7 +5846,7 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
         requester_email = None
         try:
             from src.controller.change_log_manager import change_log_manager
-            recent_changes = change_log_manager.get_changes_for_entity(db, "data_contract", contract_id)
+            recent_changes = change_log_manager.get_changes_for_entity(db, "data_contract", contract_id, action="review_requested", limit=1)
             for change in recent_changes:
                 if change.action == "review_requested":
                     requester_email = change.details.get("requester_email")
@@ -5938,7 +5938,7 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
         requested_scope = "organization"
         try:
             from src.controller.change_log_manager import change_log_manager
-            recent_changes = change_log_manager.get_changes_for_entity(db, "data_contract", contract_id)
+            recent_changes = change_log_manager.get_changes_for_entity(db, "data_contract", contract_id, action="publish_requested", limit=1)
             for change in recent_changes:
                 if change.action == "publish_requested":
                     requester_email = change.details.get("requester_email")
@@ -6118,7 +6118,7 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
         requester_email = None
         try:
             from src.controller.change_log_manager import change_log_manager
-            recent_changes = change_log_manager.get_changes_for_entity(db, "data_contract", contract_id)
+            recent_changes = change_log_manager.get_changes_for_entity(db, "data_contract", contract_id, action="deploy_requested", limit=1)
             for change in recent_changes:
                 if change.action == "deploy_requested":
                     requester_email = change.details.get("requester_email")
