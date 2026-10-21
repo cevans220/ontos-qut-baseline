@@ -39,9 +39,24 @@ export function notificationI18n(notification: NotificationText): NotificationI1
   return i18n && typeof i18n === 'object' ? (i18n as NotificationI18n) : null;
 }
 
+/**
+ * The label of an entity type written raw (`data_product`) in a text's params:
+ * the approval notifications' label, else the workflows' one, else the raw value.
+ */
+function entityTypeParam(t: TFunction, value: unknown): unknown {
+  if (typeof value !== 'string' || !value) return value;
+  return t(
+    [`notifications:workflowDefaults.approval.entityTypes.${value}`, `common:workflows.entityTypes.${value}`],
+    { defaultValue: value },
+  ) as string;
+}
+
 function translate(t: TFunction, key: string | undefined, fallback: string, params?: Record<string, unknown>) {
   if (!key) return fallback;
-  return t(key, { ...(params || {}), defaultValue: fallback }) as string;
+  const shown = params && 'entity_type' in params
+    ? { ...params, entity_type: entityTypeParam(t, params.entity_type) }
+    : params;
+  return t(key, { ...(shown || {}), defaultValue: fallback }) as string;
 }
 
 function isI18nText(value: unknown): value is I18nText {

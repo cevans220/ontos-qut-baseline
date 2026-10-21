@@ -121,3 +121,40 @@ describe('approval notifications', () => {
     expect(notificationDescription(unknownKey, t)).toBe('Requester: x');
   });
 });
+
+describe('entity types in default workflow notifications', () => {
+  afterEach(() => {
+    i18n.changeLanguage('en');
+  });
+
+  // As sent by the Validation workflow's notify step: the type comes raw
+  const validationFailed = {
+    title: 'Validation Failed',
+    description: "Validation failed for data_product 'orders'",
+    data: {
+      i18n: {
+        title: 'notifications:workflowDefaults.templates.validation_failed.title',
+        description: 'notifications:workflowDefaults.templates.validation_failed.message',
+        params: { entity_type: 'data_product', entity_name: 'orders' },
+      },
+    },
+  };
+
+  it('shows the entity type label instead of the raw type', async () => {
+    expect(notificationDescription(validationFailed, t)).toBe(
+      "Validation failed for Data Product 'orders'",
+    );
+    await i18n.changeLanguage('pt');
+    expect(notificationDescription(validationFailed, t)).toBe(
+      "A validação falhou para Produto de dados 'orders'",
+    );
+  });
+
+  it('falls back to the raw type for an unknown one', () => {
+    const unknown = {
+      ...validationFailed,
+      data: { i18n: { ...validationFailed.data.i18n, params: { entity_type: 'gizmo', entity_name: 'x' } } },
+    };
+    expect(notificationDescription(unknown, t)).toBe("Validation failed for gizmo 'x'");
+  });
+});
