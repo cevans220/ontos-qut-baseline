@@ -1158,8 +1158,7 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
                             prop_dict['encryptedName'] = prop.encrypted_name
                         if getattr(prop, 'transform_logic', None):
                             prop_dict['transformLogic'] = prop.transform_logic
-                        if getattr(prop, 'transform_source_objects', None):
-                            prop_dict['transformSourceObjects'] = prop.transform_source_objects
+                        # transformSourceObjects is set above, parsed from its JSON text
                         if getattr(prop, 'transform_description', None):
                             prop_dict['transformDescription'] = prop.transform_description
 

@@ -160,6 +160,42 @@ def test_object_tags_export_as_a_list(db_session, imported):
     assert _object(_export(manager, db_session, contract.id))['tags'] == ['finance', 'gold']
 
 
+def _transform_contract(db_session, manager, sources):
+    odcs = _odcs()
+    odcs['schema'] = [{
+        'name': 'orders', 'tags': ['x'],
+        'properties': [
+            {'name': 'order_id', 'logicalType': 'string', 'transformSourceObjects': sources},
+        ],
+    }]
+    contract = manager.create_from_upload(db_session, odcs, current_user='alice')
+    db_session.commit()
+    return contract
+
+
+def test_transform_source_objects_and_tags_export_as_lists(db_session: Session):
+    manager = _manager()
+    contract = _transform_contract(db_session, manager, ['a.b', 'c.d'])
+
+    doc = _export(manager, db_session, contract.id)
+
+    # The JSON text it is stored as used to overwrite the parsed list
+    assert _columns(doc)['order_id']['transformSourceObjects'] == ['a.b', 'c.d']
+    assert _object(doc)['tags'] == ['x']
+
+
+def test_a_legacy_transform_source_objects_string_is_exported_as_is(db_session: Session):
+    manager = _manager()
+    contract = _transform_contract(db_session, manager, ['a.b'])
+    column = db_session.get(DataContractDb, contract.id).schema_objects[0].properties[0]
+    column.transform_source_objects = 'a.b, c.d'
+    db_session.commit()
+
+    doc = _export(manager, db_session, contract.id)
+
+    assert _columns(doc)['order_id']['transformSourceObjects'] == 'a.b, c.d'
+
+
 # --- schema editor --------------------------------------------------------
 
 def test_the_contract_api_returns_what_the_editor_sends_back(db_session, imported):
