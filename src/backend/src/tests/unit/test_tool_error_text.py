@@ -14,12 +14,12 @@ from unittest.mock import MagicMock
 import src.tools as tools_pkg
 from src.routes.mcp_routes import MCPHandler
 from src.tools.base import (
-    TOOL_FAILED,
     TOOL_FAILED_CODE,
-    TOOL_FAILED_MESSAGE,
     ToolContext,
     ToolResult,
+    tool_failure,
 )
+from src.tools.registry import ToolRegistry
 from src.tools.domains import GetDomainTool
 from src.tools.unity_catalog import ListCatalogsTool
 
@@ -34,18 +34,23 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+_ERROR_ID_SHAPE = re.compile(r"^The tool failed with an unexpected error \(error id [0-9a-f]{12}\)\.$")
+
+
 def _assert_generic(error: str):
-    assert error == TOOL_FAILED_MESSAGE
+    assert _ERROR_ID_SHAPE.match(error), error
     for leaked in ("SQL", "parameters", "psycopg2", "Error", "Orders"):
         assert leaked not in error
 
 
-def test_tool_failed_constant_has_code_and_message():
-    res = ToolResult(success=False, **TOOL_FAILED)
-    assert res.error == TOOL_FAILED_MESSAGE
-    assert res.error_code == TOOL_FAILED_CODE == "tool_failed"
-    # error_code is additive: the dict keeps "error" and adds the code.
-    assert res.to_dict() == {"error": TOOL_FAILED_MESSAGE, "error_code": "tool_failed"}
+def test_tool_failure_has_code_error_id_and_logs_the_text(caplog):
+    with caplog.at_level(logging.ERROR):
+        out = tool_failure("some_tool", RuntimeError(SECRET))
+    assert out["error_code"] == TOOL_FAILED_CODE == "tool_failed"
+    _assert_generic(out["error"])
+    error_id = out["error"].split("error id ")[1].rstrip(").")
+    assert error_id in caplog.text  # the log entry carries the same id
+    assert SECRET in caplog.text
 
 
 def test_result_without_code_serializes_as_before():
@@ -84,11 +89,26 @@ def test_no_tool_puts_exception_text_in_error():
             if bad.search(line) and "logger" not in line:
                 offenders.append(f"{path.name}:{no}: {line.strip()}")
     # Expected, user-meaningful error: the SPARQL validator's ValueError.
-    # registry.py's catch-all is handled by the health-warning-codes change
-    # (#1129), which touches the same lines; drop this exemption once merged.
-    allowed = ("semantic_models.py", "registry.py")
+    allowed = ("semantic_models.py",)
     offenders = [o for o in offenders if not o.startswith(allowed)]
     assert offenders == []
+
+
+def test_registry_catch_all_hides_text_and_sets_code(caplog):
+    class Boom:
+        name = "boom"
+
+        async def execute(self, ctx, **kwargs):
+            raise RuntimeError(SECRET)
+
+    registry = ToolRegistry()
+    registry.register(Boom())
+    with caplog.at_level(logging.ERROR):
+        res = _run(registry.execute("boom", ToolContext(db=MagicMock(), settings=MagicMock()), {}))
+    assert not res.success
+    _assert_generic(res.error)
+    assert res.error_code == "tool_failed"
+    assert SECRET in caplog.text
 
 
 def test_mcp_exception_branch_hides_text(caplog):
