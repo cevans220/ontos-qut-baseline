@@ -803,26 +803,6 @@ export default function ApprovalWizardDialog({
     onOpenChange(open);
   };
 
-  // A toast shown on completion (e.g. the parent's "request submitted") is the
-  // topmost Radix dismissable layer, so the first Escape only closes the toast
-  // and never reaches this dialog. Radix preventDefaults the Escape it handles
-  // for a dialog (or a nested select/popover), so an Escape that is still
-  // unhandled by the time it bubbles to the document is ours to act on.
-  const handleDialogOpenChangeRef = useRef(handleDialogOpenChange);
-  handleDialogOpenChangeRef.current = handleDialogOpenChange;
-  const completionScreenOpen = isOpen && !!completeResult;
-  useEffect(() => {
-    if (!completionScreenOpen) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !e.defaultPrevented) {
-        e.preventDefault();
-        handleDialogOpenChangeRef.current(false);
-      }
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [completionScreenOpen]);
-
   /** Whether the current step is non-visual (auto-advancing). */
   const isNonVisualStep = currentStep && NON_VISUAL_STEP_TYPES.has(currentStep.step_type);
 
