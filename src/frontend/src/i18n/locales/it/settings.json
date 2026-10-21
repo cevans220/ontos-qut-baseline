@@ -144,8 +144,8 @@
       "title": "Identità dell'istanza",
       "id": {
         "label": "ID istanza",
-        "help": "Identificatore stabile di questa istanza di Ontos, impresso sulle entità esportate. Predefinito: {{default}}. Svuota il campo per ripristinare il valore predefinito.",
-        "invalid": "Usa da 1 a 128 lettere, cifre, \".\", \"_\", \":\" o \"-\", iniziando con una lettera o una cifra."
+        "help": "Identificatore stabile di questa istanza di Ontos, riportato nelle entità esportate. Predefinito: {{default}}. Svuota il campo per ripristinare il valore predefinito.",
+        "invalid": "Usa da 1 a 128 caratteri tra lettere, cifre, \".\", \"_\", \":\" e \"-\"; il primo carattere deve essere una lettera o una cifra."
       },
       "name": {
         "label": "Nome istanza",

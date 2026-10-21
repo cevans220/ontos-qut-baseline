@@ -144,8 +144,8 @@
       "title": "Instantie-identiteit",
       "id": {
         "label": "Instantie-ID",
-        "help": "Stabiele identificatie van deze Ontos-instantie, vastgelegd op geëxporteerde entiteiten. Standaard: {{default}}. Maak het veld leeg om de standaardwaarde te herstellen.",
-        "invalid": "Gebruik 1-128 letters, cijfers, \".\", \"_\", \":\" of \"-\", beginnend met een letter of cijfer."
+        "help": "Vaste identifier van deze Ontos-instantie, die wordt opgenomen in geëxporteerde entiteiten. Standaard: {{default}}. Maak het veld leeg om de standaardwaarde te herstellen.",
+        "invalid": "Gebruik 1-128 letters, cijfers, \".\", \"_\", \":\" of \"-\", en begin met een letter of cijfer."
       },
       "name": {
         "label": "Instantienaam",
