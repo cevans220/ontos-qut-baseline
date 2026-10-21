@@ -7,7 +7,7 @@ import { useNotificationsStore } from '@/stores/notifications-store';
 import { Link } from 'react-router-dom';
 import ConfirmRoleRequestDialog from '@/components/settings/confirm-role-request-dialog';
 import WorkflowApprovalResponseDialog, { type WorkflowApprovalResponseDialogPayload } from '@/components/workflows/workflow-approval-response-dialog';
-import { notificationTitle } from '@/lib/notification-text';
+import { approvalActionPayload, notificationTitle } from '@/lib/notification-text';
 
 interface ApprovalsQueue {
   contracts: { id: string; name?: string; status?: string }[];
@@ -115,7 +115,7 @@ export default function RequiredActionsSection() {
       title: n.action_payload?.entity_name || notificationTitle(n, t) || t('requiredActionsSection.approvalRequest'),
       subtitle: n.action_payload?.requester_email || n.subtitle,
       date: n.created_at,
-      payload: n.action_payload ?? undefined,
+      payload: approvalActionPayload(n, t),
     })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
