@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { deleteOrThrow } from '@/lib/delete-product';
+import { deleteOrThrow } from '@/lib/delete-or-throw';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';

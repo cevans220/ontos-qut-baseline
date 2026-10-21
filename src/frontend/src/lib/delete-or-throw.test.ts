@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { deleteOrThrow } from './delete-product';
+import { deleteOrThrow } from './delete-or-throw';
 
 describe('deleteOrThrow', () => {
   it('throws with the API error so callers show the error toast and skip navigation', async () => {

@@ -1,6 +1,6 @@
 /**
  * `useApi().delete` resolves with `{ error }` on HTTP errors instead of throwing.
- * Product delete/discard call sites rely on try/catch to show the error toast and
+ * Delete call sites rely on try/catch to show the error toast and
  * to skip navigation / success toasts, so convert a failed response into a throw.
  */
 export async function deleteOrThrow(

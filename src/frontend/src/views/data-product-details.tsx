@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { deleteOrThrow } from '@/lib/delete-product';
+import { deleteOrThrow } from '@/lib/delete-or-throw';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { DataProduct, InputPort, OutputPort, ManagementPort, TeamMember, Support, SubscriptionResponse, SubscribersListResponse } from '@/types/data-product';
