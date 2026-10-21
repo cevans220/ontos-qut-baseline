@@ -1230,6 +1230,24 @@ def enrich_entity_data_with_data_product(
 
 
 
+def _log_workflow_failure(execution: WorkflowExecution) -> None:
+    """Log a failed workflow execution without exposing sensitive error details to the requester.
+
+    Extracts the error message from the first failed step or the execution error, logs it as
+    a warning for admins/debugging, and does NOT expose it to the requester (who only gets
+    the error code).
+    """
+    step_error = next(
+        (s.error_message for s in execution.step_executions
+         if s.passed is False and s.error_message),
+        None,
+    )
+    logger.warning(
+        f"Request workflow '{execution.workflow_name}' failed (execution {execution.id}): "
+        f"{step_error or execution.error_message}"
+    )
+
+
 def request_workflow_outcome(executions: List[WorkflowExecution]) -> Dict[str, Any]:
     """Outcome of the workflows a request (review, publish, ...) triggered.
 
@@ -1258,15 +1276,7 @@ def request_workflow_outcome(executions: List[WorkflowExecution]) -> Dict[str, A
     # Total failure: all executions failed
     if failed_execs and not non_failed_execs:
         failed = failed_execs[0]
-        step_error = next(
-            (s.error_message for s in failed.step_executions
-             if s.passed is False and s.error_message),
-            None,
-        )
-        logger.warning(
-            f"Request workflow '{failed.workflow_name}' failed (execution {failed.id}): "
-            f"{step_error or failed.error_message}"
-        )
+        _log_workflow_failure(failed)
         outcome: Dict[str, Any] = {
             "workflow_triggered": False,
             "execution_id": failed.id,
@@ -1280,15 +1290,7 @@ def request_workflow_outcome(executions: List[WorkflowExecution]) -> Dict[str, A
     if failed_execs and non_failed_execs:
         # Log the failures but don't block the request
         for failed in failed_execs:
-            step_error = next(
-                (s.error_message for s in failed.step_executions
-                 if s.passed is False and s.error_message),
-                None,
-            )
-            logger.warning(
-                f"Request workflow '{failed.workflow_name}' failed (execution {failed.id}): "
-                f"{step_error or failed.error_message}"
-            )
+            _log_workflow_failure(failed)
         failed_names = [e.workflow_name for e in failed_execs]
         outcome: Dict[str, Any] = {
             "workflow_triggered": True,
