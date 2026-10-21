@@ -394,3 +394,95 @@ def test_limit_skips_cleanup(tag_sync, uc):
     assert uc[("COLUMN", COLUMN)] == {OPEX_KEY: OPEX}
     assert second.removed == 0
     assert second.delivered["COLUMN"] == {}
+
+
+def test_legacy_cleanup_off_logs_candidates(tag_sync, db, uc, capsys,
+                                            monkeypatch):
+    """Legacy cleanup off: logs candidates on first run."""
+    # Pre-populate UC with legacy tags
+    uc[("CATALOG", "main")] = {OPEX_KEY: OPEX}
+
+    # Monkeypatch get_existing_prefixed_tags to return the UC tags
+    def fake_get_with_tags(spark, obj_type, obj_name, prefix):
+        if obj_type == "CATALOG" and obj_name == "main":
+            return uc.get(("CATALOG", "main"), {})
+        return {}
+
+    monkeypatch.setattr(tag_sync, "get_existing_prefixed_tags", fake_get_with_tags)
+
+    # Status should not be checked yet
+    status_before = tag_sync.read_cleanup_legacy_status(db)
+    assert not status_before.get("checked_first_run")
+
+    # Create a dataset linking to "main" catalog
+    dataset = _asset_dataset(tag_sync, "main.schema.table", [OPEX])
+
+    # Run cleanup with flag off
+    removed, errors = tag_sync.handle_legacy_tag_cleanup(
+        MagicMock(), db, [dataset], PREFIX, cleanup_enabled=False, dry_run=False
+    )
+
+    assert removed == 0
+    assert len(errors) == 0
+    out = capsys.readouterr().out
+    assert "legacy" in out.lower() or "Found" in out or "INFO" in out
+
+    # Status should be marked as checked
+    status_after = tag_sync.read_cleanup_legacy_status(db)
+    assert status_after.get("checked_first_run")
+
+
+def test_legacy_cleanup_on_removes_default_prefix_only(tag_sync, db, uc,
+                                                       monkeypatch):
+    """Legacy cleanup on: removes default-prefix tags only."""
+    # Setup a dataset linking to "main" catalog
+    dataset = _asset_dataset(tag_sync, "main.schema.table", [OPEX])
+
+    # Pre-populate UC with legacy tags using default prefix
+    default_prefix = "x_ontos_"
+    default_key = f"{default_prefix}legacy_tag"
+    uc[("CATALOG", "main")] = {default_key: OPEX, "user_tag": "value"}
+
+    def fake_get_tags(spark, obj_type, obj_name, prefix):
+        if obj_type == "CATALOG" and obj_name == "main":
+            return {k: v for k, v in uc.get(("CATALOG", "main"), {}).items()
+                    if k.startswith(prefix)}
+        return {}
+
+    def fake_unassign(spark, obj_type, obj_name, key):
+        if obj_type == "CATALOG" and obj_name == "main":
+            uc[("CATALOG", "main")].pop(key, None)
+
+    monkeypatch.setattr(tag_sync, "get_existing_prefixed_tags", fake_get_tags)
+    monkeypatch.setattr(tag_sync, "unassign_tag", fake_unassign)
+
+    # Run cleanup with flag on, using default prefix
+    removed, errors = tag_sync.handle_legacy_tag_cleanup(
+        MagicMock(), db, [dataset], default_prefix, cleanup_enabled=True,
+        dry_run=False
+    )
+
+    # Should remove default_key (has default prefix) but not user_tag
+    assert removed == 1
+    assert uc[("CATALOG", "main")] == {"user_tag": "value"}
+
+    # Status should be marked done
+    status = tag_sync.read_cleanup_legacy_status(db)
+    assert status.get("cleanup_done")
+
+
+def test_legacy_cleanup_non_default_prefix_refuses(tag_sync, db, uc, capsys):
+    """Legacy cleanup with non-default prefix: refuses and warns."""
+    dataset = _asset_dataset(tag_sync, "main.schema.table", [OPEX])
+    custom_prefix = "custom_"
+
+    removed, errors = tag_sync.handle_legacy_tag_cleanup(
+        MagicMock(), db, [dataset], custom_prefix, cleanup_enabled=True,
+        dry_run=False
+    )
+
+    assert removed == 0
+    assert len(errors) == 1
+    assert "default prefix" in errors[0].lower()
+    out = capsys.readouterr().out
+    assert "Refusing" in out

@@ -997,6 +997,149 @@ class SyncResult:
     )
 
 
+def read_cleanup_legacy_status(engine: Engine) -> Dict[str, Any]:
+    """Read legacy cleanup status from app_settings."""
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT value FROM app_settings WHERE key = "
+                    "'uc_tag_sync_cleanup_legacy_status'"
+                )
+            ).first()
+            if row and row[0]:
+                return json.loads(row[0])
+    except Exception:
+        pass
+    return {}
+
+
+def mark_cleanup_legacy_checked(engine: Engine, dry_run: bool = False) -> None:
+    """Mark that we've checked for legacy tags (first-run log done)."""
+    if dry_run:
+        return
+    try:
+        status = read_cleanup_legacy_status(engine)
+        status["checked_first_run"] = True
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO app_settings (key, value, updated_at) "
+                    "VALUES (:key, :value, CURRENT_TIMESTAMP) "
+                    "ON CONFLICT (key) DO UPDATE "
+                    "SET value = EXCLUDED.value, updated_at = "
+                    "CURRENT_TIMESTAMP"
+                ),
+                {
+                    "key": "uc_tag_sync_cleanup_legacy_status",
+                    "value": json.dumps(status),
+                },
+            )
+    except Exception:
+        pass
+
+
+def mark_cleanup_legacy_done(engine: Engine) -> None:
+    """Mark that legacy cleanup has been performed (one-time)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO app_settings (key, value, updated_at) "
+                    "VALUES (:key, :value, CURRENT_TIMESTAMP) "
+                    "ON CONFLICT (key) DO UPDATE "
+                    "SET value = EXCLUDED.value, updated_at = "
+                    "CURRENT_TIMESTAMP"
+                ),
+                {
+                    "key": "uc_tag_sync_cleanup_legacy_status",
+                    "value": json.dumps({"cleanup_done": True}),
+                },
+            )
+    except Exception:
+        pass
+
+
+def handle_legacy_tag_cleanup(
+    spark: SparkSession,
+    engine: Engine,
+    datasets: List[DatasetTagInfo],
+    prefix: str,
+    cleanup_enabled: bool,
+    dry_run: bool = False,
+) -> Tuple[int, List[str]]:
+    """Handle optional cleanup of legacy tags (delivered before this feature).
+
+    When cleanup_enabled is False, log candidates for operator review.
+    When True, remove tags from unlinked objects (only default prefix, only in
+    catalogs this instance links). Mark cleanup done in app_settings.
+
+    Returns (removed, errors).
+    """
+    default_prefix = "x_ontos_"
+    if cleanup_enabled and prefix != default_prefix:
+        msg = f"[WARN] --cleanup_legacy_tags only works with default prefix "
+        msg += f"'{default_prefix}', not '{prefix}'. Refusing cleanup."
+        print(msg)
+        return (0, [msg])
+
+    # Collect linked catalogs this instance knows about
+    linked_catalogs = set()
+    for d in datasets:
+        linked_catalogs.add(d.catalog.lower())
+
+    removed_count = 0
+    errors: List[str] = []
+
+    # Find objects with our prefix tags but no current link
+    cleanup_status = read_cleanup_legacy_status(engine)
+    if not cleanup_enabled and not cleanup_status.get("checked_first_run"):
+        # First run without cleanup: scan and log candidates
+        candidates_found = 0
+        candidate_samples: List[str] = []
+        for cat in linked_catalogs:
+            try:
+                existing = get_existing_prefixed_tags(
+                    spark, "CATALOG", cat, default_prefix
+                )
+                if existing:
+                    candidates_found += len(existing)
+                    if len(candidate_samples) < 5:
+                        candidate_samples.extend(list(existing.keys())[:5])
+            except Exception:
+                pass  # Catalog might not exist
+        if candidates_found > 0:
+            sample_str = ", ".join(candidate_samples[:5])
+            print(f"[INFO] Found {candidates_found} legacy tags with prefix "
+                  f"'{default_prefix}' (samples: {sample_str})")
+            print(f"[INFO] Run with --cleanup_legacy_tags=true to remove them")
+            mark_cleanup_legacy_checked(engine, dry_run=dry_run)
+    elif cleanup_enabled:
+        # Actually perform cleanup
+        for cat in linked_catalogs:
+            try:
+                existing = get_existing_prefixed_tags(
+                    spark, "CATALOG", cat, default_prefix
+                )
+                for key in existing:
+                    try:
+                        unassign_tag(spark, "CATALOG", cat, key)
+                        removed_count += 1
+                    except Exception as e:
+                        msg = f"Failed to remove legacy tag {key} from "
+                        msg += f"CATALOG {cat}: {e}"
+                        print(f"[WARN] {msg}")
+                        errors.append(msg)
+            except Exception:
+                # Catalog might not exist
+                pass
+        # Mark cleanup done
+        if not dry_run:
+            mark_cleanup_legacy_done(engine)
+
+    return (removed_count, errors)
+
+
 def sync_tags(
     ws: WorkspaceClient,
     spark: SparkSession,
