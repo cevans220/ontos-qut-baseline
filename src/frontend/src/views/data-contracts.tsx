@@ -318,9 +318,9 @@ export default function DataContracts() {
           .map((i) => `• ${i.name || i.source_id || `#${i.index}`}: ${i.message ?? i.status}`)
           .join('\n');
         // Keep the dialog open so the user sees which entities were skipped/failed.
-        setUploadError({ message: summarizeImport(result), detail });
+        setUploadError({ message: summarizeImport(result, t), detail });
         if (result.created > 0) {
-          toast({ title: t('data-contracts:messages.success', 'Success'), description: summarizeImport(result) });
+          toast({ title: t('data-contracts:messages.success', 'Success'), description: summarizeImport(result, t) });
         }
         return;
       }
@@ -329,7 +329,7 @@ export default function DataContracts() {
       toast({
         title: t('data-contracts:messages.success', 'Success'),
         description: result.skipped > 0
-          ? summarizeImport(result)
+          ? summarizeImport(result, t)
           : t('data-contracts:messages.uploadSuccessCount', {
               count: result.created,
               defaultValue: '{{count}} contract(s) imported successfully',
@@ -366,13 +366,13 @@ export default function DataContracts() {
           .slice(0, 5)
           .map((i) => `• ${i.name || i.source_id || `#${i.index}`}: ${i.message ?? i.status}`)
           .join('\n');
-        setUploadError({ message: summarizeImport(result), detail });
+        setUploadError({ message: summarizeImport(result, t), detail });
         // Partial success: keep the pasted content so the user can fix the
         // failing/skipped entries and retry (#930 review item 4).
       } else {
         setOpenUploadDialog(false);
         setOdcsPaste('');
-        toast({ title: t('data-contracts:import.importedTitle', 'Imported'), description: summarizeImport(result) });
+        toast({ title: t('data-contracts:import.importedTitle', 'Imported'), description: summarizeImport(result, t) });
       }
     } catch (err) {
       setUploadError({ message: err instanceof Error ? err.message : t('data-contracts:import.importOdcsError', 'Failed to import ODCS JSON') });

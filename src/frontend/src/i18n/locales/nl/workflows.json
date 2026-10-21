@@ -329,6 +329,45 @@
     },
     "errors": {
       "own_owner_approval": "Deze goedkeuring is voor de eigenaren; u kunt uw eigen aanvraag niet goedkeuren."
+    },
+    "entityTypes": {
+      "entity": "Entiteit",
+      "data_product": "Dataproduct",
+      "data_contract": "Datacontract",
+      "data_domain": "Datadomein",
+      "data_asset_review": "Beoordeling van data-assets",
+      "access_grant": "Toegangsverlening",
+      "asset": "Asset"
+    },
+    "fields": {
+      "product_id": "Product-ID",
+      "product_name": "Productnaam",
+      "contract_id": "Contract-ID",
+      "contract_name": "Contractnaam",
+      "status": "Status",
+      "from_status": "Van status",
+      "to_status": "Naar status",
+      "target_status": "Aangevraagde status",
+      "current_status": "Huidige status",
+      "justification": "Onderbouwing",
+      "sunset_date": "Einddatum",
+      "replacement_id": "Vervangings-ID",
+      "replacement_name": "Vervanging",
+      "requested_scope": "Aangevraagd bereik",
+      "publication_scope": "Publicatiebereik",
+      "requester": "Aanvrager",
+      "requester_message": "Bericht van de aanvrager",
+      "reviewer_email": "Beoordelaar",
+      "requested_certification_level": "Aangevraagd certificeringsniveau",
+      "certification_level": "Certificeringsniveau",
+      "certification_notes": "Certificeringsnotities",
+      "asset_count": "Aantal assets",
+      "asset_fqns": "Assets",
+      "domain_id": "Domein-ID",
+      "project_id": "Project-ID",
+      "project_name": "Project",
+      "name": "Naam",
+      "notes": "Notities"
     }
   },
   "approvalWizard": {

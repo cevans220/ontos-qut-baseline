@@ -31,10 +31,12 @@ import type {
   WorkflowStep,
   WorkflowStepExecutionResult,
   ExecutionStatus,
+  EntityType,
 } from '@/types/process-workflow';
 import { 
   getTriggerTypeLabel, 
   getEntityTypeLabel,
+  getStepTypeLabel,
   getStepIcon,
   getStepColor,
 } from '@/lib/workflow-labels';
@@ -187,8 +189,8 @@ function SimpleWorkflowFlow({
               </div>
               <div className="flex-1 min-w-0">
                 <div className="font-medium text-sm truncate">{step.name}</div>
-                <div className="text-xs text-muted-foreground capitalize">
-                  {step.step_type.replace('_', ' ')}
+                <div className="text-xs text-muted-foreground">
+                  {getStepTypeLabel(step.step_type, t)}
                 </div>
                 {errorText && (
                   <div className="text-xs text-destructive mt-1 break-words">{errorText}</div>
@@ -219,6 +221,7 @@ export function WorkflowExecutionDialog({
   onOpenChange,
 }: WorkflowExecutionDialogProps) {
   const { t } = useTranslation(['workflows', 'common']);
+  const defaultWorkflowText = useDefaultWorkflowText();
   const { get } = useApi();
   const [workflow, setWorkflow] = useState<ProcessWorkflow | null>(null);
   const [stepResults, setStepResults] = useState<WorkflowExecution['step_executions'] | null>(null);
@@ -278,7 +281,7 @@ export function WorkflowExecutionDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Zap className="h-5 w-5" />
-            {execution.workflow_name || t('workflows:execution.titleFallback')}
+            {defaultWorkflowText(execution.workflow_name) || t('workflows:execution.titleFallback')}
           </DialogTitle>
           <DialogDescription>
             {t('workflows:execution.executionId', { id: execution.id.slice(0, 8) })}
@@ -301,8 +304,8 @@ export function WorkflowExecutionDialog({
                 {execution.entity_name || execution.entity_id || '-'}
               </div>
               {execution.entity_type && (
-                <div className="text-xs text-muted-foreground capitalize">
-                  {execution.entity_type}
+                <div className="text-xs text-muted-foreground">
+                  {getEntityTypeLabel(execution.entity_type as EntityType, t)}
                 </div>
               )}
             </Card>
@@ -364,7 +367,7 @@ export function WorkflowExecutionDialog({
             <div className="flex items-start gap-2 p-3 rounded-lg bg-destructive/10 border border-destructive/30">
               <AlertCircle className="h-4 w-4 text-destructive mt-0.5" />
               <div className="text-sm text-destructive">
-                <ExecutionErrorText message={execution.error_message} />
+                <ExecutionErrorText execution={stepResults ? { ...execution, step_executions: stepResults } : execution} t={t} />
               </div>
             </div>
           )}
@@ -374,8 +377,23 @@ export function WorkflowExecutionDialog({
   );
 }
 
-// The execution's error; a shipped fail step's message in the user's language
-function ExecutionErrorText({ message }: { message: string }) {
+// The execution's error. When it is the failed step's error and that step sent a
+// code, the step's translated text; otherwise a shipped fail step's message in
+// the user's language.
+export function getExecutionErrorText(
+  execution: Pick<WorkflowExecution, 'error_message' | 'step_executions'>,
+  t: TFunction
+): string | undefined {
+  const message = execution.error_message || undefined;
+  if (!message) return undefined;
+  const codedRun = [...(execution.step_executions || [])].reverse().find(
+    run => run.error_message === message && typeof run.result_data?.error_code === 'string'
+  );
+  return codedRun ? getStepErrorText(codedRun, t) : undefined;
+}
+
+function ExecutionErrorText({ execution, t }: { execution: WorkflowExecution; t: TFunction }) {
   const defaultWorkflowText = useDefaultWorkflowText();
-  return <>{defaultWorkflowText(message)}</>;
+  const message = execution.error_message || '';
+  return <>{getExecutionErrorText(execution, t) ?? defaultWorkflowText(message)}</>;
 }

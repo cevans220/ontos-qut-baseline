@@ -90,6 +90,44 @@ describe('WorkflowExecutionDialog', () => {
   });
 });
 
+describe('entity type and step type labels', () => {
+  const steps = [
+    { id: 'row-1', step_id: 's1', name: 'Notify Approval', step_type: 'notification' },
+    { id: 'row-2', step_id: 's2', name: 'Weird', step_type: 'custom_thing' },
+  ];
+  const workflow = { id: 'wf-1', name: 'W', steps } as unknown as ProcessWorkflow;
+  const ex = execution({ entity_type: 'table', entity_name: 'orders', step_executions: [] });
+
+  async function show(lang: string, check: () => void) {
+    get.mockImplementation(async (url: string) => (
+      url === '/api/workflows/wf-1' ? { data: workflow } : { data: ex }
+    ));
+    await i18n.changeLanguage(lang);
+    try {
+      render(<WorkflowExecutionDialog execution={ex} open onOpenChange={vi.fn()} />);
+      await screen.findByText('Notify Approval');
+      check();
+    } finally {
+      await i18n.changeLanguage('en');
+    }
+  }
+
+  it('shows them in Portuguese', async () => {
+    await show('pt', () => {
+      expect(screen.getByText('Tabela')).toBeInTheDocument();
+      expect(screen.getByText('Notificação')).toBeInTheDocument();
+    });
+  });
+
+  it('shows them in English, and falls back for an unknown step type', async () => {
+    await show('en', () => {
+      expect(screen.getByText('Table')).toBeInTheDocument();
+      expect(screen.getByText('Notification')).toBeInTheDocument();
+      expect(screen.getByText('Custom Thing')).toBeInTheDocument();
+    });
+  });
+});
+
 describe('step errors', () => {
   const LOAD_FAILED = {
     error_message: 'Could not load data_product p-1 to evaluate the rule',

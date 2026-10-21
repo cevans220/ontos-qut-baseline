@@ -50,6 +50,7 @@ from src.models.data_contracts_api import (
     DataContractCommentCreate,
     DataContractCommentRead,
 )
+from src.common.api_errors import CodedValueError
 from src.common.odcs_validation import validate_odcs_contract, ODCSValidationError
 from src.common.authorization import PermissionChecker, ApprovalChecker, user_has_feature_level, user_can_adopt_entity_ids_for
 from src.common.manager_dependencies import get_auth_manager
@@ -274,6 +275,23 @@ def _decide_waiting_review_workflows(
     return resumed
 
 
+class InvalidReviewDecisionError(CodedValueError):
+    """A contract approved or rejected while its status no longer allows it.
+
+    The message is the one these routes always answered with; the code and the
+    statuses let the UI say it in the user's language.
+    """
+
+    code = 'invalid_status_transition'
+
+    def __init__(self, from_status: Optional[str], to_status: str):
+        super().__init__(
+            f"Invalid transition from {from_status} to {to_status.upper()}",
+            fromStatus=(from_status or '').lower(),
+            toStatus=to_status,
+        )
+
+
 @router.post('/data-contracts/{contract_id}/approve')
 async def approve_contract(
     contract_id: str,
@@ -292,7 +310,7 @@ async def approve_contract(
             raise HTTPException(status_code=404, detail="Contract not found")
         from_status = (contract.status or '').lower()
         if from_status not in ('proposed', 'under_review'):
-            raise HTTPException(status_code=409, detail=f"Invalid transition from {contract.status} to APPROVED")
+            raise InvalidReviewDecisionError(contract.status, 'approved')
         
         # Business logic now in manager
         updated = manager.transition_status(
@@ -346,7 +364,7 @@ async def reject_contract(
             raise HTTPException(status_code=404, detail="Contract not found")
         from_status = (contract.status or '').lower()
         if from_status not in ('proposed', 'under_review'):
-            raise HTTPException(status_code=409, detail=f"Invalid transition from {contract.status} to DRAFT")
+            raise InvalidReviewDecisionError(contract.status, 'draft')
         
         # Business logic now in manager (ODCS: rejected contracts return to draft)
         updated = manager.transition_status(

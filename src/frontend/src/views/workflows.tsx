@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
+import { executionStatusLabel } from '@/lib/status-labels';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -57,8 +59,9 @@ import type {
   WorkflowListResponse,
   WorkflowExecution,
   ExecutionStatus,
+  EntityType,
 } from '@/types/process-workflow';
-import { getTriggerDisplay } from '@/lib/workflow-labels';
+import { getTriggerDisplay, getEntityTypeLabel, getStepTypeLabel } from '@/lib/workflow-labels';
 import { WorkflowExecutionDialog } from '@/components/workflows/workflow-execution-dialog';
 import { useDefaultWorkflowText } from '@/lib/workflow-default-texts';
 import ApprovalWizardDialog from '@/components/workflows/approval-wizard-dialog';
@@ -85,7 +88,7 @@ const getStepTypeIcon = (stepType: string) => {
 };
 
 // Helper to get execution status badge
-const getStatusBadge = (status: ExecutionStatus) => {
+const getStatusBadge = (status: ExecutionStatus, t: TFunction) => {
   const variants: Record<ExecutionStatus, { variant: 'default' | 'secondary' | 'destructive' | 'outline'; icon: React.ReactNode }> = {
     pending: { variant: 'secondary', icon: <Clock className="h-3 w-3 mr-1" /> },
     running: { variant: 'default', icon: <Play className="h-3 w-3 mr-1 animate-pulse" /> },
@@ -98,7 +101,7 @@ const getStatusBadge = (status: ExecutionStatus) => {
   return (
     <Badge variant={config.variant} className="flex items-center">
       {config.icon}
-      {status}
+      {executionStatusLabel(status, t)}
     </Badge>
   );
 };
@@ -785,7 +788,7 @@ export default function Workflows() {
             onClick={() => navigate(`${pathname}/${row.original.id}`)}
             className="font-medium hover:underline hover:text-primary text-left"
           >
-            {row.original.name}
+            {defaultWorkflowText(row.original.name)}
           </button>
           {row.original.is_default && (
             <Badge variant="secondary" className="text-xs">{t('workflows:view.badges.default')}</Badge>
@@ -819,7 +822,7 @@ export default function Workflows() {
       cell: ({ row }) => (
         <div className="flex items-center gap-1">
           {row.original.steps.slice(0, 4).map((step, i) => (
-            <span key={i} className="text-muted-foreground" title={step.step_type}>
+            <span key={i} className="text-muted-foreground" title={getStepTypeLabel(step.step_type, t)}>
               {getStepTypeIcon(step.step_type)}
             </span>
           ))}
@@ -922,7 +925,7 @@ export default function Workflows() {
         return (
           <div className="flex items-center gap-2">
             <GitBranch className="h-4 w-4 text-muted-foreground" />
-            <span className="font-medium">{row.original.workflow_name}</span>
+            <span className="font-medium">{defaultWorkflowText(row.original.workflow_name)}</span>
             {wfType === 'approval' ? (
               <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">{t('workflows:view.badges.approval')}</Badge>
             ) : (
@@ -943,7 +946,7 @@ export default function Workflows() {
           <div className="flex flex-col">
             <span className="text-sm font-medium">{entity_name || entity_id || '-'}</span>
             {entity_type && (
-              <span className="text-xs text-muted-foreground capitalize">{entity_type}</span>
+              <span className="text-xs text-muted-foreground">{getEntityTypeLabel(entity_type as EntityType, t)}</span>
             )}
           </div>
         );
@@ -957,7 +960,7 @@ export default function Workflows() {
           <ChevronDown className="ml-2 h-4 w-4" />
         </Button>
       ),
-      cell: ({ row }) => getStatusBadge(row.original.status),
+      cell: ({ row }) => getStatusBadge(row.original.status, t),
     },
     {
       accessorKey: 'current_step_name',
@@ -1510,7 +1513,7 @@ export default function Workflows() {
           <DialogHeader>
             <DialogTitle>{t('workflows:view.dialogs.duplicateTitle')}</DialogTitle>
             <DialogDescription>
-              {t('workflows:view.dialogs.duplicateDescription', { name: duplicatingWorkflow?.name })}
+              {t('workflows:view.dialogs.duplicateDescription', { name: defaultWorkflowText(duplicatingWorkflow?.name) })}
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
@@ -1580,11 +1583,11 @@ export default function Workflows() {
             <div className="py-4 space-y-2">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium">{t('workflows:view.detail.workflow')}</span>
-                <span className="text-sm text-muted-foreground">{executionToDelete.workflow_name}</span>
+                <span className="text-sm text-muted-foreground">{defaultWorkflowText(executionToDelete.workflow_name)}</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium">{t('workflows:view.detail.status')}</span>
-                {getStatusBadge(executionToDelete.status)}
+                {getStatusBadge(executionToDelete.status, t)}
               </div>
               {executionToDelete.entity_name && (
                 <div className="flex items-center gap-2">

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { reviewStatusLabel } from '@/lib/status-labels';
 import { ColumnDef } from "@tanstack/react-table";
 import { Loader2, AlertCircle, ArrowLeft, X, ArrowUpDown, Pencil, Check, Copy } from 'lucide-react';
 import { useApi } from '@/hooks/use-api';
@@ -251,7 +252,7 @@ export default function DataAssetReviewDetails() {
                 </Button>
             ),
             cell: ({ row }) => (
-                <Badge variant={getAssetStatusColor(row.original.status)}>{row.original.status}</Badge>
+                <Badge variant={getAssetStatusColor(row.original.status)}>{reviewStatusLabel(row.original.status, t)}</Badge>
             ),
         },
         {
@@ -388,7 +389,7 @@ export default function DataAssetReviewDetails() {
                             </SelectTrigger>
                             <SelectContent>
                                 {Object.values(ReviewRequestStatus).map((status) => (
-                                    <SelectItem key={status} value={status}>{status}</SelectItem>
+                                    <SelectItem key={status} value={status}>{reviewStatusLabel(status, t)}</SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>
@@ -404,7 +405,7 @@ export default function DataAssetReviewDetails() {
                     <CardContent className="grid md:grid-cols-3 gap-4 text-sm">
                         <div><Label>{t('common:labels.requester')}:</Label> {request.requester_email}</div>
                         <div><Label>{t('common:labels.reviewer')}:</Label> {request.reviewer_email}</div>
-                        <div><Label>{t('data-asset-reviews:details.currentStatus')}:</Label> <Badge variant={getRequestStatusColor(request.status)}>{request.status}</Badge></div>
+                        <div><Label>{t('data-asset-reviews:details.currentStatus')}:</Label> <Badge variant={getRequestStatusColor(request.status)}>{reviewStatusLabel(request.status, t)}</Badge></div>
                         <div><Label>{t('common:labels.created')}:</Label> <RelativeDate date={request.created_at} /></div>
                         <div><Label>{t('common:labels.lastUpdated')}:</Label> <RelativeDate date={request.updated_at} /></div>
                         <div className="md:col-span-3"><Label>{t('common:labels.notes')}:</Label> <p className="text-xs mt-1 whitespace-pre-wrap">{request.notes || t('common:states.none')}</p></div>

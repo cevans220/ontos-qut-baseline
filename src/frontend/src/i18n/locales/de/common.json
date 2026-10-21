@@ -749,5 +749,11 @@
     "tabMemberships": "Mitgliedschaften",
     "detailsFailed": "Benutzerdetails konnten nicht abgerufen werden",
     "loadFailed": "Profildaten konnten nicht geladen werden"
+  },
+  "importSummary": {
+    "created": "Erstellt: {{created}}.",
+    "createdSkipped": "Erstellt: {{created}}, übersprungen: {{skipped}}.",
+    "createdFailed": "Erstellt: {{created}}, fehlgeschlagen: {{failed}}.",
+    "createdSkippedFailed": "Erstellt: {{created}}, übersprungen: {{skipped}}, fehlgeschlagen: {{failed}}."
   }
 }

@@ -49,14 +49,32 @@
   },
   "upload": {
     "success": "Upload erfolgreich",
-    "successMessage": "{{filename}} erfolgreich verarbeitet. {{count}} Produkt(e) verarbeitet.",
+    "successMessage_one": "{{filename}} erfolgreich verarbeitet. {{count}} Produkt verarbeitet.",
+    "successMessage_other": "{{filename}} erfolgreich verarbeitet. {{count}} Produkte verarbeitet.",
+    "successMessage_files_one": "{{files}} Dateien erfolgreich verarbeitet. {{count}} Produkt verarbeitet.",
+    "successMessage_files_other": "{{files}} Dateien erfolgreich verarbeitet. {{count}} Produkte verarbeitet.",
+    "partialSuccess": "Mit Problemen importiert",
     "failed": "Upload fehlgeschlagen",
     "unexpectedError": "Ein unerwarteter Fehler ist beim Upload aufgetreten.",
     "uploading": "Wird hochgeladen...",
     "tooltipTitle": "Datenprodukt hochladen (ODPS-Format)",
     "tooltipDescription": "Akzeptiert YAML- oder JSON-Dateien nach dem ODPS (Open Data Product Standard) Schema.",
     "tooltipHint": "Für Datenverträge (ODCS) verwenden Sie bitte die Datenverträge-Seite.",
-    "odcsHint": "Hinweis: Diese Seite ist für Datenprodukte (ODPS-Format). Wenn Sie einen Datenvertrag (ODCS-Format) hochladen möchten, verwenden Sie bitte stattdessen die Datenverträge-Seite."
+    "odcsHint": "Hinweis: Diese Seite ist für Datenprodukte (ODPS-Format). Wenn Sie einen Datenvertrag (ODCS-Format) hochladen möchten, verwenden Sie bitte stattdessen die Datenverträge-Seite.",
+    "dialogTitle": "Datenprodukte hochladen",
+    "dialogDescription": "Wählen Sie eine oder mehrere ODPS-Dateien (YAML/JSON). Jede Datei kann ein einzelnes Produkt oder ein Array enthalten.",
+    "createMissingDomains": "Fehlende Domänen anlegen",
+    "createMissingDomainsHint": "Nicht vorhandene Domänen automatisch anlegen. Aus: nicht zugeordnete Domänen bleiben leer (der Originalwert bleibt erhalten).",
+    "adoptIds": "IDs aus der Datei übernehmen",
+    "adoptIdsHint": "Eine gültige, nicht kollidierende UUID aus der Datei als Primärschlüssel verwenden, damit Verknüpfungen zwischen Entitäten den Import überstehen.",
+    "duplicatesAsNew": "Doppelte IDs als neue Kopien importieren",
+    "duplicatesAsNewHint": "Aus (Standard): Ein Produkt, dessen ID bereits existiert, wird übersprungen. An: Es wird als neue Kopie mit neuer ID importiert.",
+    "dropActive": "Datei(en) hier ablegen",
+    "dropInactive": "Produktdatei(en) hierher ziehen oder klicken, um auszuwählen",
+    "supportedFormats": "Unterstützte Formate: JSON oder YAML (ODPS)",
+    "orPasteOdps": "Oder ODPS-JSON einfügen",
+    "pasteOdpsPlaceholder": "ODPS-Produkt-JSON hier einfügen",
+    "importJsonButton": "JSON importieren"
   },
   "genie": {
     "noSelection": "Keine Auswahl",
@@ -354,7 +372,8 @@
       "deleteSupportChannel": "Diesen Support-Kanal löschen?",
       "unlinkContract": "Vertragsverknüpfung mit diesem Deliverable lösen?",
       "createGenieSpace": "Einen Genie Space für \"{{name}}\" erstellen?"
-    }
+    },
+    "contractDangling": "Vertrag existiert nicht mehr"
   },
   "form": {
     "createTitle": "Datenprodukt erstellen",
@@ -658,7 +677,7 @@
       "certLevelRequired": "Bitte wählen Sie eine Zertifizierungsstufe aus"
     },
     "errors": {
-      "cannotRequest": "{{requestType}} kann für ein Produkt mit dem Status '{{productStatus}}' nicht angefordert werden",
+      "cannotRequest": "\"{{requestType}}\" ist für ein Produkt mit Status {{productStatus}} nicht verfügbar.",
       "failedToSubmit": "Anfrage konnte nicht gesendet werden"
     },
     "toast": {

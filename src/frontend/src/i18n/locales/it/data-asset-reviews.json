@@ -60,7 +60,11 @@
     "in_review": "In Revisione",
     "approved": "Approvato",
     "rejected": "Rifiutato",
-    "cancelled": "Annullato"
+    "cancelled": "Annullato",
+    "queued": "In coda",
+    "needs_review": "Da rivedere",
+    "denied": "Negata",
+    "needs_clarification": "Chiarimento necessario"
   },
   "details": {
     "backToList": "Torna alle Revisioni",

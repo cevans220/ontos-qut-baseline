@@ -329,6 +329,45 @@
     },
     "errors": {
       "own_owner_approval": "Diese Genehmigung ist Sache der Eigentümer; Sie können Ihre eigene Anfrage nicht genehmigen."
+    },
+    "entityTypes": {
+      "entity": "Entität",
+      "data_product": "Datenprodukt",
+      "data_contract": "Datenvertrag",
+      "data_domain": "Datendomäne",
+      "data_asset_review": "Prüfung von Daten-Assets",
+      "access_grant": "Zugriffsberechtigung",
+      "asset": "Asset"
+    },
+    "fields": {
+      "product_id": "Produkt-ID",
+      "product_name": "Produktname",
+      "contract_id": "Vertrags-ID",
+      "contract_name": "Vertragsname",
+      "status": "Status",
+      "from_status": "Ausgangsstatus",
+      "to_status": "Zielstatus",
+      "target_status": "Angeforderter Status",
+      "current_status": "Aktueller Status",
+      "justification": "Begründung",
+      "sunset_date": "Auslaufdatum",
+      "replacement_id": "Ersatz-ID",
+      "replacement_name": "Ersatz",
+      "requested_scope": "Angeforderter Umfang",
+      "publication_scope": "Veröffentlichungsumfang",
+      "requester": "Antragsteller",
+      "requester_message": "Nachricht des Antragstellers",
+      "reviewer_email": "Prüfer",
+      "requested_certification_level": "Angeforderte Zertifizierungsstufe",
+      "certification_level": "Zertifizierungsstufe",
+      "certification_notes": "Zertifizierungsnotizen",
+      "asset_count": "Anzahl der Assets",
+      "asset_fqns": "Assets",
+      "domain_id": "Domänen-ID",
+      "project_id": "Projekt-ID",
+      "project_name": "Projekt",
+      "name": "Name",
+      "notes": "Notizen"
     }
   },
   "approvalWizard": {

@@ -79,6 +79,7 @@ from src.common.search_registry import searchable_asset
 
 from src.common.logging import get_logger
 from src.common.database import get_session_factory
+from src.common.api_errors import CodedValueError
 from src.common.errors import ConflictError
 from src.db_models.data_contracts import (
     DataContractDb,
@@ -5361,7 +5362,7 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
             .count()
         )
         if schema_object_count == 0:
-            raise ValueError("A schema is required before a contract can be proposed for review.")
+            raise ReviewSchemaRequiredError()
 
         # Transition to PROPOSED. Clear the personal-draft owner so the contract
         # is promoted from tier-1 (creator-only) to organisation visibility; a
@@ -7245,3 +7246,12 @@ def reindex_contract_in_search_index(contract_db_obj, db) -> None:
             "Failed to reindex contract %s: %s",
             getattr(contract_db_obj, 'id', '<?>'), exc,
         )
+
+
+class ReviewSchemaRequiredError(CodedValueError):
+    """A draft contract without a schema object can't be proposed for review."""
+
+    code = 'review_schema_required'
+
+    def __init__(self):
+        super().__init__("A schema is required before a contract can be proposed for review.")

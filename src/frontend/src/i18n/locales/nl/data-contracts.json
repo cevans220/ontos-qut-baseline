@@ -54,7 +54,9 @@
     "uploadError": "Uploaden van contract mislukt",
     "uploadFailed": "Uploaden mislukt",
     "uploadOdpsHint": "\n\nTip: Deze pagina is voor datacontracten (ODCS-formaat). Als u een dataproduct (ODPS-formaat) probeert te uploaden, gebruik dan de pagina Dataproducten.",
-    "uploadSuccess": "Contract succesvol geüpload"
+    "uploadSuccess": "Contract succesvol geüpload",
+    "uploadSuccessCount_one": "{{count}} contract geïmporteerd",
+    "uploadSuccessCount_other": "{{count}} contracten geïmporteerd"
   },
   "status": {
     "draft": "Concept",
@@ -69,6 +71,15 @@
     "retired": "Buiten Gebruik",
     "published": "Gepubliceerd",
     "archived": "Gearchiveerd"
+  },
+  "statusDescriptions": {
+    "draft": "In ontwikkeling, nog niet ter beoordeling ingediend",
+    "proposed": "Ingediend ter beoordeling",
+    "under_review": "Wordt beoordeeld door de data steward",
+    "approved": "Goedgekeurd door de steward, klaar om te activeren",
+    "active": "In productie, beheert data-assets",
+    "deprecated": "Nog beschikbaar, maar gemarkeerd voor uitfasering",
+    "retired": "Niet meer in gebruik, gearchiveerd"
   },
   "details": {
     "backToList": "Terug naar Lijst",
@@ -209,7 +220,14 @@
     "importedTitle": "Geïmporteerd",
     "importedSuccess": "ODCS-JSON succesvol geïmporteerd",
     "importOdcsError": "Importeren van ODCS-JSON mislukt",
-    "importJsonButton": "JSON importeren"
+    "importJsonButton": "JSON importeren",
+    "uploadDescription": "Selecteer een of meer ODCS-bestanden (YAML/JSON). Elk bestand kan één contract of een array bevatten.",
+    "createMissingDomains": "Ontbrekende domeinen aanmaken",
+    "createMissingDomainsHint": "Maakt domeinen die nog niet bestaan automatisch aan. Uit: domeinen zonder overeenkomst blijven niet toegewezen (het origineel blijft bewaard).",
+    "adoptIds": "ID's uit het bestand overnemen",
+    "adoptIdsHint": "Gebruikt een geldige, niet-conflicterende UUID uit het bestand als primaire sleutel, zodat koppelingen tussen entiteiten de import overleven.",
+    "duplicatesAsNew": "Dubbele ID's als nieuwe kopieën importeren",
+    "duplicatesAsNewHint": "Uit (standaard): een entiteit waarvan de ID al bestaat, wordt overgeslagen. Aan: ze wordt geïmporteerd als nieuwe kopie met een nieuwe ID."
   },
   "editor": {
     "title": "Contract Editor",
@@ -266,6 +284,8 @@
       "domain": "Domein",
       "project": "Project",
       "projectIdTitle": "Project-ID: {{id}}",
+      "dataProduct": "Dataproduct",
+      "dataProductIdTitle": "Product-ID: {{id}}",
       "tenant": "Tenant",
       "team": "Team",
       "teamIdTitle": "Team-ID: {{id}}",
@@ -496,9 +516,8 @@
       "deleteSchemaAuthDefFailed": "Verwijderen van gezaghebbende schemadefinitie mislukt",
       "createPropertyAuthDefFailed": "Aanmaken van gezaghebbende eigenschapsdefinitie mislukt",
       "updatePropertyAuthDefFailed": "Bijwerken van gezaghebbende eigenschapsdefinitie mislukt",
-      "approveFailedStatus": "Goedkeuren mislukt ({{status}})",
+      "invalidTransition": "Het contract is nu {{fromStatus}} en kan niet meer worden goedgekeurd of afgewezen. Laad de pagina opnieuw om de huidige status te zien.",
       "approveFailed": "Goedkeuren mislukt",
-      "rejectFailedStatus": "Afwijzen mislukt ({{status}})",
       "rejectFailed": "Afwijzen mislukt",
       "startProfilingFailed": "Starten van profilering mislukt"
     }
@@ -1062,7 +1081,7 @@
     "statusLabel": "Status:",
     "requestTypeLabel": "Verzoektype *",
     "notAvailableForStatus": "Niet beschikbaar voor status '{{status}}'",
-    "cannotRequest": "Kan geen {{type}} aanvragen voor een contract met status '{{status}}'",
+    "cannotRequest": "\"{{type}}\" is niet beschikbaar voor een contract met status {{status}}.",
     "messageOptionalLabel": "Bericht (optioneel)",
     "changingStatus": "Status wijzigen...",
     "sendingRequest": "Verzoek verzenden...",
@@ -1123,6 +1142,14 @@
       "requestDescription": "Vraag goedkeuring aan om de levenscyclusstatus van dit contract te wijzigen.",
       "currentStatusLabel": "Huidige status:",
       "recommendedLabel": "Aanbevolen:",
+      "recommended": {
+        "draft": "Dien in ter beoordeling (Voorgesteld) zodra het klaar is",
+        "proposed": "Wacht tot de steward het naar In beoordeling zet",
+        "under_review": "De steward keurt goed of vraagt om wijzigingen",
+        "approved": "Activeer het zodra het productiedata moet beheren",
+        "active": "Markeer als verouderd wanneer uitfasering gepland is; gebruik het certificeringspaneel voor certificering",
+        "deprecated": "Faseer het uit wanneer het niet meer wordt gebruikt"
+      },
       "selectTargetLabel": "Selecteer doelstatus *",
       "chooseTargetPlaceholder": "Kies doelstatus...",
       "terminalStateLabel": "Eindstatus:",
@@ -1149,7 +1176,8 @@
     },
     "errors": {
       "submitFailed": "Indienen van verzoek mislukt",
-      "loadPolicyFailed": "Laden van deploymentbeleid mislukt"
+      "loadPolicyFailed": "Laden van deploymentbeleid mislukt",
+      "reviewSchemaRequired": "Een contract heeft een schema nodig voordat het ter beoordeling kan worden voorgesteld."
     }
   },
   "deployRequest": {

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { reviewStatusLabel } from '@/lib/status-labels';
 import { ColumnDef } from "@tanstack/react-table";
 import { Plus, AlertCircle, ClipboardCheck, ChevronDown, Trash2 } from 'lucide-react';
 import { ListViewSkeleton } from '@/components/common/list-view-skeleton';
@@ -138,7 +139,7 @@ export default function DataAssetReviews() {
                 </Button>
             ),
             cell: ({ row }) => (
-                <Badge variant={getStatusColor(row.original.status)}>{row.original.status}</Badge>
+                <Badge variant={getStatusColor(row.original.status)}>{reviewStatusLabel(row.original.status, t)}</Badge>
             ),
         },
         {
