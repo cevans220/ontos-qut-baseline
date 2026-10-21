@@ -87,4 +87,40 @@ describe('RequestContractActionDialog request type in its toasts', () => {
       'Your deploy request has been submitted and you will be notified of the decision.',
     );
   });
+
+  it('names the failed workflows when some succeed/pause and others fail (partial failure)', async () => {
+    await i18n.changeLanguage('pt');
+    mockPost.mockResolvedValue({
+      data: {
+        workflow_status: 'partially_failed',
+        workflow_error_code: 'request_workflow_partially_failed',
+        workflow_error_params: { failed_workflows: ['Deploy Audit', 'Compliance Check'] },
+      },
+    });
+
+    const toast = await submitDeployRequest();
+
+    expect(toast.description).toBe(
+      'Um dos workflows de solicitação de implantação falhou: Deploy Audit, Compliance Check. '
+      + 'Outras aprovações podem ainda estar pendentes.',
+    );
+    expect(toast.description).not.toContain('Ninguém foi acionado');
+  });
+
+  it('shows partial failure toast in English', async () => {
+    mockPost.mockResolvedValue({
+      data: {
+        workflow_status: 'partially_failed',
+        workflow_error_code: 'request_workflow_partially_failed',
+        workflow_error_params: { failed_workflows: ['Deploy Approval'] },
+      },
+    });
+
+    const toast = await submitDeployRequest();
+
+    expect(toast.description).toBe(
+      'One of the deploy request workflows failed: Deploy Approval. Other approvals may still be pending.',
+    );
+    expect(toast.description).not.toContain('Nobody was asked');
+  });
 });

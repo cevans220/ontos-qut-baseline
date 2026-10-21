@@ -541,4 +541,47 @@ describe('RequestProductActionDialog when the request workflow fails', () => {
     expect(toast.variant).toBeUndefined();
     expect(toast.description).toMatch(/you will be notified/i);
   });
+
+  it('warns when some workflows succeed/pause but others fail (partial failure)', async () => {
+    mockPost.mockResolvedValue({
+      data: {
+        workflow_status: 'partially_failed',
+        workflow_error_code: 'request_workflow_partially_failed',
+        workflow_error_params: { failed_workflows: ['Data Product Access Audit', 'Compliance Check'] },
+      },
+    });
+
+    const toast = await submitAccessRequest();
+
+    expect(toast.variant).toBe('destructive');
+    expect(toast.description).toBe(
+      'One of the access request workflows failed: Data Product Access Audit, Compliance Check. ' +
+        'Other approvals may still be pending.',
+    );
+    expect(toast.description).not.toContain('Nobody was asked');
+  });
+
+  it('names partial failure workflows in the UI language', async () => {
+    await i18n.changeLanguage('pt');
+    mockPost.mockResolvedValue({
+      data: {
+        workflow_status: 'partially_failed',
+        workflow_error_code: 'request_workflow_partially_failed',
+        workflow_error_params: { failed_workflows: ['Access Audit'] },
+      },
+    });
+
+    try {
+      const toast = await submitAccessRequest();
+
+      expect(toast.variant).toBe('destructive');
+      expect(toast.description).toBe(
+        'Um dos workflows de solicitação de acesso falhou: Access Audit. ' +
+          'Outras aprovações podem ainda estar pendentes.',
+      );
+      expect(toast.description).not.toContain('Ninguém foi acionado');
+    } finally {
+      await i18n.changeLanguage('en');
+    }
+  });
 });
