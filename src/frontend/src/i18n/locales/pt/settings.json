@@ -217,7 +217,8 @@
       "repoUrl": "https://github.com/your-org/your-repo.git",
       "branch": "main",
       "token": "ghp_... ou similar",
-      "username": "x-access-token"
+      "username": "x-access-token",
+      "tokenSaved": "Salvo. Deixe vazio para mantê-lo."
     },
     "cloneButton": "Clonar repositório",
     "currentCommit": "Commit",
@@ -242,7 +243,8 @@
       "pushError": "Falha ao enviar as alterações",
       "pushSuccess": "Alterações enviadas com sucesso",
       "saveError": "Falha ao salvar as configurações do Git",
-      "saveSuccess": "Configurações do Git salvas"
+      "saveSuccess": "Configurações do Git salvas",
+      "tokenRemoved": "Token salvo removido"
     },
     "pendingChanges": "Alterações pendentes",
     "pullButton": "Pull",
@@ -257,7 +259,15 @@
       "notConfigured": "Não configurado"
     },
     "viewChangesButton": "Ver alterações",
-    "volumePath": "Caminho do volume"
+    "volumePath": "Caminho do volume",
+    "workingCopy": "Cópia de trabalho",
+    "workingCopyNote": "O volume não está montado aqui, então a cópia de trabalho fica no disco local do app e cada arquivo exportado também é gravado no volume. Depois que o app reiniciar, clone o repositório de novo: os commits enviados ficam no remoto.",
+    "volumeSyncWarningTitle": "Exportação não gravada no volume",
+    "errors": {
+      "git_volume_invalid": "A configuração de volume \"{{value}}\" não indica um volume do Unity Catalog. Use /Volumes/<catalog>/<schema>/<volume>, <catalog>.<schema>.<volume> ou o nome de um volume com o catálogo e o schema definidos nas configurações gerais.",
+      "git_volume_sync_failed": "Não foi possível gravar {{path}} no volume. A mudança está no repositório e é enviada normalmente; verifique se o app pode gravar no volume (WRITE VOLUME)."
+    },
+    "removeTokenButton": "Remover token salvo"
   },
   "nav": {
     "groups": {

@@ -94,6 +94,11 @@ async def update_settings(
             details['allow_job_enablement_requests'] = settings_payload.get('allow_job_enablement_requests')
         if 'schema_import_child_limit' in settings_payload:
             details['schema_import_child_limit'] = settings_payload.get('schema_import_child_limit')
+        # The Git token itself never goes to the audit log, only what happened to it.
+        if settings_payload.get('git_password'):
+            details['git_password'] = 'set'
+        elif settings_payload.get('git_password_clear'):
+            details['git_password'] = 'cleared'
 
         updated = manager.update_settings(settings_payload)
         success = True
@@ -1163,10 +1168,12 @@ async def clone_git_repository(
     manager: SettingsManager = Depends(get_settings_manager),
     _: bool = Depends(PermissionChecker('settings-git', FeatureAccessLevel.READ_WRITE)),
 ):
-    """Clone the Git repository to the UC Volume.
+    """Clone the Git repository to the export location.
     
     This is an explicit admin action to initialize the Git repository.
-    The repository will be cloned to {DATABRICKS_VOLUME}/git-export/.
+    The repository is cloned to {DATABRICKS_VOLUME}/git-export/, or to a
+    local working copy whose exports are written there when the volume
+    isn't mounted (Databricks Apps).
     """
     success = False
     details = {"action": "clone_git_repository"}
@@ -1182,10 +1189,15 @@ async def clone_git_repository(
             return result.to_dict()
         else:
             details["error"] = result.error_message
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=result.error_message or "Failed to clone repository"
-            )
+            message = result.error_message or "Failed to clone repository"
+            detail: Any = message
+            if result.error_code:
+                detail = {
+                    "code": result.error_code,
+                    "message": message,
+                    "params": result.error_params or {},
+                }
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
     except RuntimeError as e:
         details["exception"] = str(e)
         raise HTTPException(status_code=400, detail=str(e))

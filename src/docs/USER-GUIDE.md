@@ -3440,6 +3440,18 @@ Before using Indirect mode, configure the Git repository:
 3. Click **Save Settings**
 4. Click **Clone Repository** to clone the repo to the configured volume
 
+The volume comes from **Settings → General → Unity Catalog**. The **Volume** field
+accepts `/Volumes/<catalog>/<schema>/<volume>`, `<catalog>.<schema>.<volume>`, or a
+volume name with the catalog and schema set. Exports go to
+`/Volumes/<catalog>/<schema>/<volume>/git-export/`.
+
+Inside Databricks Apps, a volume isn't mounted on the app's filesystem, so the Git
+working copy is kept on the app's local disk (`GIT_WORK_DIR`, or a directory under
+the system temp directory), and each exported file is also written to the volume
+through the Files API. The app's service principal needs `WRITE VOLUME` on it. After
+the app restarts, click **Clone Repository** again: pushed commits are kept in the
+remote, and exports already written to the volume stay there.
+
 **Creating a GitHub PAT**:
 1. Go to GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)
 2. Click "Generate new token (classic)"
