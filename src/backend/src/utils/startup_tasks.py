@@ -251,11 +251,10 @@ def import_estates_from_yaml_once(db: Session, yaml_path: Optional[Path] = None)
         app_settings_repo.set(db, import_key, 'true')
         return False
 
-    # Import in transaction
+    # Import estates (each create_estate commits)
     from src.controller.estate_manager import EstateManager
     from src.models.estate import Estate, SharingPolicy, SharingRule
 
-    savepoint = db.begin_nested()
     try:
         estate_manager = EstateManager()
         imported = 0
@@ -299,13 +298,11 @@ def import_estates_from_yaml_once(db: Session, yaml_path: Optional[Path] = None)
             except Exception as e:
                 logger.error("Failed to import estate: %s", e, exc_info=True)
 
-        savepoint.commit()
         app_settings_repo.set(db, import_key, 'true')
         logger.info("Completed estates YAML import: %d imported", imported)
         return imported > 0
     except Exception as e:
-        savepoint.rollback()
-        logger.error("Estates import transaction failed (code: estates_yaml_import_failed): %s", e, exc_info=True)
+        logger.error("Estates import failed (code: estates_yaml_import_failed): %s", e, exc_info=True)
         logger.warning("Fix the estates YAML and restart to retry")
         return False  # Do NOT mark done
 
