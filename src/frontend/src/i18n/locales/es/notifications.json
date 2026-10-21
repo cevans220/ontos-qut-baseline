@@ -40,11 +40,11 @@
     "templates": {
       "validation_failed": {
         "title": "Validación fallida",
-        "message": "La validación falló para {{entity_type}} '{{entity_name}}'"
+        "message": "Error de validación en {{entity_type}} '{{entity_name}}'"
       },
       "validation_passed": {
         "title": "Validación superada",
-        "message": "La validación se superó para {{entity_type}} '{{entity_name}}'"
+        "message": "Validación superada en {{entity_type}} '{{entity_name}}'"
       },
       "product_approved": {
         "title": "Producto de datos aprobado",
@@ -76,17 +76,17 @@
       },
       "pii_detected": {
         "title": "PII detectada",
-        "message": "Posible PII detectada en {{entity_type}} '{{entity_name}}'. Revísela."
+        "message": "Posible PII detectada en {{entity_type}} '{{entity_name}}'. Se requiere revisión."
       },
       "default": {
-        "title": "Notificación de workflow",
-        "message": "Notificación de workflow para {{entity_name}}"
+        "title": "Notificación de flujo de trabajo",
+        "message": "Notificación de flujo de trabajo para {{entity_name}}"
       }
     },
     "messages": {
       "naming-convention-check": {
         "notify-naming-failure": "El nombre del objeto no sigue las convenciones de nomenclatura. Los nombres solo pueden tener minúsculas y guiones bajos.",
-        "notify-tag-failure": "No se pudo asignar automáticamente la etiqueta de owner. Añada la etiqueta de owner manualmente."
+        "notify-tag-failure": "No se pudo asignar automáticamente la etiqueta «owner». Añádala manualmente."
       },
       "data-product-approval": {
         "notify-no-contract": "No se puede publicar un producto de datos sin un contrato de datos. Adjunte al menos un contrato primero.",
@@ -94,13 +94,13 @@
         "notify-rejected": "Su solicitud de publicación del producto de datos ha sido rechazada. Revise los comentarios y vuelva a enviarla."
       },
       "data-contract-validation": {
-        "notify-no-schema": "El contrato de datos debe tener una definición de schema. Añada el schema antes de continuar."
+        "notify-no-schema": "El contrato de datos debe tener una definición de esquema. Añada el esquema antes de continuar."
       },
       "pii-detection": {
         "notify-pii-detected": "Posible PII detectada en la tabla. La tabla se ha etiquetado para revisión."
       },
       "contract-review-request": {
-        "notify-requester": "Su solicitud de revisión del contrato de datos se ha enviado. Un data steward la revisará en breve.",
+        "notify-requester": "Su solicitud de revisión del contrato de datos se ha enviado. Un administrador de datos la revisará en breve.",
         "notify-approved": "Su contrato de datos ha sido aprobado y está listo para el siguiente paso.",
         "notify-rejected": "Su solicitud de revisión del contrato de datos ha sido denegada. Revise los comentarios."
       },
@@ -135,7 +135,7 @@
       },
       "role-access-request": {
         "notify-requester": "Su solicitud de acceso al rol se ha enviado para aprobación.",
-        "notify-approved": "Su solicitud de acceso al rol ha sido aprobada. Póngase en contacto con un administrador para que le añada al grupo adecuado.",
+        "notify-approved": "Su solicitud de acceso al rol ha sido aprobada. Póngase en contacto con un administrador para que se le añada al grupo adecuado.",
         "notify-rejected": "Su solicitud de acceso al rol ha sido denegada."
       },
       "job-failure-notification": {
@@ -145,7 +145,7 @@
         "notify-requester": "Su job en segundo plano se ha completado correctamente."
       },
       "access-expiring-warning": {
-        "notify-grantee": "Su acceso caducará pronto. Póngase en contacto con el responsable del recurso si necesita ampliarlo."
+        "notify-grantee": "Su acceso expirará pronto. Póngase en contacto con el propietario del recurso si necesita extenderlo."
       },
       "access-revoked-notification": {
         "notify-grantee": "Su acceso ha sido revocado. Póngase en contacto con un administrador si cree que se trata de un error."
