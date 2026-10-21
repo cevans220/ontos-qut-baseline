@@ -141,37 +141,64 @@ def _count_estates(db: Session) -> int:
     return db.query(EstateDb).count()
 
 
+# Exact shipped sample for reliable detection. Extracted from
+# origin/development:src/backend/src/data/estates.yaml and normalized
+# to JSON with sort_keys=True to catch any configuration changes.
+_SHIPPED_SAMPLE_JSON = (
+    '[{"cloud_type":"aws","connection_type":"delta_share","created_at":"2024-01-01T00:00:00Z",'
+    '"description":"Primary production workspace in US West","id":"1","is_enabled":true,'
+    '"last_sync_status":"success","last_sync_time":"2024-03-29T10:00:00Z",'
+    '"metastore_name":"us_prod_metastore","name":"US Production",'
+    '"sharing_policies":[{"created_at":"2024-03-30T10:00:00Z",'
+    '"description":"Shares all active data products from the US Production estate.",'
+    '"id":"policy-us-prod-dp-active","is_enabled":true,'
+    '"name":"Share Active US Data Products","resource_type":"data_product",'
+    '"rules":[{"filter_type":"status","filter_value":"Active","operator":"equals"},'
+    '{"filter_type":"domain","filter_value":"US Operations","operator":"equals"}],'
+    '"updated_at":"2024-03-30T10:00:00Z"}],'
+    '"sync_schedule":"0 0 * * *","updated_at":"2024-03-29T10:00:00Z",'
+    '"workspace_url":"https://us-west.cloud.databricks.com"},'
+    '{"cloud_type":"azure","connection_type":"delta_share","created_at":"2024-01-15T00:00:00Z",'
+    '"description":"Analytics workspace in EU Central","id":"2","is_enabled":true,'
+    '"last_sync_status":"success","last_sync_time":"2024-03-29T12:00:00Z",'
+    '"metastore_name":"eu_analytics_metastore","name":"EU Analytics",'
+    '"sharing_policies":[{"created_at":"2024-03-30T11:00:00Z",'
+    '"description":"Shares all business glossary terms related to Finance.",'
+    '"id":"policy-eu-glossary-finance","is_enabled":true,'
+    '"name":"Share Finance Glossary Terms from EU",'
+    '"resource_type":"business_glossary",'
+    '"rules":[{"filter_type":"tag","filter_value":"finance","operator":"contains"},'
+    '{"filter_type":"domain","filter_value":"EU Analytics","operator":"equals"}],'
+    '"updated_at":"2024-03-30T11:00:00Z"}],'
+    '"sync_schedule":"0 12 * * *","updated_at":"2024-03-29T12:00:00Z",'
+    '"workspace_url":"https://europe-west.cloud.databricks.com"},'
+    '{"cloud_type":"gcp","connection_type":"database","created_at":"2024-02-01T00:00:00Z",'
+    '"description":"Development workspace in APAC","id":"3","is_enabled":false,'
+    '"last_sync_error":"Connection timeout","last_sync_status":"failed",'
+    '"last_sync_time":"2024-03-28T06:00:00Z","metastore_name":"apac_dev_metastore",'
+    '"name":"APAC Development","sharing_policies":[],"sync_schedule":"0 6 * * *",'
+    '"updated_at":"2024-03-28T06:00:00Z",'
+    '"workspace_url":"https://asia-southeast.cloud.databricks.com"}]'
+)
+
+
 def _is_shipped_sample(data: List) -> bool:
     """Check if data matches the shipped sample estates (never configured).
 
-    Returns True only if this is exactly the shipped sample (both estates with their
-    default policies/rules), so deployments that never configured estates stay empty.
+    Returns True only if this is EXACTLY the shipped sample by normalizing
+    both to JSON and comparing, so deployments that never configured estates
+    stay empty. Catches any configuration changes (rule values, descriptions, etc).
     """
-    if not isinstance(data, list) or len(data) != 2:
+    if not isinstance(data, list):
         return False
 
-    # Shipped samples have exactly these two names and cloud types
-    names_clouds = {(e.get('name'), e.get('cloud_type')) for e in data if isinstance(e, dict)}
-    if names_clouds != {('US Production', 'aws'), ('EU Analytics', 'azure')}:
+    try:
+        # Normalize both to JSON with consistent ordering to detect any changes
+        normalized_data = json.dumps(data, sort_keys=True, separators=(',', ':'))
+        return normalized_data == _SHIPPED_SAMPLE_JSON
+    except (TypeError, ValueError):
+        # If data cannot be serialized, it's not the sample
         return False
-
-    # Check that each has exactly one sharing_policy with the expected structure
-    for e in data:
-        if not isinstance(e, dict):
-            continue
-        policies = e.get('sharing_policies', [])
-        if len(policies) != 1:
-            return False
-        policy = policies[0]
-        # Check high-level structure - must have name, resource_type, rules
-        if not all(k in policy for k in ['name', 'resource_type', 'rules']):
-            return False
-        # US Production: data_product policy with 2 rules (status & domain)
-        # EU Analytics: business_glossary policy with 2 rules (tag & domain)
-        if len(policy.get('rules', [])) != 2:
-            return False
-
-    return True
 
 
 def _load_estates_yaml(yaml_path: Optional[Path] = None) -> Optional[List]:
@@ -210,7 +237,9 @@ def import_estates_from_yaml_once(db: Session, yaml_path: Optional[Path] = None)
 
     Detects shipped samples (never configured) and skips them.
     On malformed YAML: logs a coded warning, does NOT mark done → retry after fix.
-    All estates created in a transaction for atomicity.
+    All estates created in a single transaction for atomicity: on any error,
+    all changes are rolled back and the "done" flag is NOT set, so retry happens
+    on the next startup.
 
     Args:
         db: Database session
@@ -240,69 +269,97 @@ def import_estates_from_yaml_once(db: Session, yaml_path: Optional[Path] = None)
 
     if not estates_data:
         logger.info("No estates YAML found; marking import done")
-        app_settings_repo.set(db, import_key, 'true')
+        from src.db_models.app_settings import AppSettingDb
+        setting = db.query(AppSettingDb).filter(AppSettingDb.key == import_key).first()
+        if setting:
+            setting.value = 'true'
+        else:
+            setting = AppSettingDb(key=import_key, value='true')
+            db.add(setting)
+        db.commit()
         return False
 
     # Check if sample (never configured, should stay empty)
     if _is_shipped_sample(estates_data):
         logger.info("Estates YAML contains only shipped sample; skipping import")
-        app_settings_repo.set(db, import_key, 'true')
+        from src.db_models.app_settings import AppSettingDb
+        setting = db.query(AppSettingDb).filter(AppSettingDb.key == import_key).first()
+        if setting:
+            setting.value = 'true'
+        else:
+            setting = AppSettingDb(key=import_key, value='true')
+            db.add(setting)
+        db.commit()
         return False
 
-    # Import estates (each create_estate commits)
+    # Import estates atomically: all or nothing, one transaction
     from src.controller.estate_manager import EstateManager
     from src.models.estate import Estate, SharingPolicy, SharingRule
+    from src.db_models.app_settings import AppSettingDb
+
+    estate_manager = EstateManager()
+    imported = 0
+    estate_rows = []
 
     try:
-        estate_manager = EstateManager()
-        imported = 0
-
         for e_dict in estates_data:
-            try:
-                policies = e_dict.pop('sharing_policies', []) or []
-                export_policies = e_dict.pop('export_policies', None) or policies
-                import_policies = e_dict.pop('import_policies', [])
+            policies = e_dict.pop('sharing_policies', []) or []
+            export_policies = e_dict.pop('export_policies', None) or policies
+            import_policies = e_dict.pop('import_policies', [])
 
-                def make_policies(pol_list):
-                    return [
-                        SharingPolicy(
-                            id=p.get('id'),
-                            name=p['name'],
-                            description=p.get('description', ''),
-                            resource_type=p['resource_type'].replace('business_glossary', 'business_term'),
-                            rules=[SharingRule(filter_type=r['filter_type'], operator=r.get('operator', 'equals'), filter_value=r['filter_value'])
-                                   for r in p.get('rules', [])],
-                            is_enabled=p.get('is_enabled', True),
-                        )
-                        for p in pol_list
-                    ]
+            def make_policies(pol_list):
+                return [
+                    SharingPolicy(
+                        id=p.get('id'),
+                        name=p['name'],
+                        description=p.get('description', ''),
+                        resource_type=p['resource_type'].replace('business_glossary', 'business_term'),
+                        rules=[SharingRule(filter_type=r['filter_type'], operator=r.get('operator', 'equals'), filter_value=r['filter_value'])
+                               for r in p.get('rules', [])],
+                        is_enabled=p.get('is_enabled', True),
+                    )
+                    for p in pol_list
+                ]
 
-                estate = Estate(
-                    id=e_dict.get('id'),
-                    name=e_dict['name'],
-                    description=e_dict.get('description', ''),
-                    workspace_url=e_dict['workspace_url'],
-                    cloud_type=e_dict['cloud_type'],
-                    metastore_name=e_dict['metastore_name'],
-                    connection_type=e_dict.get('connection_type', 'delta_share'),
-                    export_policies=make_policies(export_policies),
-                    import_policies=make_policies(import_policies),
-                    is_enabled=e_dict.get('is_enabled', True),
-                    sync_schedule=e_dict.get('sync_schedule', '0 0 * * *'),
-                )
-                estate_manager.create_estate(db, estate, user='system@startup')
-                imported += 1
-                logger.info("Imported estate: %s", estate.name)
-            except Exception as e:
-                logger.error("Failed to import estate: %s", e, exc_info=True)
+            estate = Estate(
+                id=e_dict.get('id'),
+                name=e_dict['name'],
+                description=e_dict.get('description', ''),
+                workspace_url=e_dict['workspace_url'],
+                cloud_type=e_dict['cloud_type'],
+                metastore_name=e_dict['metastore_name'],
+                connection_type=e_dict.get('connection_type', 'delta_share'),
+                export_policies=make_policies(export_policies),
+                import_policies=make_policies(import_policies),
+                is_enabled=e_dict.get('is_enabled', True),
+                sync_schedule=e_dict.get('sync_schedule', '0 0 * * *'),
+            )
+            # Use batch method to stage without committing
+            row = estate_manager.create_estate_batch(db, estate, user='system@startup')
+            estate_rows.append(row)
+            imported += 1
+            logger.info("Staged estate for import: %s", estate.name)
 
-        app_settings_repo.set(db, import_key, 'true')
+        # Mark import as done in the session (not committed yet)
+        # Add directly to session to include in atomic commit
+        setting = db.query(AppSettingDb).filter(AppSettingDb.key == import_key).first()
+        if setting:
+            setting.value = 'true'
+        else:
+            setting = AppSettingDb(key=import_key, value='true')
+            db.add(setting)
+
+        # Commit all estates and the done marker together atomically
+        db.commit()
         logger.info("Completed estates YAML import: %d imported", imported)
         return imported > 0
+
     except Exception as e:
-        logger.error("Estates import failed (code: estates_yaml_import_failed): %s", e, exc_info=True)
+        # Rollback everything on any error (estates and the done marker)
+        db.rollback()
+        logger.error("Estates YAML import failed (code: estates_yaml_import_failed): %s", e)
         logger.warning("Fix the estates YAML and restart to retry")
-        return False  # Do NOT mark done
+        return False  # Do NOT mark done; allow retry
 
 
 def initialize_database():

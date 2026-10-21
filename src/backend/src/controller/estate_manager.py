@@ -84,12 +84,17 @@ class EstateManager:
         # Postgres names the constraint estates_name_key; SQLite reports the column.
         return 'estates_name_key' in message or 'estates.name' in message
 
-    def _commit(self, db: Session, name: str) -> None:
-        """Commit, turning a lost race on the unique name into the coded 409.
+    def _commit(self, db: Session, name: str, commit: bool = True) -> None:
+        """Flush and optionally commit, turning a lost race on the unique name into the coded 409.
 
         The pre-check can't see an estate another request creates in the
         meantime; the database constraint then fails the commit. Other
         integrity errors are re-raised unchanged.
+
+        Args:
+            db: Database session
+            name: Estate name for error reporting
+            commit: If True, commit after flush. If False, only flush (for batch operations).
         """
         try:
             db.flush()
@@ -100,7 +105,8 @@ class EstateManager:
                     f"An estate named '{name}' already exists.", name=name
                 ) from e
             raise
-        db.commit()
+        if commit:
+            db.commit()
 
     # --- CRUD -----------------------------------------------------------------------
 
@@ -121,6 +127,25 @@ class EstateManager:
         db.refresh(row)
         logger.info("Created estate %s (%s)", row.name, row.id)
         return self._to_api(row)
+
+    def create_estate_batch(self, db: Session, estate: Estate, user: Optional[str] = None) -> EstateDb:
+        """Create an estate without committing (for batch operations like YAML import).
+
+        This is an internal method used by bulk import operations that need to
+        commit multiple estates atomically. It flushes to the session but does
+        not commit, allowing the caller to batch multiple creates and commit once.
+
+        Returns the database row (not the API model), which must be refreshed
+        by the caller after commit.
+        """
+        self._check_name_free(db, estate.name)
+        row = self._repo.apply(db, EstateDb(), estate)
+        row.created_by = user
+        row.updated_by = user
+        db.add(row)
+        self._commit(db, estate.name, commit=False)
+        logger.info("Staged estate for batch import: %s", row.name)
+        return row
 
     def update_estate(
         self, db: Session, estate_id: str, estate: Estate, user: Optional[str] = None
