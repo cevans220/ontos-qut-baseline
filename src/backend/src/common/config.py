@@ -11,6 +11,7 @@ from pydantic import AliasChoices, Field, PrivateAttr, field_validator, model_va
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .api_errors import CodedValueError
+from .instance_identity import resolve_instance_identity
 from .logging import get_logger
 
 logger = get_logger(__name__)
@@ -65,7 +66,7 @@ class Settings(BaseSettings):
     DATABRICKS_WORKSPACE_ID: Optional[str] = Field(None, env='DATABRICKS_WORKSPACE_ID')  # Injected by Databricks Apps; absent in local dev
 
     # Instance identity (federation / Estate Manager). When unset, both values are derived
-    # from DATABRICKS_WORKSPACE_ID + DATABRICKS_APP_NAME (see derive_instance_identity).
+    # from DATABRICKS_WORKSPACE_ID + DATABRICKS_APP_NAME (see compute_instance_identity).
     # Admins can override them at runtime via General Settings (persisted in app_settings
     # as ONTOS_INSTANCE_ID / ONTOS_INSTANCE_NAME), which wins over env and derived values.
     ONTOS_INSTANCE_ID: Optional[str] = Field(None, env='ONTOS_INSTANCE_ID')
@@ -235,27 +236,29 @@ class Settings(BaseSettings):
         """Instance name in effect before any admin override (env value, else derived)."""
         return self._instance_name_default
 
-    @staticmethod
-    def derive_instance_identity(workspace_id: Optional[str], app_name: Optional[str]) -> Tuple[str, str]:
-        """Derive the default (instance_id, instance_name) from workspace id and app name.
-
-        Deterministic, so the same deployment gets the same identity across restarts:
-        - id: "<workspace_id>-<app_name>"; just "<app_name>" when the workspace id is missing
-          (local dev); "ontos" when both are missing.
-        - name: the app name (falls back to "ontos").
-        """
-        ws = (workspace_id or "").strip()
-        app = (app_name or "").strip() or "ontos"
-        return (f"{ws}-{app}" if ws else app), app
-
     @model_validator(mode='after')
     def compute_instance_identity(self) -> 'Settings':
-        """Fill ONTOS_INSTANCE_ID / ONTOS_INSTANCE_NAME from env or derived defaults."""
-        derived_id, derived_name = self.derive_instance_identity(
-            self.DATABRICKS_WORKSPACE_ID, self.DATABRICKS_APP_NAME
-        )
-        self._instance_id_default = (self.ONTOS_INSTANCE_ID or "").strip() or derived_id
-        self._instance_name_default = (self.ONTOS_INSTANCE_NAME or "").strip() or derived_name
+        """Fill ONTOS_INSTANCE_ID / ONTOS_INSTANCE_NAME from env or derived defaults.
+
+        The id is "<workspace_id>-<app_name>" (just "<app_name>" without a workspace id,
+        "ontos" without both) and the name is the app name, so a deployment keeps its
+        identity across restarts. Every candidate, the environment values included, goes
+        through the same validator as the Settings PUT; an invalid one stops the app at
+        startup (like any other invalid setting) instead of becoming the identity.
+
+        Raises:
+            InstanceIdInvalidError: (a ``ValueError``, so pydantic reports it as a
+                ``ValidationError``) If the id from the environment or the derived one is invalid
+            InstanceNameInvalidError: Same, for the name
+        """
+        try:
+            self._instance_id_default, self._instance_name_default = resolve_instance_identity(
+                self.ONTOS_INSTANCE_ID, self.ONTOS_INSTANCE_NAME,
+                self.DATABRICKS_WORKSPACE_ID, self.DATABRICKS_APP_NAME,
+            )
+        except CodedValueError as e:
+            logger.critical(f"Invalid instance identity, refusing to start: {e}")
+            raise
         self.ONTOS_INSTANCE_ID = self._instance_id_default
         self.ONTOS_INSTANCE_NAME = self._instance_name_default
         return self

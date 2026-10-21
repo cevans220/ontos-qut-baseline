@@ -6,6 +6,7 @@ SettingsManager read/update/persist path. No ``client`` fixture is used.
 import pytest
 
 from src.common.config import Settings
+from src.common.instance_identity import InstanceIdInvalidError, InstanceNameInvalidError
 from src.controller.settings_manager import SettingsManager
 from src.repositories.app_settings_repository import app_settings_repo
 
@@ -195,3 +196,85 @@ class TestCodedErrors:
         assert detail["code"] == "instance_name_invalid"
         assert detail["params"] == {"max_length": 128}
         assert "control characters" in detail["message"]
+
+
+class TestEnvironmentSourcesAreValidated:
+    """The environment (and derived) values go through the validator the Settings PUT uses."""
+
+    @pytest.mark.parametrize(
+        "bad",
+        ["has space", "-leading", ".dot", "a/b", "x" * 129, "ünï", "tab\tid", "new\nline", "mid\nend"],
+    )
+    def test_invalid_env_id_stops_startup_with_a_coded_error(self, tmp_path, monkeypatch, bad):
+        from pydantic import ValidationError
+
+        monkeypatch.setenv("ONTOS_INSTANCE_ID", bad)
+        with pytest.raises(ValidationError) as raised:
+            make_settings(tmp_path)
+        error = raised.value.errors()[0]["ctx"]["error"]
+        assert isinstance(error, InstanceIdInvalidError)
+        assert error.code == "instance_id_invalid"
+        assert error.params == {"max_length": 128}
+        assert "ONTOS_INSTANCE_ID (environment variable)" in str(error)
+
+    @pytest.mark.parametrize("bad", ["bad id", "a\x00b"])
+    def test_invalid_env_id_passed_as_init_value_is_rejected_too(self, tmp_path, bad):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            make_settings(tmp_path, ONTOS_INSTANCE_ID=bad)
+
+    @pytest.mark.parametrize("bad", ["x" * 129, "line\nbreak", "bell\x07"])
+    def test_invalid_env_name_stops_startup_with_a_coded_error(self, tmp_path, monkeypatch, bad):
+        from pydantic import ValidationError
+
+        monkeypatch.setenv("ONTOS_INSTANCE_NAME", bad)
+        with pytest.raises(ValidationError) as raised:
+            make_settings(tmp_path)
+        error = raised.value.errors()[0]["ctx"]["error"]
+        assert isinstance(error, InstanceNameInvalidError)
+        assert error.code == "instance_name_invalid"
+        assert error.params == {"max_length": 128}
+        assert "ONTOS_INSTANCE_NAME (environment variable)" in str(error)
+
+    @pytest.mark.parametrize("empty", ["", "   "])
+    def test_empty_env_values_mean_unset(self, tmp_path, monkeypatch, empty):
+        monkeypatch.setenv("ONTOS_INSTANCE_ID", empty)
+        monkeypatch.setenv("ONTOS_INSTANCE_NAME", empty)
+        monkeypatch.setenv("DATABRICKS_WORKSPACE_ID", "5")
+        s = make_settings(tmp_path)
+        assert s.ONTOS_INSTANCE_ID == "5-ontos"
+        assert s.ONTOS_INSTANCE_NAME == "ontos"
+
+    def test_valid_env_values_are_stripped_and_used(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ONTOS_INSTANCE_ID", "  Prod.eu:1_a-b  ")
+        monkeypatch.setenv("ONTOS_INSTANCE_NAME", "  Ontos EU  ")
+        s = make_settings(tmp_path)
+        assert s.ONTOS_INSTANCE_ID == "Prod.eu:1_a-b"
+        assert s.ONTOS_INSTANCE_NAME == "Ontos EU"
+
+    def test_invalid_derived_id_is_rejected_with_its_source(self, tmp_path):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError) as raised:
+            make_settings(tmp_path, DATABRICKS_WORKSPACE_ID="1", DATABRICKS_APP_NAME="my app")
+        error = raised.value.errors()[0]["ctx"]["error"]
+        assert isinstance(error, InstanceIdInvalidError)
+        assert "DATABRICKS_APP_NAME" in str(error)
+
+    def test_stored_override_still_wins_over_a_valid_env_value(self, db_session, tmp_path):
+        s = make_settings(tmp_path, ONTOS_INSTANCE_ID="env-id", ONTOS_INSTANCE_NAME="Env")
+        m = SettingsManager(db=db_session, settings=s, workspace_client=None)
+        m.update_settings({"ontos_instance_id": "stored-id", "ontos_instance_name": "Stored"})
+        fresh = make_settings(tmp_path, ONTOS_INSTANCE_ID="env-id", ONTOS_INSTANCE_NAME="Env")
+        SettingsManager(db=db_session, settings=fresh, workspace_client=None)
+        assert fresh.ONTOS_INSTANCE_ID == "stored-id"
+        assert fresh.ONTOS_INSTANCE_NAME == "Stored"
+
+    def test_invalid_stored_values_are_ignored_and_the_default_stays(self, db_session, tmp_path):
+        app_settings_repo.set(db_session, "ONTOS_INSTANCE_ID", "bad id!")
+        app_settings_repo.set(db_session, "ONTOS_INSTANCE_NAME", "x" * 200)
+        s = make_settings(tmp_path, ONTOS_INSTANCE_ID="env-id")
+        SettingsManager(db=db_session, settings=s, workspace_client=None)
+        assert s.ONTOS_INSTANCE_ID == "env-id"
+        assert s.ONTOS_INSTANCE_NAME == "ontos"

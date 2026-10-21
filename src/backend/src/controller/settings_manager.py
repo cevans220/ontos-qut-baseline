@@ -2,7 +2,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import json
-import re
 import uuid
 import yaml
 
@@ -12,7 +11,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from sqlalchemy import func
 
-from src.common.api_errors import CodedValueError
+from src.common.instance_identity import (
+    INSTANCE_ID_SETTING_KEY,
+    INSTANCE_NAME_SETTING_KEY,
+    validate_instance_id,
+    validate_instance_name,
+)
 from src.common.config import Settings
 from src.common.sanitization import (
     APP_SHORT_NAME_MAX_LEN,
@@ -150,27 +154,6 @@ DEFAULT_ROLE_PERMISSIONS = {
     },
 }
 
-# Instance identity (Estate Manager federation). The id is stamped on exported entities,
-# so keep it to a conservative, URL/filename-safe alphabet.
-INSTANCE_ID_SETTING_KEY = "ONTOS_INSTANCE_ID"
-INSTANCE_NAME_SETTING_KEY = "ONTOS_INSTANCE_NAME"
-INSTANCE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
-INSTANCE_ID_MAX_LENGTH = 128
-INSTANCE_NAME_MAX_LENGTH = 128
-
-
-class InstanceIdInvalidError(CodedValueError):
-    """The instance id is not 1-``max_length`` allowed characters (UI shows it translated)."""
-
-    code = 'instance_id_invalid'
-
-
-class InstanceNameInvalidError(CodedValueError):
-    """The instance name is longer than ``max_length`` or has control characters."""
-
-    code = 'instance_name_invalid'
-
-
 class SettingsManager:
     def __init__(self, db: Session, settings: Settings, workspace_client: Optional[WorkspaceClient] = None):
         """Inject database session, settings, and optional workspace client."""
@@ -228,14 +211,7 @@ class SettingsManager:
         # Instance identity: a blank value clears the override and reverts to the
         # env/derived default; otherwise the value is validated and persisted.
         if 'ontos_instance_id' in settings:
-            raw = settings.get('ontos_instance_id')
-            value = raw.strip() if isinstance(raw, str) else ''
-            if value and not INSTANCE_ID_PATTERN.match(value):
-                raise InstanceIdInvalidError(
-                    "ontos_instance_id must be 1-128 characters: letters, digits, '.', '_', ':' or '-', "
-                    "starting with a letter or digit",
-                    max_length=INSTANCE_ID_MAX_LENGTH,
-                )
+            value = validate_instance_id(settings.get('ontos_instance_id'))
             if value:
                 app_settings_repo.set(self._db, INSTANCE_ID_SETTING_KEY, value)
                 self._settings.ONTOS_INSTANCE_ID = value
@@ -245,14 +221,7 @@ class SettingsManager:
             logger.info(f"Updated {INSTANCE_ID_SETTING_KEY} to: {self._settings.ONTOS_INSTANCE_ID}")
 
         if 'ontos_instance_name' in settings:
-            raw = settings.get('ontos_instance_name')
-            value = raw.strip() if isinstance(raw, str) else ''
-            if len(value) > INSTANCE_NAME_MAX_LENGTH or any(ord(c) < 32 for c in value):
-                raise InstanceNameInvalidError(
-                    f"ontos_instance_name must be at most {INSTANCE_NAME_MAX_LENGTH} characters "
-                    "with no control characters",
-                    max_length=INSTANCE_NAME_MAX_LENGTH,
-                )
+            value = validate_instance_name(settings.get('ontos_instance_name'))
             if value:
                 app_settings_repo.set(self._db, INSTANCE_NAME_SETTING_KEY, value)
                 self._settings.ONTOS_INSTANCE_NAME = value
@@ -289,12 +258,26 @@ class SettingsManager:
                     logger.warning(f"Invalid SCHEMA_IMPORT_CHILD_LIMIT in database: {all_settings['SCHEMA_IMPORT_CHILD_LIMIT']}")
             
             # Instance identity overrides (win over env and derived defaults)
+            # An invalid stored value (edited by hand in the database) is skipped, as with
+            # the other persisted settings, and the env/derived default stays in effect.
             if all_settings.get(INSTANCE_ID_SETTING_KEY):
-                self._settings.ONTOS_INSTANCE_ID = all_settings[INSTANCE_ID_SETTING_KEY]
-                logger.debug(f"Loaded {INSTANCE_ID_SETTING_KEY} from database")
+                try:
+                    self._settings.ONTOS_INSTANCE_ID = (
+                        validate_instance_id(all_settings[INSTANCE_ID_SETTING_KEY], 'stored')
+                        or self._settings.ONTOS_INSTANCE_ID
+                    )
+                    logger.debug(f"Loaded {INSTANCE_ID_SETTING_KEY} from database")
+                except ValueError as e:
+                    logger.error(f"Ignoring the stored {INSTANCE_ID_SETTING_KEY}: {e}")
             if all_settings.get(INSTANCE_NAME_SETTING_KEY):
-                self._settings.ONTOS_INSTANCE_NAME = all_settings[INSTANCE_NAME_SETTING_KEY]
-                logger.debug(f"Loaded {INSTANCE_NAME_SETTING_KEY} from database")
+                try:
+                    self._settings.ONTOS_INSTANCE_NAME = (
+                        validate_instance_name(all_settings[INSTANCE_NAME_SETTING_KEY], 'stored')
+                        or self._settings.ONTOS_INSTANCE_NAME
+                    )
+                    logger.debug(f"Loaded {INSTANCE_NAME_SETTING_KEY} from database")
+                except ValueError as e:
+                    logger.error(f"Ignoring the stored {INSTANCE_NAME_SETTING_KEY}: {e}")
 
             # Databricks Unity Catalog settings
             if 'DATABRICKS_CATALOG' in all_settings and all_settings['DATABRICKS_CATALOG']:
