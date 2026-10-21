@@ -3422,5 +3422,8 @@ class WorkflowExecutor:
             triggered_by=db_execution.triggered_by,
             step_executions=step_executions,
             workflow_name=workflow_name,
+            entity_type=trigger_context.entity_type if trigger_context else None,
+            entity_id=trigger_context.entity_id if trigger_context else None,
+            entity_name=trigger_context.entity_name if trigger_context else None,
         )
 
