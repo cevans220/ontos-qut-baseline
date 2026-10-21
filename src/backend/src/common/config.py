@@ -63,7 +63,8 @@ class Settings(BaseSettings):
     )  # Local dev: name of profile in ~/.databrickscfg (OAuth U2M with auto-refresh)
     DATABRICKS_HTTP_PATH: Optional[str] = None # Will be computed by validator
     DATABRICKS_APP_NAME: str = Field("ontos", env='DATABRICKS_APP_NAME')  # Name of the Databricks App
-    DATABRICKS_WORKSPACE_ID: Optional[str] = Field(None, env='DATABRICKS_WORKSPACE_ID')  # Injected by Databricks Apps; absent in local dev
+    # Injected by Databricks Apps; absent in local dev
+    DATABRICKS_WORKSPACE_ID: Optional[str] = Field(None, env='DATABRICKS_WORKSPACE_ID')
 
     # Instance identity (federation / Estate Manager). When unset, both values are derived
     # from DATABRICKS_WORKSPACE_ID + DATABRICKS_APP_NAME (see compute_instance_identity).

@@ -228,7 +228,9 @@ class SettingsManager:
             else:
                 app_settings_repo.delete(self._db, INSTANCE_NAME_SETTING_KEY)
                 self._settings.ONTOS_INSTANCE_NAME = self._settings.instance_name_default
-            logger.info(f"Updated {INSTANCE_NAME_SETTING_KEY} to: {self._settings.ONTOS_INSTANCE_NAME}")
+            logger.info(
+                f"Updated {INSTANCE_NAME_SETTING_KEY} to: {self._settings.ONTOS_INSTANCE_NAME}"
+            )
 
     def _load_persisted_settings(self) -> None:
         """Load persisted settings from database and apply to in-memory Settings."""

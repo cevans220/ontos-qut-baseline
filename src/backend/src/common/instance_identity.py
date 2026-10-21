@@ -36,7 +36,8 @@ def validate_instance_id(raw: object, source: str = 'settings') -> str:
 
     Args:
         raw: The candidate value.
-        source: Where it came from (``settings``, ``env``, ``stored`` or ``default``), for the message.
+        source: Where it came from (``settings``, ``env``, ``stored`` or ``default``), for the
+            message.
 
     Raises:
         InstanceIdInvalidError: (a ``ValueError``) If a non-empty value has characters
@@ -93,5 +94,7 @@ def resolve_instance_identity(
     instance_id = validate_instance_id(env_id, 'env') or validate_instance_id(
         f"{ws}-{app}" if ws else app, 'default'
     )
-    instance_name = validate_instance_name(env_name, 'env') or validate_instance_name(app, 'default')
+    instance_name = (
+        validate_instance_name(env_name, 'env') or validate_instance_name(app, 'default')
+    )
     return instance_id, instance_name

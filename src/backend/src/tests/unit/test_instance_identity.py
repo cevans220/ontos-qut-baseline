@@ -36,7 +36,9 @@ def _clean_env(monkeypatch):
 
 class TestDefaults:
     def test_derived_from_workspace_id_and_app_name(self, tmp_path):
-        s = make_settings(tmp_path, DATABRICKS_WORKSPACE_ID="123456", DATABRICKS_APP_NAME="ontos-prod")
+        s = make_settings(
+            tmp_path, DATABRICKS_WORKSPACE_ID="123456", DATABRICKS_APP_NAME="ontos-prod"
+        )
         assert s.ONTOS_INSTANCE_ID == "123456-ontos-prod"
         assert s.ONTOS_INSTANCE_NAME == "ontos-prod"
 
@@ -96,7 +98,9 @@ class TestManagerReadUpdate:
         assert data["ontos_instance_name_default"] == "app"
 
     def test_update_persists_and_applies(self, manager, db_session, settings):
-        manager.update_settings({"ontos_instance_id": " my.id-1 ", "ontos_instance_name": "My Ontos"})
+        manager.update_settings(
+            {"ontos_instance_id": " my.id-1 ", "ontos_instance_name": "My Ontos"}
+        )
         assert settings.ONTOS_INSTANCE_ID == "my.id-1"
         assert settings.ONTOS_INSTANCE_NAME == "My Ontos"
         assert app_settings_repo.get_by_key(db_session, "ONTOS_INSTANCE_ID") == "my.id-1"
@@ -203,7 +207,10 @@ class TestEnvironmentSourcesAreValidated:
 
     @pytest.mark.parametrize(
         "bad",
-        ["has space", "-leading", ".dot", "a/b", "x" * 129, "ünï", "tab\tid", "new\nline", "mid\nend"],
+        [
+            "has space", "-leading", ".dot", "a/b", "x" * 129, "ünï", "tab\tid", "new\nline",
+            "mid\nend",
+        ],
     )
     def test_invalid_env_id_stops_startup_with_a_coded_error(self, tmp_path, monkeypatch, bad):
         from pydantic import ValidationError
