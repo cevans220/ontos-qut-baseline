@@ -456,7 +456,7 @@
     "noEntities": "Rien à sélectionner.",
     "listFailed": "Impossible de charger la liste ; saisissez l'identifiant.",
     "entityId": "Identifiant de l'entité",
-    "entityIdPlaceholder": "p. ex. main.sales.orders",
+    "entityIdPlaceholder": "par ex. main.sales.orders",
     "entityIdHelp": "L'identifiant ou le nom complet de l'entité pour laquelle exécuter le workflow.",
     "run": "Exécuter",
     "failed": "Le workflow n'a pas pu être démarré.",

@@ -453,15 +453,15 @@
     "entity": "Entität",
     "selectEntity": "Entität auswählen",
     "loading": "Wird geladen...",
-    "noEntities": "Nichts zur Auswahl.",
-    "listFailed": "Die Liste konnte nicht geladen werden; geben Sie die ID ein.",
+    "noEntities": "Keine Einträge zur Auswahl vorhanden.",
+    "listFailed": "Die Liste konnte nicht geladen werden. Geben Sie stattdessen die ID ein.",
     "entityId": "Entitäts-ID",
     "entityIdPlaceholder": "z. B. main.sales.orders",
     "entityIdHelp": "Die ID oder der vollständige Name der Entität, für die der Workflow laufen soll.",
     "run": "Ausführen",
     "failed": "Der Workflow konnte nicht gestartet werden.",
     "resultStatus": "Ergebnis",
-    "viewExecution": "Ausführung ansehen"
+    "viewExecution": "Ausführung anzeigen"
   },
   "templateVars": {
     "copiedToClipboard": "{{placeholder}} in die Zwischenablage kopiert.",
