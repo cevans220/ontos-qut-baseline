@@ -53,7 +53,11 @@ export enum AssetType {
 
     // Term-mapping suggestions (one ReviewedAsset == one MappingSuggestionDb)
     CONCEPT_MAPPING_SUGGESTION = "concept_mapping_suggestion",
-    
+
+    // Knowledge system assets
+    KNOWLEDGE_CONCEPT = "knowledge_concept",
+    KNOWLEDGE_COLLECTION = "knowledge_collection",
+
     // Generic/external
     EXTERNAL = "external",
     OTHER = "other",

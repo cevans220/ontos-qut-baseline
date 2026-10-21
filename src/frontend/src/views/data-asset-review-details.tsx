@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ColumnDef } from "@tanstack/react-table";
 import { Loader2, AlertCircle, ArrowLeft, X, ArrowUpDown, Pencil, Check, Copy } from 'lucide-react';
@@ -12,6 +12,7 @@ import {
     DataAssetReviewRequestUpdate,
     DataAssetReviewRequestUpdateStatus
 } from '@/types/data-asset-review';
+import { appEntityAssetLink } from '@/lib/app-entity-asset';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -224,7 +225,12 @@ export default function DataAssetReviewDetails() {
                     <ArrowUpDown className="ml-2 h-4 w-4" />
                 </Button>
             ),
-            cell: ({ row }) => <span className="font-mono text-xs">{row.original.asset_fqn}</span>,
+            cell: ({ row }) => {
+                const entityLink = appEntityAssetLink(row.original);
+                return entityLink
+                    ? <Link to={entityLink} className="font-mono text-xs underline">{row.original.asset_fqn}</Link>
+                    : <span className="font-mono text-xs">{row.original.asset_fqn}</span>;
+            },
         },
         {
             accessorKey: "asset_type",

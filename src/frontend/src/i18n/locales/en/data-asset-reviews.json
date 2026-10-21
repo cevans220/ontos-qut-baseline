@@ -120,6 +120,8 @@
     "fqnLabel": "FQN:",
     "typeLabel": "Type:",
     "contentPreview": "Content Preview / Definition",
+    "openDataProduct": "Open data product",
+    "openDataContract": "Open data contract",
     "yourReview": "Your Review",
     "statusLabel": "Status *",
     "statusPlaceholder": "Set status",
