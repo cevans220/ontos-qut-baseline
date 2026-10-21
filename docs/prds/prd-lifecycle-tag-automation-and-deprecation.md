@@ -23,7 +23,7 @@ Ship a **standard deprecation lifecycle** for Data Products and Data Contracts, 
 1. **Deprecation vocabulary**: `deprecation_reason`, `sunset_date`, `replacement_product_id` (contracts: `replacement_contract_id`) and `deprecated_at`, captured by a deprecation dialog and required when moving to `deprecated`. Stored as first-class columns (see *Data model*).
 2. **Lifecycle tag in Unity Catalog via `uc_tag_sync`**: a default `tag_sync_configs` entry that writes the lifecycle status to the tables behind output ports (`ontos_lifecycle_status`), with a defined rule for tables used by several products, and following the governed-tag conventions of #737 where governed tags are enabled. No new delivery mechanism.
 3. **Timely propagation**: after a transition into or out of `deprecated` / `retired`, Ontos requests an on-demand `uc_tag_sync` run through `JobsManager.run_job` when the job is installed; otherwise the next scheduled run applies the tag. Failures are retried, recorded and shown to the owner.
-4. **Approvals and notices**: deprecating a **certified** product or contract needs an approved status change request, enforced in the transition code. The guard is on by default and can be switched off per domain or product (`disabled_for`, see Approvals). The built-in subscriber notice carries the reason, sunset date and replacement; an owner notice and a sunset reminder are shipped as opt-in default workflows.
+4. **Approvals and notices**: deprecating a **certified** product or contract needs an approved status change request, enforced in the transition code. The guard is on by default and can be switched off per domain or product (`disabled_for`, see Approvals). The built-in subscriber notice carries the reason, sunset date and replacement; an owner notice and a sunset reminder are shipped as opt-in default workflows. Deleting a product with subscribers also notifies them (see *Deletion notice*).
 5. **Subscription guidance**: subscribing to a `deprecated` or `retired` product stays refused (as today), and the error and the product page point to the replacement and sunset date.
 6. **Evidence**: every deprecation and retirement is audited with reason, actor, sunset date and replacement; when the Signed Data Product Manifest is enabled, it is recorded as a `deprecated` / `retired` attestation.
 
@@ -44,11 +44,12 @@ Ship a **standard deprecation lifecycle** for Data Products and Data Contracts, 
 8. As a Data Consumer, I want to be reminded before the sunset date, so that I do not miss the deadline.
 9. As a Data Consumer, I want a refused subscription to a deprecated or retired product to tell me the sunset date and point me to its replacement, so that I do not build on something that is going away.
 10. As a Data Consumer, I want the product page of a deprecated product to show the reason, sunset date and replacement.
+11. As a Data Consumer (or the owner of a group or service principal subscribed on its behalf), I want to be told when a product I subscribe to is deleted, by whom and what replaces it, so that I do not find out when a pipeline breaks.
 
 ### Governance / audit stories
 
-11. As an Auditor, I want each deprecation and retirement to record who, when, why, the sunset date and the replacement, so that lifecycle decisions are traceable.
-12. As an Auditor, I want failed tag propagations and tag conflicts on shared tables to be recorded, so that I can tell when Unity Catalog did not reflect Ontos.
+12. As an Auditor, I want each deprecation and retirement to record who, when, why, the sunset date and the replacement, so that lifecycle decisions are traceable.
+13. As an Auditor, I want failed tag propagations and tag conflicts on shared tables to be recorded, so that I can tell when Unity Catalog did not reflect Ontos.
 
 ## Implementation Decisions
 
@@ -130,6 +131,18 @@ Products and contracts share `EntityStatus` (`models/lifecycle.py`). The transit
 - **Sunset reminder** (daily): notify subscribers of products whose `sunset_date` is within a configurable window (default 14 days). `scheduled` process workflows have no runner yet (#941; `JobsManager` schedules Databricks jobs only, and `AccessGrantsManager.check_and_process_expirations`, which fires `on_expiring`, isn't called), so the reminder needs one: a small in-app scheduler or a Databricks job.
 - The owner notice and the reminder are shipped as default workflows (editable, duplicable, not deletable), consistent with the default workflow catalog in `src/docs/USER-GUIDE.md`. Like other event-driven defaults (#1016) they are created inactive; an admin enables them. Only the certified guard and the subscriber notice are on out of the box.
 
+### Deletion notice
+
+Today, deleting a data product removes its `data_product_subscriptions` rows silently: since #739 / #1146 the foreign key's `ON DELETE CASCADE` does it, and nobody is told. This is part of the lifecycle's subscriber notification.
+
+- **Who.** Every subscriber of the product, read from `data_product_subscriptions` before the delete. A row with `on_behalf_of_type` / `on_behalf_of_value` (`group`, `service_principal`) is notified through its `subscriber_email`, the person who requested it, and the text names the group or service principal it was requested for (`on_behalf_of_value`); the implementation checks how `notify_subscribers` treats these rows today and aligns both notices. `user` rows notify `subscriber_email`. A person with several rows gets one notice. The user who deletes is not notified.
+- **When.** After the delete commits, so a rolled-back delete (as in #739) notifies nobody. The recipients are collected before the delete, since the cascade removes the rows. A failed notification is logged and does not fail the delete.
+- **Content.** Product name and version, who deleted it, the time, and the replacement (id and name, with a link) when `replacement_product_id` is set. The text is built from `data.i18n` keys with parameters (#1074), so each recipient reads it in their language. Name and version are captured before the delete, since the product no longer exists when the notice is read.
+- **Deprecated and active products.** The same notice is sent in both cases. For a `deprecated` or `retired` product, subscribers already got the deprecation notice, and the deletion notice says it is now gone; the `sunset_date` and replacement are shown if set. For an `active` product there was no warning, so the text says so plainly and carries no sunset date. Deletion does not clear the audit record of the earlier deprecation.
+- **Acceptance.** Deleting a product with three subscribers (one user, one group, one service principal) produces three notices with the product name and version, the deleting user, and the replacement when set; a delete that fails produces none; a product with no subscribers produces none and the delete still returns 204; the notice exists in every locale.
+
+Open question for maintainers: should deleting a product that has active subscribers require it to be `deprecated` (or `retired`) first, so that subscribers always get the deprecation notice and a sunset date before the product disappears? This PRD does not assume it: the notice above works either way, and a stricter rule would block admins from removing a product created by mistake.
+
 ### Subscription guidance
 
 - `DataProductsManager.subscribe` refuses products that are not `active`. For `deprecated` and `retired` products the error is sent with a code and parameters (sunset date, replacement id and name) and the English text as fallback.
@@ -164,6 +177,7 @@ The Compliance DSL tag actions, listed as a prerequisite in the first version of
 | Lifecycle tag | Unit | `build_desired_for_dataset` produces `ontos_lifecycle_status=<status>` from the default config (stubbed pyspark, following the `uc_tag_sync` tests of #737); two products on one table, one `active` and one `deprecated`: the table gets `active` and a conflict is recorded, in either row order; both `deprecated`: `deprecated`; one `deprecated` and one `retired`: `deprecated`; an output port without a contract is tagged; a transient error is retried, a permission error is not; a failure is recorded in `uc_tag_sync_results` and the job exits non-zero |
 | Propagation | Integration | The transition hook requests one debounced job run; no run requested when the job is not installed; the owner gets `lifecycle_tag_failed` after a failed on-demand run |
 | Notices | Integration | Subscriber and owner notices carry reason, sunset date and replacement with `data.i18n` keys; the sunset reminder selects products inside the window |
+| Deletion notice | Integration | Deleting a product notifies each subscriber once, including `group`, `service_principal` and `user` rows, with name, version, deleter and replacement and `data.i18n` keys; a failed delete notifies nobody; a product without subscribers deletes with 204; a failing notification does not fail the delete; deleted `deprecated` and `active` products give the matching text |
 | Subscription guidance | Integration (`TestClient`) | Deprecated and retired → 409 with code, sunset date and replacement |
 | Migration | Integration | `alembic upgrade head` succeeds; single head |
 
@@ -218,6 +232,7 @@ E2E is skipped in CI, so each implementation PR documents this path on a local i
 ### Open questions
 
 - Should subscribing to a deprecated product be allowed with an explicit acknowledgement (today it is refused)?
+- Should deleting a product with active subscribers require it to be `deprecated` or `retired` first (see *Deletion notice*)?
 - Should retirement automatically unpublish the product (`publication_scope = none`)?
 
 Settled in review of this PRD: lifecycle fields are columns, not Compliance Template fields (#731, Lars to confirm); the key is `ontos_lifecycle_status`, governed when governed tags are enabled (#737); the certified guard is enforced out of the box, applies to contracts, and can be switched off per domain or entity like any status gate (aligned with #1114).
