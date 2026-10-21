@@ -883,6 +883,213 @@ def reconcile_tags(ws: WorkspaceClient, spark: SparkSession, object_type: str, o
     return (updated, removed, errors)
 
 
+# Delivery state storage (tags delivered by this job) ----
+
+# Tags this job delivered, by UC object:
+# object type -> object FQN -> tag key -> tag value.
+DeliveryState = Dict[str, Dict[str, Dict[str, Optional[str]]]]
+
+DELIVERY_OBJECT_TYPES = ("TABLE", "COLUMN", "SCHEMA", "CATALOG")
+
+
+def read_delivery_state(engine: Engine) -> Optional[DeliveryState]:
+    """Read the tags the previous run delivered from app_settings.
+
+    Returns None when the state can't be read, so the caller can tell "nothing
+    was delivered" (an empty dict) apart from "unknown".
+    """
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT value FROM app_settings WHERE key = "
+                    "'uc_tag_sync_delivery_state'"
+                )
+            ).first()
+            if not row or not row[0]:
+                return {}
+            data = json.loads(row[0])
+            return data.get("objects", {})
+    except Exception as e:
+        msg = f"Failed to read UC tag delivery state: {e}"
+        print(f"[WARN] {msg}")
+        return None
+
+
+def save_delivery_state(
+    engine: Engine, state: DeliveryState, prefix: str, replace: bool = True
+) -> Optional[str]:
+    """Store what this run delivered in app_settings, for the next run.
+
+    Returns an error message on failure.
+
+    prefix is stored to detect prefix changes between runs.
+    """
+    payload = {"version": 1, "prefix": prefix, "objects": state}
+    try:
+        with engine.begin() as conn:
+            # Use CURRENT_TIMESTAMP for better database compatibility
+            conn.execute(
+                text(
+                    "INSERT INTO app_settings (key, value, updated_at) "
+                    "VALUES (:key, :value, CURRENT_TIMESTAMP) "
+                    "ON CONFLICT (key) DO UPDATE "
+                    "SET value = EXCLUDED.value, "
+                    "updated_at = CURRENT_TIMESTAMP"
+                ),
+                {"key": "uc_tag_sync_delivery_state", "value": json.dumps(payload)},
+            )
+    except Exception as e:
+        msg = f"Failed to save UC tag delivery state: {e}"
+        print(f"[WARN] {msg}")
+        return msg
+    return None
+
+
+def remove_delivered_tags(
+    spark: SparkSession,
+    object_type: str,
+    object_name: str,
+    delivered: Dict[str, Optional[str]],
+    prefix: str,
+    dry_run: bool = False,
+) -> Tuple[int, List[str], Dict[str, Optional[str]]]:
+    """Remove tags this job delivered from an object that no longer has a link.
+
+    Only the delivered keys are removed; other tags on the object stay. Returns
+    (removed, errors, still_delivered): still_delivered holds the keys that
+    couldn't be checked or removed, so the next run tries again.
+    """
+    try:
+        existing = get_existing_prefixed_tags(spark, object_type, object_name, prefix)
+    except Exception as e:
+        msg = f"[WARN] Failed to read tags of {object_type} {object_name}: {e}"
+        print(msg)
+        return (0, [], dict(delivered))
+    to_remove = [k for k in delivered if k in existing]
+    if dry_run:
+        if to_remove:
+            print(f"[DRY-RUN] {object_type} {object_name} remove={to_remove}")
+        return (0, [], {})
+
+    removed = 0
+    errors: List[str] = []
+    still_delivered: Dict[str, Optional[str]] = {}
+    for k in to_remove:
+        try:
+            unassign_tag(spark, object_type, object_name, k)
+            removed += 1
+        except Exception as e:
+            msg = f"Failed to remove tag {k} from {object_type} {object_name}: {e}"
+            print(f"[WARN] {msg}")
+            errors.append(msg)
+            still_delivered[k] = delivered[k]
+    return (removed, errors, still_delivered)
+
+
+@dataclass
+class SyncResult:
+    updated: int = 0
+    removed: int = 0
+    errors: List[str] = field(default_factory=list)
+    delivered: DeliveryState = field(
+        default_factory=lambda: {t: {} for t in DELIVERY_OBJECT_TYPES}
+    )
+
+
+def sync_tags(
+    ws: WorkspaceClient,
+    spark: SparkSession,
+    datasets: List[DatasetTagInfo],
+    direct: "DirectLinkInfos",
+    tag_sync_configs: List[Dict[str, Any]],
+    prefix: str,
+    previous: Optional[DeliveryState],
+    dry_run: bool = False,
+    verbose: bool = False,
+) -> SyncResult:
+    """Reconcile UC tags for every linked object, then clean up lost links.
+
+    previous is what the last run delivered. Objects in it that have no desired
+    tags this run get the delivered keys removed. Pass None to skip that cleanup
+    (state unknown, or a partial --limit read where a missing object doesn't
+    mean unlinked).
+    """
+    result = SyncResult()
+
+    def apply(
+        object_type: str, fqn: str, desired: Dict[str, Optional[str]]
+    ) -> Tuple[int, int]:
+        u, r, errs = reconcile_tags(ws, spark, object_type, fqn, desired, prefix,
+                                    dry_run=dry_run)
+        result.updated += u
+        result.removed += r
+        result.errors.extend(errs)
+        result.delivered[object_type].setdefault(fqn, {}).update(desired)
+        return u, r
+
+    # Dataset-level
+    for d in datasets:
+        desired = build_desired_for_dataset(d, tag_sync_configs)
+        if not desired:
+            continue
+        u, r = apply("TABLE", d.fqn, desired)
+        if verbose:
+            print(f"Dataset {d.fqn}: updated={u} removed={r}")
+
+    # Aggregate parent desired values
+    schema_desired, catalog_desired = aggregate_parent_desired(
+        datasets,
+        tag_sync_configs,
+        direct_schema_desired={
+            f: build_desired_for_links(l, tag_sync_configs)
+            for f, l in direct.schemas.items()
+        },
+        direct_catalog_desired={
+            f: build_desired_for_links(l, tag_sync_configs)
+            for f, l in direct.catalogs.items()
+        },
+    )
+
+    # Column-level (concepts linked directly to a UC column)
+    for col in direct.columns:
+        desired = build_desired_for_links(col.semantic_links, tag_sync_configs)
+        if not desired:
+            continue
+        u, r = apply("COLUMN", col.fqn, desired)
+        if verbose:
+            print(f"Column {col.fqn}: updated={u} removed={r}")
+
+    # Schema-level
+    for schema_fqn, desired in schema_desired.items():
+        if desired:
+            apply("SCHEMA", schema_fqn, desired)
+
+    # Catalog-level
+    for catalog_name, desired in catalog_desired.items():
+        if desired:
+            apply("CATALOG", catalog_name, desired)
+
+    # Objects that had tags delivered last run but have no link now: nothing
+    # above reconciles them, so remove what this job delivered there.
+    if previous is None:
+        return result
+    for object_type in DELIVERY_OBJECT_TYPES:
+        for fqn, tags in previous.get(object_type, {}).items():
+            if fqn in result.delivered[object_type]:
+                continue
+            r, errs, still_delivered = remove_delivered_tags(
+                spark, object_type, fqn, tags, prefix, dry_run=dry_run
+            )
+            result.removed += r
+            result.errors.extend(errs)
+            if still_delivered:
+                result.delivered[object_type][fqn] = still_delivered
+            if verbose:
+                print(f"{object_type} {fqn} (no link left): removed={r}")
+    return result
+
+
 def aggregate_parent_desired(
     dataset_items: List[DatasetTagInfo],
     tag_sync_configs: List[Dict[str, Any]],
@@ -1053,6 +1260,7 @@ def main() -> None:
     parser.add_argument("--default_schema", type=str, default="")
     parser.add_argument("--limit", type=str, default="")
     parser.add_argument("--verbose", type=str, default="false")
+    parser.add_argument("--cleanup_legacy_tags", type=str, default="false")
     parser.add_argument("--lakebase_instance_name", type=str, required=True)
     parser.add_argument("--postgres_host", type=str, required=True)
     parser.add_argument("--postgres_db", type=str, required=True)
@@ -1066,24 +1274,20 @@ def main() -> None:
     # Parse tag sync configs
     tag_sync_configs = json.loads(args.tag_sync_configs) if args.tag_sync_configs else []
 
-    # Compute tag prefix for filtering existing tags (find common prefix from all tag keys)
-    # Fall back to legacy prefix parameter if no configs
+    # Compute tag prefix for filtering existing tags
     tag_prefixes = set()
     for config in tag_sync_configs:
         if config.get("enabled", True):
             key_format = config.get("tag_key_format", "")
-            # Extract prefix before first variable placeholder
             if "{" in key_format:
                 tag_prefixes.add(key_format.split("{")[0])
             else:
                 tag_prefixes.add(key_format)
 
-    # Use common prefix if all start with same prefix, otherwise use legacy prefix
     if tag_prefixes:
         common_prefix = ""
         sorted_prefixes = sorted(tag_prefixes)
         if len(sorted_prefixes) > 0:
-            # Find longest common prefix
             first = sorted_prefixes[0]
             last = sorted_prefixes[-1]
             for i, char in enumerate(first):
@@ -1100,23 +1304,26 @@ def main() -> None:
     default_schema = args.default_schema if args.default_schema else None
     limit = int(args.limit) if args.limit and args.limit.isdigit() else None
     verbose = args.verbose.lower() in ("true", "1", "yes")
+    cleanup_legacy = args.cleanup_legacy_tags.lower() in ("true", "1", "yes")
 
     print("=" * 80)
     print("UC Tag Sync workflow started")
     print("=" * 80)
     print(f"\nJob Parameters:")
-    print(f"  Tag sync configs: {len(tag_sync_configs)} entity types configured")
+    print(f"  Tag sync configs: {len(tag_sync_configs)} entity types")
     print(f"  Computed prefix: {prefix}")
     print(f"  Dry run: {dry_run}")
     print(f"  Default catalog: {default_catalog}")
     print(f"  Default schema: {default_schema}")
     print(f"  Limit: {limit}")
     print(f"  Verbose: {verbose}")
+    print(f"  Cleanup legacy tags: {cleanup_legacy}")
     print(f"  Lakebase instance name: {args.lakebase_instance_name}")
 
     # Initialize Workspace Client (needed for OAuth authentication)
     print("\nInitializing Databricks Workspace Client...")
-    ws = WorkspaceClient(product=args.product_name, product_version=args.product_version)
+    ws = WorkspaceClient(product=args.product_name,
+                         product_version=args.product_version)
     print("✓ Workspace client initialized")
 
     # Connect to database using OAuth
@@ -1139,12 +1346,14 @@ def main() -> None:
     # Read from both data sources: contracts and assets
     print("\nReading contract-based metadata...")
     contract_rows = read_contracts_and_links(engine, limit=limit)
-    contract_datasets = build_dataset_tag_infos(contract_rows, default_catalog, default_schema)
+    contract_datasets = build_dataset_tag_infos(contract_rows, default_catalog,
+                                                default_schema)
     print(f"  Found {len(contract_datasets)} datasets from contracts")
 
     print("Reading asset-based metadata...")
     asset_rows = read_assets_and_links(engine, limit=limit)
-    asset_datasets = build_asset_tag_infos(asset_rows, default_catalog, default_schema)
+    asset_datasets = build_asset_tag_infos(asset_rows, default_catalog,
+                                           default_schema)
     print(f"  Found {len(asset_datasets)} datasets from assets")
 
     print("Reading direct UC links (catalog/schema/table/column)...")
@@ -1152,72 +1361,50 @@ def main() -> None:
     direct = build_direct_link_infos(direct_rows, default_catalog, default_schema)
     print(
         f"  Found {len(direct.tables)} tables, {len(direct.columns)} columns, "
-        f"{len(direct.schemas)} schemas, {len(direct.catalogs)} catalogs from direct links"
+        f"{len(direct.schemas)} schemas, {len(direct.catalogs)} catalogs from "
+        f"direct links"
     )
 
-    datasets = merge_dataset_tag_infos(contract_datasets, asset_datasets, direct.tables)
+    datasets = merge_dataset_tag_infos(contract_datasets, asset_datasets,
+                                       direct.tables)
 
-    updated_total = removed_total = 0
-    all_errors: List[str] = []
+    print("\nReading the previous UC tag delivery state...")
+    previous = read_delivery_state(engine)
+    is_partial_read = limit is not None
+    if previous is None:
+        msg = "  Unavailable: tags on objects that lost their last link are not"
+        print(f"{msg} removed this run")
+    elif is_partial_read:
+        print("  --limit is set: objects without a link are not cleaned up")
+    else:
+        count = sum(len(o) for o in previous.values())
+        print(f"  {count} object(s) had tags delivered last run")
 
     print(f"\nProcessing {len(datasets)} datasets (merged)...")
-
-    # Dataset-level
-    for d in datasets:
-        desired = build_desired_for_dataset(d, tag_sync_configs)
-        if not desired:
-            continue
-        u, r, errs = reconcile_tags(ws, spark, "TABLE", d.fqn, desired, prefix, dry_run=dry_run)
-        updated_total += u
-        removed_total += r
-        all_errors.extend(errs)
-        if verbose:
-            print(f"Dataset {d.fqn}: updated={u} removed={r}")
-
-    # Aggregate parent desired values
-    schema_desired, catalog_desired = aggregate_parent_desired(
+    result = sync_tags(
+        ws,
+        spark,
         datasets,
+        direct,
         tag_sync_configs,
-        direct_schema_desired={
-            f: build_desired_for_links(l, tag_sync_configs) for f, l in direct.schemas.items()
-        },
-        direct_catalog_desired={
-            f: build_desired_for_links(l, tag_sync_configs) for f, l in direct.catalogs.items()
-        },
+        prefix,
+        previous=None if is_partial_read else previous,
+        dry_run=dry_run,
+        verbose=verbose,
     )
+    updated_total, removed_total = result.updated, result.removed
+    all_errors: List[str] = list(result.errors)
 
-    # Column-level (concepts linked directly to a UC column)
-    for col in direct.columns:
-        desired = build_desired_for_links(col.semantic_links, tag_sync_configs)
-        if not desired:
-            continue
-        u, r, errs = reconcile_tags(ws, spark, "COLUMN", col.fqn, desired, prefix, dry_run=dry_run)
-        updated_total += u
-        removed_total += r
-        all_errors.extend(errs)
-        if verbose:
-            print(f"Column {col.fqn}: updated={u} removed={r}")
-
-    # Schema-level
-    for schema_fqn, desired in schema_desired.items():
-        if not desired:
-            continue
-        u, r, errs = reconcile_tags(ws, spark, "SCHEMA", schema_fqn, desired, prefix, dry_run=dry_run)
-        updated_total += u
-        removed_total += r
-        all_errors.extend(errs)
-
-    # Catalog-level
-    for catalog_name, desired in catalog_desired.items():
-        if not desired:
-            continue
-        u, r, errs = reconcile_tags(ws, spark, "CATALOG", catalog_name, desired, prefix, dry_run=dry_run)
-        updated_total += u
-        removed_total += r
-        all_errors.extend(errs)
+    if not dry_run:
+        save_error = save_delivery_state(engine, result.delivered, prefix,
+                                         replace=previous is not None and
+                                         not is_partial_read)
+        if save_error:
+            all_errors.append(save_error)
 
     print("\n" + "=" * 80)
-    print(f"Summary: updated={updated_total} removed={removed_total} errors={len(all_errors)}")
+    msg = f"Summary: updated={updated_total} removed={removed_total} errors="
+    print(f"{msg}{len(all_errors)}")
 
     if all_errors:
         print(f"\n{len(all_errors)} error(s) occurred during tag sync:")
