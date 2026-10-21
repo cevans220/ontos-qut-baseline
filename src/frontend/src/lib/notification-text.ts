@@ -89,3 +89,21 @@ export function notificationDescription(notification: NotificationText, t: TFunc
   }
   return translate(t, i18n?.description, fallback, i18n?.params);
 }
+
+/**
+ * The approval notification's action payload for the approval dialog, with its
+ * `workflow_message` in the user's language when the notification carries the
+ * key of a shipped message. Otherwise the payload is returned as stored.
+ */
+export function approvalActionPayload(
+  notification: NotificationText & { action_payload?: Record<string, any> | null },
+  t: TFunction,
+): Record<string, any> | undefined {
+  const payload = notification.action_payload ?? undefined;
+  const lines = notificationI18n(notification)?.descriptionLines;
+  const message = Array.isArray(lines)
+    ? lines.find(line => line?.key?.endsWith('.approval.lines.workflowMessage'))?.params?.message
+    : undefined;
+  if (!payload || !isI18nText(message) || !message.key) return payload;
+  return { ...payload, workflow_message: translateText(t, message) };
+}

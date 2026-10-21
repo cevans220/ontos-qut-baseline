@@ -5,7 +5,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import i18n from '@/i18n/config';
-import { notificationDescription, notificationTitle } from './notification-text';
+import { approvalActionPayload, notificationDescription, notificationTitle } from './notification-text';
 
 const t = i18n.t.bind(i18n);
 
@@ -156,5 +156,54 @@ describe('entity types in default workflow notifications', () => {
       data: { i18n: { ...validationFailed.data.i18n, params: { entity_type: 'gizmo', entity_name: 'x' } } },
     };
     expect(notificationDescription(unknown, t)).toBe("Validation failed for gizmo 'x'");
+  });
+});
+
+describe('approval dialog payload', () => {
+  afterEach(() => {
+    i18n.changeLanguage('en');
+  });
+
+  const message = (extra: Record<string, unknown> = {}) => ({
+    title: 'Approval Required',
+    description: '',
+    action_payload: {
+      execution_id: 'x1',
+      workflow_message: "Please review the certification request for data_product 'Orders'.",
+    },
+    data: {
+      i18n: {
+        title: 'notifications:workflowDefaults.approval.title',
+        descriptionLines: [{
+          key: 'notifications:workflowDefaults.approval.lines.workflowMessage',
+          text: 'Workflow message: x',
+          params: {
+            message: {
+              key: 'notifications:workflowDefaults.approvalMessages.certification-request-review.approval-gate',
+              text: "Please review the certification request for data_product 'Orders'.",
+              params: { entity_type: 'data_product', entity_name: 'Orders' },
+              ...extra,
+            },
+          },
+        }],
+      },
+    },
+  });
+
+  it('shows the shipped message with the entity type label', async () => {
+    expect(approvalActionPayload(message(), t)?.workflow_message).toBe(
+      "Please review the certification request for Data Product 'Orders'.",
+    );
+    await i18n.changeLanguage('pt');
+    expect(approvalActionPayload(message(), t)?.workflow_message).toBe(
+      "Revise a solicitação de certificação de Produto de dados 'Orders'.",
+    );
+  });
+
+  it('keeps the stored message when the notification has no key for it', () => {
+    const edited = { ...message(), data: { i18n: { title: 'notifications:workflowDefaults.approval.title' } } };
+    expect(approvalActionPayload(edited, t)).toBe(edited.action_payload);
+    const plain = { title: 'Approval Required', description: '', action_payload: { execution_id: 'x1' } };
+    expect(approvalActionPayload(plain, t)).toBe(plain.action_payload);
   });
 });
