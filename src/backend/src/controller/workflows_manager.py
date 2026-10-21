@@ -29,6 +29,7 @@ from src.models.process_workflows import (
     ScopeType,
     WorkflowType,
     StepPosition,
+    CodedMessage,
     WorkflowValidationResult,
     StepTypeSchema,
     TemplateVarDescriptor,
@@ -37,6 +38,7 @@ from src.models.process_workflows import (
 )
 from src.repositories.process_workflows_repository import process_workflow_repo
 from src.common.logging import get_logger
+from src.common.workflow_step_config import check_condition, check_script_config
 
 logger = get_logger(__name__)
 
@@ -44,21 +46,16 @@ logger = get_logger(__name__)
 _DEFAULTS_LOCK_KEY = 7_340_001_016
 
 
-class GateExemptionMessage(str):
-    """A ``disabled_for`` validation error: the English text, with a code and params.
+def _missing(step: WorkflowStepCreate, text: str, fields: List[str]) -> CodedMessage:
+    """A step config error for required settings, with the step and fields as params."""
+    return CodedMessage(f"Step '{step.step_id}': {text}", 'step_config_missing',
+                        step=step.step_id, fields=fields)
 
-    It is a ``str``, so ``WorkflowValidationResult.errors`` keeps its plain
-    list; a client that reads ``code`` / ``params`` can show it in the
-    user's language.
-    """
-    code: str
-    params: Dict[str, Any]
 
-    def __new__(cls, message: str, code: str, **params: Any) -> 'GateExemptionMessage':
-        obj = super().__new__(cls, message)
-        obj.code = code
-        obj.params = params
-        return obj
+def _step_issue(step: WorkflowStepCreate, issue: Dict[str, Any]) -> CodedMessage:
+    """A Conditional / Script check's issue (workflow_step_config), keeping its code."""
+    return CodedMessage(f"Step '{step.step_id}': {issue['message']}", issue['code'],
+                        **{**(issue.get('params') or {}), 'step': step.step_id})
 
 
 class WorkflowsManager:
@@ -426,26 +423,28 @@ class WorkflowsManager:
         """Validate a workflow definition."""
         errors = []
         warnings = []
-        
+
         # Check for required fields
         if not workflow.name or not workflow.name.strip():
-            errors.append("Workflow name is required")
-        
+            errors.append(CodedMessage("Workflow name is required", 'workflow_name_required'))
+
         if not workflow.steps:
-            errors.append("Workflow must have at least one step")
-        
+            errors.append(CodedMessage("Workflow must have at least one step", 'workflow_steps_required'))
+
         # Check for duplicate step IDs
         step_ids = [s.step_id for s in workflow.steps]
         if len(step_ids) != len(set(step_ids)):
-            errors.append("Duplicate step IDs found")
-        
+            errors.append(CodedMessage("Duplicate step IDs found", 'duplicate_step_ids'))
+
         # Check step references
         step_id_set = set(step_ids)
         for step in workflow.steps:
-            if step.on_pass and step.on_pass not in step_id_set:
-                errors.append(f"Step '{step.step_id}' references unknown step '{step.on_pass}' in on_pass")
-            if step.on_fail and step.on_fail not in step_id_set:
-                errors.append(f"Step '{step.step_id}' references unknown step '{step.on_fail}' in on_fail")
+            for field, target in (('on_pass', step.on_pass), ('on_fail', step.on_fail)):
+                if target and target not in step_id_set:
+                    errors.append(CodedMessage(
+                        f"Step '{step.step_id}' references unknown step '{target}' in {field}",
+                        'step_unknown_reference', step=step.step_id, target=target, field=field,
+                    ))
         
         # Check for unreachable steps (warning only)
         reachable = set()
@@ -488,7 +487,7 @@ class WorkflowsManager:
         if exemptions is None or exemptions.is_empty():
             return []
         if trigger.type != TriggerType.BEFORE_STATUS_CHANGE:
-            return [GateExemptionMessage(
+            return [CodedMessage(
                 "Only before_status_change workflows can be switched off per domain, "
                 "data product or data contract (disabled_for)",
                 'gate_exemptions_wrong_trigger', triggerType=trigger.type.value,
@@ -507,7 +506,7 @@ class WorkflowsManager:
                 continue
             found = {row[0] for row in self._db.query(model.id).filter(model.id.in_(ids)).all()}
             for missing in [i for i in ids if i not in found]:
-                errors.append(GateExemptionMessage(
+                errors.append(CodedMessage(
                     f"disabled_for: unknown {label} '{missing}'",
                     'gate_exemption_not_found', kind=kind, id=missing,
                 ))
@@ -517,43 +516,44 @@ class WorkflowsManager:
         """Validate step configuration based on type."""
         errors = []
         config = step.config or {}
-        
+
         if step.step_type == StepType.VALIDATION:
             if not config.get('rule'):
-                errors.append(f"Step '{step.step_id}': Validation step requires 'rule' in config")
-        
+                errors.append(_missing(step, "Validation step requires 'rule' in config", ['rule']))
+
         elif step.step_type == StepType.APPROVAL:
             if not config.get('approvers'):
-                errors.append(f"Step '{step.step_id}': Approval step requires 'approvers' in config")
-        
+                errors.append(_missing(step, "Approval step requires 'approvers' in config", ['approvers']))
+
         elif step.step_type == StepType.NOTIFICATION:
             if not config.get('recipients'):
-                errors.append(f"Step '{step.step_id}': Notification step requires 'recipients' in config")
+                errors.append(_missing(step, "Notification step requires 'recipients' in config", ['recipients']))
             if not config.get('template'):
-                errors.append(f"Step '{step.step_id}': Notification step requires 'template' in config")
-        
+                errors.append(_missing(step, "Notification step requires 'template' in config", ['template']))
+
         elif step.step_type == StepType.ASSIGN_TAG:
             if not config.get('key'):
-                errors.append(f"Step '{step.step_id}': Assign tag step requires 'key' in config")
+                errors.append(_missing(step, "Assign tag step requires 'key' in config", ['key']))
             if not config.get('value') and not config.get('value_source'):
-                errors.append(f"Step '{step.step_id}': Assign tag step requires 'value' or 'value_source' in config")
-        
+                errors.append(_missing(step, "Assign tag step requires 'value' or 'value_source' in config", ['value', 'value_source']))
+
         elif step.step_type == StepType.REMOVE_TAG:
             if not config.get('key'):
-                errors.append(f"Step '{step.step_id}': Remove tag step requires 'key' in config")
-        
+                errors.append(_missing(step, "Remove tag step requires 'key' in config", ['key']))
+
         elif step.step_type == StepType.CONDITIONAL:
-            if not config.get('condition'):
-                errors.append(f"Step '{step.step_id}': Conditional step requires 'condition' in config")
-        
+            issue = check_condition(config.get('condition'))
+            if issue:
+                errors.append(_step_issue(step, issue))
+
         elif step.step_type == StepType.SCRIPT:
-            if not config.get('code'):
-                errors.append(f"Step '{step.step_id}': Script step requires 'code' in config")
-        
+            for issue in check_script_config(config):
+                errors.append(_step_issue(step, issue))
+
         elif step.step_type == StepType.ENTITY_ACTION:
             if not config.get('action'):
-                errors.append(f"Step '{step.step_id}': Entity action step requires 'action' in config")
-        
+                errors.append(_missing(step, "Entity action step requires 'action' in config", ['action']))
+
         return errors
 
     def get_step_type_schemas(self) -> List[StepTypeSchema]:
