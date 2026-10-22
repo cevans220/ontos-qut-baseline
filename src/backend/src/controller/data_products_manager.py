@@ -948,9 +948,11 @@ class DataProductsManager(DeliveryMixin, SearchableAsset):
             # Validate transition
             allowed = valid_transitions.get(current_status, [])
             if new_status_lower not in allowed:
-                raise ValueError(
+                from src.common.api_errors import InvalidStatusTransitionError
+                raise InvalidStatusTransitionError(
                     f"Invalid status transition from '{current_status}' to '{new_status_lower}'. "
-                    f"Allowed transitions: {', '.join(allowed) if allowed else 'none'}"
+                    f"Allowed transitions: {', '.join(allowed) if allowed else 'none'}",
+                    fromStatus=current_status, toStatus=new_status_lower, allowed=list(allowed),
                 )
             
             # Run before_status_change workflows (gating)
