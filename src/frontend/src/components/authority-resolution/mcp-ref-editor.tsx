@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -18,6 +20,31 @@ interface Props {
 
 const templateFor = (tool: McpToolInfo): Record<string, string> =>
   Object.fromEntries(Object.keys(tool.input_schema?.properties || {}).map((k) => [k, `{{ ${k} }}`]));
+
+/** Compact Markdown rendering of an MCP tool description, sized for a tooltip. */
+function ToolDescription({ markdown }: { markdown: string }) {
+  return (
+    <div className="space-y-1.5">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          h1: ({ children }) => <p className="font-semibold pt-1">{children}</p>,
+          h2: ({ children }) => <p className="font-semibold pt-1">{children}</p>,
+          h3: ({ children }) => <p className="font-semibold pt-1">{children}</p>,
+          p: ({ children }) => <p>{children}</p>,
+          ul: ({ children }) => <ul className="list-disc pl-4 space-y-0.5">{children}</ul>,
+          ol: ({ children }) => <ol className="list-decimal pl-4 space-y-0.5">{children}</ol>,
+          code: ({ children }) => <code className="rounded bg-muted px-1 font-mono">{children}</code>,
+          a: ({ children, href }) => (
+            <a href={href} target="_blank" rel="noreferrer" className="underline">{children}</a>
+          ),
+        }}
+      >
+        {markdown}
+      </ReactMarkdown>
+    </div>
+  );
+}
 
 /** Server → tool → params/result-pointer cascade for an `mcp_tool` resource ref. */
 export default function McpRefEditor({ value, onChange }: Props) {
@@ -122,7 +149,9 @@ export default function McpRefEditor({ value, onChange }: Props) {
         {toolsLoading ? (
           <Skeleton className="h-9 w-full" />
         ) : (
+          <div className="flex items-center gap-1.5">
           <NativeSelect
+            className="flex-1"
             value={value.mcp_tool_name || ''}
             disabled={!value.mcp_service_name}
             onChange={(e) => {
@@ -143,9 +172,16 @@ export default function McpRefEditor({ value, onChange }: Props) {
               <option value={value.mcp_tool_name}>{value.mcp_tool_name}</option>
             )}
           </NativeSelect>
+          {selectedTool?.description && (
+            // Tool descriptions are often long Markdown (headings, operator lists);
+            // keep them out of the form and render them readably on hover.
+            <InfoHint contentClassName="max-w-lg max-h-96 overflow-y-auto">
+              <ToolDescription markdown={selectedTool.description} />
+            </InfoHint>
+          )}
+          </div>
         )}
       </div>
-      {selectedTool?.description && <p className="text-xs text-muted-foreground">{selectedTool.description}</p>}
       <div className="space-y-1">
         <Label className="text-xs flex items-center gap-1.5">
           {t('mcp.params.label')}
