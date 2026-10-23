@@ -110,7 +110,7 @@ export function ConceptModeSwitch({ tipLeft = false }: ConceptModeSwitchProps) {
           aria-selected={mode === 'simple'}
           onClick={() => setMode('simple')}
           className={cn(
-            'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+            'rounded-md px-4 py-2 text-sm font-medium leading-none transition-colors',
             mode === 'simple'
               ? 'bg-background text-foreground shadow'
               : 'text-muted-foreground hover:text-foreground'
@@ -124,7 +124,7 @@ export function ConceptModeSwitch({ tipLeft = false }: ConceptModeSwitchProps) {
           aria-selected={mode === 'advanced'}
           onClick={() => setMode('advanced')}
           className={cn(
-            'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+            'rounded-md px-4 py-2 text-sm font-medium leading-none transition-colors',
             mode === 'advanced'
               ? 'bg-background text-foreground shadow'
               : 'text-muted-foreground hover:text-foreground'
@@ -143,9 +143,9 @@ export function ConceptModeSwitch({ tipLeft = false }: ConceptModeSwitchProps) {
                 'concepts:mode.info',
                 'Advanced view reveals the ontology layer'
               )}
-              className="inline-flex items-center justify-center h-4 w-4 rounded-full border border-border text-muted-foreground hover:text-foreground"
+              className="inline-flex items-center justify-center h-5 w-5 rounded-full border border-border text-muted-foreground hover:text-foreground"
             >
-              <Info className="h-3 w-3" />
+              <Info className="h-3.5 w-3.5" />
             </button>
           </TooltipTrigger>
           <TooltipContent side={tipLeft ? 'left' : 'right'} className="max-w-[240px]">

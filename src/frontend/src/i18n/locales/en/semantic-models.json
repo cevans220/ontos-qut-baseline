@@ -422,8 +422,8 @@
     "editDescription": "Update collection settings.",
     "namePlaceholder": "e.g., Finance Glossary",
     "descriptionPlaceholder": "Optional description...",
-    "parentCollection": "Parent Collection",
-    "noneRootCollection": "None (root collection)",
+    "parentCollection": "Parent Scheme",
+    "noneRootCollection": "None (root scheme)",
     "editable": "Editable",
     "editableHelp": "Allow creating and editing concepts in this collection"
   },

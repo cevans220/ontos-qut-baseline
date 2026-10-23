@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { Fragment, useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -280,16 +280,26 @@ export default function DefineView() {
           ontology is a maturity progression: start simple, harden where needed. */}
       <div className="mb-6 rounded-lg border bg-muted/30 px-3.5 py-2.5 text-xs">
         <div className="mb-1.5 font-medium text-foreground">What you can build</div>
-        <div className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-3">
+        <div className="flex flex-col gap-y-2 sm:flex-row sm:items-start sm:gap-x-3">
           {RUNGS.map((r, i) => (
-            <div key={r.key} className="flex min-w-0 items-start gap-2">
+            <Fragment key={r.key}>
+            {/* Progression separator between rungs: decoupled from the
+                advanced-only info icon, never after the last rung, and hidden
+                when the columns stack. */}
+            {i > 0 && (
+              <span
+                className="hidden shrink-0 self-center text-muted-foreground/40 sm:inline"
+                aria-hidden
+                data-testid="rung-separator"
+              >
+                →
+              </span>
+            )}
+            <div className="flex min-w-0 flex-1 items-start gap-2">
               <r.Icon className="mt-0.5 h-4 w-4 shrink-0 text-foreground" />
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5">
                   <span className="font-medium text-foreground">{r.label}</span>
-                  {i < RUNGS.length - 1 && (
-                    <span className="text-muted-foreground/40" aria-hidden>→</span>
-                  )}
                   {/* Advanced view only: the RDF vocabulary this rung is written in. */}
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -312,6 +322,7 @@ export default function DefineView() {
                 </div>
               </div>
             </div>
+            </Fragment>
           ))}
         </div>
       </div>
@@ -347,7 +358,7 @@ export default function DefineView() {
           </CardHeader>
           <CardContent className="mt-auto">
             <Button className="w-full" onClick={() => setAuthorOpen(true)}>
-              {t('semantic-models:define.author.cta', 'New concept scheme')}
+              {t('semantic-models:define.author.cta', 'New Concept Scheme')}
             </Button>
             <BuildsRow
               builds={{ glossary: 'yes', taxonomy: 'yes', ontology: 'yes' }}

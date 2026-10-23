@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import i18n from 'i18next';
@@ -174,7 +174,19 @@ export default function ConceptDetailView() {
   const { get } = useApi();
   const { toast } = useToast();
   const { hasPermission } = usePermissions();
-  const bumpKnowledgeGraphRefresh = useKnowledgeGraphStore((s) => s.bumpRefreshNonce);
+  const bumpRefreshNonce = useKnowledgeGraphStore((s) => s.bumpRefreshNonce);
+  const knowledgeGraphRefreshNonce = useKnowledgeGraphStore((s) => s.refreshNonce);
+  // Nonce values produced by THIS page's own actions. Those actions already
+  // refetch the concept themselves right after bumping, so the cross-view
+  // refresh subscription below skips them to avoid a double fetch.
+  const selfBumpedNoncesRef = useRef<Set<number>>(new Set());
+  const bumpKnowledgeGraphRefresh = useCallback(
+    (reason?: string) => {
+      bumpRefreshNonce(reason);
+      selfBumpedNoncesRef.current.add(useKnowledgeGraphStore.getState().refreshNonce);
+    },
+    [bumpRefreshNonce],
+  );
 
   const setStaticSegments = useBreadcrumbStore((s) => s.setStaticSegments);
   const setDynamicTitle = useBreadcrumbStore((s) => s.setDynamicTitle);
@@ -289,6 +301,21 @@ export default function ConceptDetailView() {
   useEffect(() => {
     fetchConcept();
   }, [fetchConcept]);
+
+  // React to knowledge-graph refresh broadcasts from OTHER views/dialogs (e.g.
+  // the workflow approval-response dialog bumps 'concept-approval-decision'),
+  // so a reviewer staying on this page sees the new status. The value seen at
+  // mount is ignored (the mount fetch above covers it) and bumps made by this
+  // page's own actions are skipped (they refetch themselves). The refetch is
+  // quiet: the full-page loader only shows while no concept is loaded yet.
+  const lastSeenRefreshNonceRef = useRef(knowledgeGraphRefreshNonce);
+  useEffect(() => {
+    if (knowledgeGraphRefreshNonce === lastSeenRefreshNonceRef.current) return;
+    lastSeenRefreshNonceRef.current = knowledgeGraphRefreshNonce;
+    if (selfBumpedNoncesRef.current.delete(knowledgeGraphRefreshNonce)) return;
+    fetchConcept();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the nonce drives this refetch
+  }, [knowledgeGraphRefreshNonce]);
 
   // Fetch the real current version from the engine (contract §1) so the badge
   // shows the actual integer, not a hardcoded string. Refetches after a publish
@@ -1048,8 +1075,8 @@ export default function ConceptDetailView() {
           - Row 3: Linked assets (full width)
           - Row 4: Version history (full width)
           - Row 5: Relations / neighbourhood graph (full width)
-          - Row 6: Metadata (full width)
-          - Advanced-only: Turtle serialization (last) */}
+          - Advanced-only: Turtle serialization (full width)
+          - Last row: Metadata (full width; always last in Simple + Advanced) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Row 1: Owners panel */}
         <OwnershipPanel
@@ -1278,16 +1305,17 @@ export default function ConceptDetailView() {
           </div>
         </Collapsible>
 
-        {/* Metadata (notes / links / documents) — full width at the bottom. */}
-        <div className="md:col-span-2">
-          <EntityMetadataPanel entityType="concept" entityId={concept.iri} />
-        </div>
-
-        {/* Advanced-only: RDF (Turtle) serialization — kept as the LAST grid
-            block so toggling Advanced only APPENDS it at the bottom and never
+        {/* Advanced-only: RDF (Turtle) serialization — sits directly above
+            Metadata so toggling Advanced only inserts it there and never
             reshuffles Version history / Relations above it. */}
         <div className="adv-only md:col-span-2">
           <TurtleSerializationPanel conceptIri={concept.iri} />
+        </div>
+
+        {/* Metadata (notes / links / documents) — full width, ALWAYS the last
+            panel (in both Simple and Advanced view). */}
+        <div className="md:col-span-2">
+          <EntityMetadataPanel entityType="concept" entityId={concept.iri} />
         </div>
       </div>
 

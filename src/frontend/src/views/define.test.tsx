@@ -33,7 +33,7 @@ vi.mock('@/components/knowledge', () => ({
     importDialogOpen = open;
     return open ? <div data-testid="import-dialog" /> : null;
   },
-  // Author reuses the collection editor as the "New concept scheme" dialog.
+  // Author reuses the collection editor as the "New Concept Scheme" dialog.
   CollectionEditorDialog: ({ open }: { open: boolean }) => {
     authorDialogOpen = open;
     return open ? <div data-testid="author-dialog" /> : null;
@@ -116,9 +116,9 @@ describe('DefineView', () => {
     expect(screen.getByText('Import')).toBeInTheDocument();
   });
 
-  it('Author card opens the New concept scheme dialog in place', async () => {
+  it('Author card opens the New Concept Scheme dialog in place', async () => {
     renderDefine();
-    fireEvent.click(screen.getByText('New concept scheme'));
+    fireEvent.click(screen.getByText('New Concept Scheme'));
     await waitFor(() => expect(screen.getByTestId('author-dialog')).toBeInTheDocument());
     expect(authorDialogOpen).toBe(true);
   });
@@ -146,6 +146,24 @@ describe('DefineView', () => {
     }
     // Vocabulary text lives in tooltips, not inline under the rungs.
     expect(screen.queryByText(/skos:prefLabel \/ skos:altLabel/)).not.toBeInTheDocument();
+  });
+
+  it('legend arrows are separators between rungs, not coupled to the info icon', () => {
+    renderDefine();
+    // Two separators for three rungs: none after the last item.
+    const seps = screen.getAllByTestId('rung-separator');
+    expect(seps).toHaveLength(2);
+    for (const sep of seps) {
+      expect(sep).toHaveTextContent('→');
+      // Hidden when the columns stack; never advanced-only (no dangling arrow in Simple mode).
+      expect(sep).toHaveClass('hidden', 'sm:inline');
+      expect(sep).not.toHaveClass('adv-only');
+    }
+    // Each rung's info icon no longer has an arrow as a sibling.
+    for (const key of ['glossary', 'taxonomy', 'ontology']) {
+      const row = screen.getByTestId(`rung-vocab-${key}`).parentElement!;
+      expect(row.textContent).not.toContain('→');
+    }
   });
 
   it('shows in-progress generator runs from the runs endpoint', async () => {

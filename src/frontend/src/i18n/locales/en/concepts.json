@@ -10,7 +10,9 @@
     "viewLabel": "Explore views",
     "viewList": "List",
     "viewTree": "Tree",
-    "viewGraph": "Graph"
+    "viewGraph": "Graph",
+    "createConcept": "New Concept",
+    "createScheme": "New Concept Scheme"
   },
   "nav": {
     "collections": "Collections",

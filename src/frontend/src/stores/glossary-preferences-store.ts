@@ -6,7 +6,35 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 // filtering is driven independently by `hiddenSources` (see below).
 export type GroupByDimension = 'none' | 'scheme' | 'source' | 'domain';
 
-interface GlossaryPreferencesState {
+// Sort order of the scheme/source chips in the filter panel (List tab).
+export type SourceSortMode = 'name' | 'size';
+
+// Cytoscape layout used by the Graph tab. Mirrors `LayoutType` in
+// components/semantic-models/knowledge-graph.tsx.
+export type GraphLayout = 'circle' | 'cose' | 'grid' | 'breadthfirst' | 'concentric';
+
+// User-facing Graph tab display options. Persisted so the chosen layout and
+// toggles survive reloads. Transient graph state (selection, zoom/pan,
+// fullscreen, loading) is deliberately NOT part of this.
+export interface GraphOptions {
+  graphLayout: GraphLayout;
+  graphShowDomainBoxes: boolean;
+  graphShowNodeLabels: boolean;
+  graphShowEdgeLabels: boolean;
+  graphNodeSize: number;
+  graphSpacing: number;
+}
+
+export const DEFAULT_GRAPH_OPTIONS: GraphOptions = {
+  graphLayout: 'cose',
+  graphShowDomainBoxes: true,
+  graphShowNodeLabels: false,
+  graphShowEdgeLabels: false,
+  graphNodeSize: 24,
+  graphSpacing: 80,
+};
+
+interface GlossaryPreferencesState extends GraphOptions {
   // Source filtering - stores hidden sources
   hiddenSources: string[];
 
@@ -41,6 +69,9 @@ interface GlossaryPreferencesState {
   expandedConceptGroups: string[];
   conceptListScrollTop: number;
   conceptListSearch: string;
+
+  // Filter panel chip sort order (Name / Size). Persisted.
+  sourceSortMode: SourceSortMode;
   
   // Actions
   toggleSource: (source: string) => void;
@@ -60,6 +91,12 @@ interface GlossaryPreferencesState {
   toggleConceptGroup: (group: string) => void;
   setConceptListScrollTop: (scrollTop: number) => void;
   setConceptListSearch: (search: string) => void;
+  setSourceSortMode: (mode: SourceSortMode) => void;
+  /** Set one Graph tab option. Accepts a value or an updater of the current value. */
+  setGraphOption: <K extends keyof GraphOptions>(
+    key: K,
+    value: GraphOptions[K] | ((prev: GraphOptions[K]) => GraphOptions[K]),
+  ) => void;
 }
 
 export const useGlossaryPreferencesStore = create<GlossaryPreferencesState>()(
@@ -75,6 +112,8 @@ export const useGlossaryPreferencesStore = create<GlossaryPreferencesState>()(
       expandedConceptGroups: ['root'],
       conceptListScrollTop: 0,
       conceptListSearch: '',
+      sourceSortMode: 'name',
+      ...DEFAULT_GRAPH_OPTIONS,
 
       toggleSource: (source: string) => {
         set((state) => {
@@ -191,6 +230,20 @@ export const useGlossaryPreferencesStore = create<GlossaryPreferencesState>()(
       setConceptListSearch: (search: string) => {
         set({ conceptListSearch: search });
       },
+
+      setSourceSortMode: (mode: SourceSortMode) => {
+        set({ sourceSortMode: mode });
+      },
+
+      setGraphOption: (key, value) => {
+        set((state) => {
+          const next =
+            typeof value === 'function'
+              ? (value as (prev: GraphOptions[typeof key]) => GraphOptions[typeof key])(state[key])
+              : value;
+          return { [key]: next } as Partial<GlossaryPreferencesState>;
+        });
+      },
     }),
     {
       name: 'glossary-preferences-storage',
@@ -202,7 +255,9 @@ export const useGlossaryPreferencesStore = create<GlossaryPreferencesState>()(
       // v2 stops persisting `conceptListSearch` (session-only), and drops any
       // value stored by earlier versions so Explore no longer re-opens with a
       // stale search pre-filled.
-      version: 2,
+      // v3 adds `sourceSortMode` and the Graph tab options (graph*). Older
+      // states lack them; back-fill defaults so the stored shape is complete.
+      version: 3,
       migrate: (persisted: any, version: number) => {
         if (!persisted) return persisted;
         if (version < 2) {
@@ -221,6 +276,16 @@ export const useGlossaryPreferencesStore = create<GlossaryPreferencesState>()(
         if (persisted.groupByFile === undefined) {
           persisted.groupByFile = persisted.groupByDimension === 'source';
         }
+        if (version < 3) {
+          if (persisted.sourceSortMode !== 'name' && persisted.sourceSortMode !== 'size') {
+            persisted.sourceSortMode = 'name';
+          }
+          for (const [key, def] of Object.entries(DEFAULT_GRAPH_OPTIONS)) {
+            if (typeof persisted[key] !== typeof def) {
+              persisted[key] = def;
+            }
+          }
+        }
         return persisted;
       },
       partialize: (state) => ({
@@ -232,6 +297,13 @@ export const useGlossaryPreferencesStore = create<GlossaryPreferencesState>()(
         groupByFile: state.groupByFile,
         isFilterExpanded: state.isFilterExpanded,
         expandedConceptGroups: state.expandedConceptGroups,
+        sourceSortMode: state.sourceSortMode,
+        graphLayout: state.graphLayout,
+        graphShowDomainBoxes: state.graphShowDomainBoxes,
+        graphShowNodeLabels: state.graphShowNodeLabels,
+        graphShowEdgeLabels: state.graphShowEdgeLabels,
+        graphNodeSize: state.graphNodeSize,
+        graphSpacing: state.graphSpacing,
         // Scroll position and the Explore search text (`conceptListSearch`)
         // are intentionally NOT persisted across reloads -- they are only kept
         // across in-app navigation while the store stays in memory. Persisting

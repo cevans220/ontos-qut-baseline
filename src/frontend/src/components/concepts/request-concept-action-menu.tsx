@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, Save, Send } from 'lucide-react';
+import { ChevronDown, CopyPlus, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -86,7 +86,7 @@ export function RequestConceptActionMenu({
               disabled={newVersion.disabled}
               onSelect={() => newVersion.onSelect()}
             >
-              <Save className="mr-2 h-4 w-4" />
+              <CopyPlus className="mr-2 h-4 w-4" />
               {t('semantic-models:versionHistory.newVersion', 'New version')}
             </DropdownMenuItem>
           </span>

@@ -49,13 +49,16 @@ def semantic_models_manager(db_session: Session, tmp_path: Path):
 
 
 @pytest.fixture
-def collection(client: TestClient, semantic_models_manager):
-    r = client.post("/api/knowledge/collections", json={
-        "label": f"ClassParent {uuid.uuid4().hex[:8]}", "collection_type": "glossary",
-        "scope_level": "enterprise", "description": "class parent predicate test",
-    })
-    assert r.status_code == 200, r.text
-    return r.json()["iri"]
+def collection(semantic_models_manager):
+    # Created on the manager the tests use. Going through the API would hit the
+    # manager the TestClient's startup installed on app.state, which is a
+    # different instance whenever this fixture ran before `client`.
+    return semantic_models_manager.create_collection(
+        label=f"ClassParent {uuid.uuid4().hex[:8]}",
+        collection_type="glossary",
+        scope_level="enterprise",
+        description="class parent predicate test",
+    )["iri"]
 
 
 def _db_parent_preds(db, concept_iri):

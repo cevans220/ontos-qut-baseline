@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useGlossaryPreferencesStore } from '@/stores/glossary-preferences-store';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -100,8 +101,6 @@ interface GlossaryFilterPanelProps {
   onDeleteScheme?: (collection: KnowledgeCollection) => void;
 }
 
-type SortMode = 'name' | 'size';
-
 export const GlossaryFilterPanel: React.FC<GlossaryFilterPanelProps> = ({
   filteredConcepts,
   sourceConceptCounts,
@@ -126,9 +125,10 @@ export const GlossaryFilterPanel: React.FC<GlossaryFilterPanelProps> = ({
 }) => {
   const { t } = useTranslation(['semantic-models', 'common']);
 
-  // Local state for search and sorting
+  // Local search text; the Name/Size sort is a persisted user preference.
   const [searchText, setSearchText] = useState('');
-  const [sortMode, setSortMode] = useState<SortMode>('name');
+  const sortMode = useGlossaryPreferencesStore((s) => s.sourceSortMode);
+  const setSortMode = useGlossaryPreferencesStore((s) => s.setSourceSortMode);
   const [deleteConfirmScheme, setDeleteConfirmScheme] = useState<KnowledgeCollection | null>(null);
 
   // Flatten collections tree and build a map: stripped source → collection

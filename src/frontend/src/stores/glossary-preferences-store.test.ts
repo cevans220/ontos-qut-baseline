@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
-import { useGlossaryPreferencesStore } from './glossary-preferences-store';
+import { useGlossaryPreferencesStore, DEFAULT_GRAPH_OPTIONS } from './glossary-preferences-store';
 
 // Reset to the store's documented initial state before each test so cases do
 // not leak grouping/filter state into one another.
@@ -13,6 +13,8 @@ beforeEach(() => {
       groupByFile: false,
       groupByDomain: false,
       showProperties: false,
+      sourceSortMode: 'name',
+      ...DEFAULT_GRAPH_OPTIONS,
     });
   });
 });
@@ -171,13 +173,74 @@ describe('glossary preferences store', () => {
     });
 
     it('bumps the persist version and clears a stale stored search on migrate', () => {
-      expect(options.version).toBe(2);
+      expect(options.version).toBe(3);
       const migrated = options.migrate!(
         { groupByDimension: 'scheme', groupByFile: false, conceptListSearch: 'Assetype' },
         1,
       ) as Record<string, unknown>;
       expect(migrated).not.toHaveProperty('conceptListSearch');
       expect(migrated.groupByDimension).toBe('scheme');
+    });
+  });
+
+  describe('persisted UI options (sort mode + Graph tab)', () => {
+    const options = useGlossaryPreferencesStore.persist.getOptions();
+
+    it('defaults sort to Name and graph options to the previous hard-coded values', () => {
+      const s = useGlossaryPreferencesStore.getState();
+      expect(s.sourceSortMode).toBe('name');
+      expect(s.graphLayout).toBe('cose');
+      expect(s.graphShowDomainBoxes).toBe(true);
+      expect(s.graphShowNodeLabels).toBe(false);
+      expect(s.graphShowEdgeLabels).toBe(false);
+      expect(s.graphNodeSize).toBe(24);
+      expect(s.graphSpacing).toBe(80);
+    });
+
+    it('includes the sort mode and graph options in the persisted slice', () => {
+      act(() => {
+        const s = useGlossaryPreferencesStore.getState();
+        s.setSourceSortMode('size');
+        s.setGraphOption('graphLayout', 'grid');
+        s.setGraphOption('graphShowNodeLabels', (prev) => !prev);
+        s.setGraphOption('graphShowDomainBoxes', false);
+        s.setGraphOption('graphNodeSize', 40);
+        s.setGraphOption('graphSpacing', 120);
+      });
+      const persisted = options.partialize!(useGlossaryPreferencesStore.getState()) as Record<string, unknown>;
+      expect(persisted).toMatchObject({
+        sourceSortMode: 'size',
+        graphLayout: 'grid',
+        graphShowNodeLabels: true,
+        graphShowEdgeLabels: false,
+        graphShowDomainBoxes: false,
+        graphNodeSize: 40,
+        graphSpacing: 120,
+      });
+      // Session-only fields remain excluded.
+      expect(persisted).not.toHaveProperty('conceptListSearch');
+      expect(persisted).not.toHaveProperty('conceptListScrollTop');
+    });
+
+    it('back-fills defaults when migrating a v2 state and keeps existing fields', () => {
+      const migrated = options.migrate!(
+        { groupByDimension: 'domain', groupByFile: false, sourceSortMode: 'bogus', graphNodeSize: 'x' },
+        2,
+      ) as Record<string, unknown>;
+      expect(migrated.groupByDimension).toBe('domain');
+      expect(migrated.sourceSortMode).toBe('name');
+      expect(migrated.graphNodeSize).toBe(24);
+      expect(migrated.graphLayout).toBe('cose');
+      expect(migrated.graphShowDomainBoxes).toBe(true);
+    });
+
+    it('preserves valid v2-era values on migrate', () => {
+      const migrated = options.migrate!(
+        { groupByDimension: 'none', sourceSortMode: 'size', graphSpacing: 150 },
+        2,
+      ) as Record<string, unknown>;
+      expect(migrated.sourceSortMode).toBe('size');
+      expect(migrated.graphSpacing).toBe(150);
     });
   });
 });

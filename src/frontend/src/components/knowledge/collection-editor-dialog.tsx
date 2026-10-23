@@ -35,6 +35,15 @@ import {
 } from '@/types/ontology';
 import { Loader2 } from 'lucide-react';
 
+// Marker the backend writes as `created_by` on sources it auto-registers as
+// collections (bundled / imported ontologies). These are also read-only.
+const SYSTEM_CREATED_BY = 'urn:user:system';
+
+/** True when a scheme may be offered as a parent: editable and not a system source. */
+export function isNestableParent(c: KnowledgeCollection): boolean {
+  return c.is_editable === true && c.created_by !== SYSTEM_CREATED_BY;
+}
+
 interface CollectionEditorDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -104,27 +113,30 @@ export const CollectionEditorDialog: React.FC<CollectionEditorDialogProps> = ({
     }
   };
 
-  // Filter out current collection from parent options
-  const parentOptions = collections.filter(
-    (c) => c.iri !== collection?.iri
-  );
-
-  // Flatten hierarchy for dropdown
+  // Flatten hierarchy for dropdown. Only schemes the user can actually nest
+  // under are offered: editable, not system/bundled, and not the scheme being
+  // edited. Non-qualifying schemes are skipped but their qualifying children
+  // are still listed (one level shallower).
   const flattenCollections = (
     colls: KnowledgeCollection[],
     level = 0
   ): Array<{ iri: string; label: string; level: number }> => {
     let result: Array<{ iri: string; label: string; level: number }> = [];
     for (const c of colls) {
-      result.push({ iri: c.iri, label: c.label, level });
+      const selectable = isNestableParent(c) && c.iri !== collection?.iri;
+      if (selectable) {
+        result.push({ iri: c.iri, label: c.label, level });
+      }
       if (c.child_collections && c.child_collections.length > 0) {
-        result = result.concat(flattenCollections(c.child_collections, level + 1));
+        result = result.concat(
+          flattenCollections(c.child_collections, selectable ? level + 1 : level)
+        );
       }
     }
     return result;
   };
 
-  const flatParentOptions = flattenCollections(parentOptions);
+  const flatParentOptions = flattenCollections(collections);
 
   return (
     <TooltipProvider>
@@ -132,7 +144,7 @@ export const CollectionEditorDialog: React.FC<CollectionEditorDialogProps> = ({
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle>
-            {isNew ? t('Create scheme') : t('Edit scheme')}
+            {isNew ? t('Create scheme', 'Create Scheme') : t('Edit scheme', 'Edit Scheme')}
           </DialogTitle>
           <DialogDescription>
             {isNew
@@ -229,7 +241,7 @@ export const CollectionEditorDialog: React.FC<CollectionEditorDialogProps> = ({
               </Select>
             </div>
 
-            {/* Parent Collection */}
+            {/* Parent Scheme */}
             <div className="grid gap-2">
               <Label htmlFor="parent">{t('semantic-models:collectionEditor.parentCollection')}</Label>
               <Select

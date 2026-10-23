@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowRight, Check, CheckCircle2, ExternalLink, Info, Loader2, X } from 'lucide-react';
+import { ArrowRight, Check, CheckCircle2, ExternalLink, Loader2, X } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -12,12 +12,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
 import TermMappingSuggestionReview from '@/components/term-mapping/suggestion-review';
 
 // ---------------------------------------------------------------------------
@@ -167,26 +161,11 @@ export default function ReviewSuggestionsDialog({
             {t('enrich.review.title', 'Review suggested matches')}
             <span className="text-sm font-normal text-muted-foreground">· {schemeName}</span>
           </DialogTitle>
-          <DialogDescription className="flex items-center gap-1.5">
+          <DialogDescription>
             {t(
               'enrich.review.subtitle',
               'Accept or reject each concept-to-Asset match. Nothing syncs until you accept it.',
             )}
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button type="button" aria-label="about" className="text-muted-foreground">
-                    <Info className="h-3.5 w-3.5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-[280px]">
-                  {t(
-                    'enrich.review.sharedTip',
-                    'This is the shared Review Board surface, embedded here. It is the same side-by-side accept/reject MDM and table functions use, so it behaves identically everywhere. Accepted links sync on next delivery.',
-                  )}
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
           </DialogDescription>
         </DialogHeader>
 
@@ -257,7 +236,7 @@ export default function ReviewSuggestionsDialog({
               <p className="rounded-md border border-dashed bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
                 {t(
                   'enrich.review.placeholderNote',
-                  'Sample matches. Live review activates once the coverage read-model returns a term-mapping run id per scheme; these rows are then served by the shared reviewer and accept/reject writes through.',
+                  'Sample matches shown for illustration.',
                 )}
               </p>
               {placeholders.map((s) => (

@@ -6998,8 +6998,16 @@ class SemanticModelsManager(SearchableAsset):
         Returns:
             CoverageResponse with per-scheme metrics and totals.
         """
-        # Get all concepts grouped by source_context
-        grouped_concepts = self.get_grouped_concepts()
+        # Get all concepts grouped by source_context, excluding built-in system
+        # sources (bundled ontologies/taxonomies) so totals reflect only the
+        # user's own schemes. Same identification rules as the Explore
+        # ``include_system=false`` filter (see get_system_source_names).
+        system_sources = self.get_system_source_names()
+        grouped_concepts = {
+            source: concepts
+            for source, concepts in self.get_grouped_concepts().items()
+            if source not in system_sources
+        }
 
         # Pending term-mapping suggestions per concept IRI. Drives the per-scheme
         # "suggested" count (and hence whether the Enrich matrix Review button is
