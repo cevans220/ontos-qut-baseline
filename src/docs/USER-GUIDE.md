@@ -2230,6 +2230,8 @@ Click on a run to see:
 
 Process Workflows enable automated, configurable multi-step processes that trigger on entity lifecycle events. They replace hardcoded business logic with flexible, user-editable flows that can be customized per organization.
 
+To build your own workflows, read the [Workflow Authoring Guide](/user-docs/workflow-authoring-guide): it explains how an execution moves between steps, which triggers fire where, the variables you can use, how approvals pause and resume a workflow, and how to read Recent Executions.
+
 ### What are Process Workflows?
 
 Process Workflows are:
@@ -2261,8 +2263,8 @@ Triggers determine when a workflow fires. Available trigger types:
 | **On Update** | Fires when an entity is updated | Notify subscribers of changes |
 | **On Delete** | Fires when an entity is deleted | Archive audit trail |
 | **On Status Change** | Fires when status transitions | Approve publish to production |
-| **Scheduled** | Fires on a cron schedule | Daily compliance scans |
-| **Manual** | Triggered by user action | On-demand data quality check |
+| **Scheduled** | Fires on a cron schedule (does not run yet, see [#941](https://github.com/databrickslabs/ontos/issues/941)) | Daily compliance scans |
+| **Manual** | Triggered by user action: use **Run** on the Workflows list (see [Running a Manual Workflow](#running-a-manual-workflow)) | On-demand data quality check |
 | **Before Create** | Fires before entity creation (blocking) | Enforce naming policies |
 | **Before Update** | Fires before entity update (blocking) | Validate schema changes |
 | **Review Request** | Fires when review is requested | Route to Data Steward |
@@ -2304,7 +2306,7 @@ Steps are the building blocks of workflows:
 | Step Type | Description | Configuration |
 |-----------|-------------|---------------|
 | **Validation** | Evaluate a compliance rule | Rule DSL expression |
-| **Approval** | Request human approval | Approvers, timeout, require all |
+| **Approval** | Request human approval | Approvers; timeout and require all are accepted but not enforced yet (see [#1119](https://github.com/databrickslabs/ontos/issues/1119)) |
 | **Notification** | Send a notification | Recipients, template, message |
 | **Assign Tag** | Add or update a tag | Key, value or value source |
 | **Remove Tag** | Remove a tag | Key to remove |
@@ -2430,9 +2432,19 @@ Create a copy of any workflow:
 #### How Workflows Run
 
 1. **Trigger Event**: An entity event matches a workflow's trigger
-2. **Scope Check**: Workflow scope is evaluated (all, project, catalog, domain)
+2. **Scope Check**: Not applied yet. A workflow's scope (all, project, catalog, domain) is saved, but a workflow fires for every entity that matches its trigger (see [#1118](https://github.com/databrickslabs/ontos/issues/1118))
 3. **Step Execution**: Steps run in sequence following on_pass/on_fail paths
 4. **Result**: Workflow ends at a Pass or Fail terminal step
+
+#### Running a Manual Workflow
+
+A workflow whose trigger is **Manual** never fires on its own. To start it, open **Settings > Workflows**, open the row actions (**...**) of the workflow and choose **Run**. Pick the entity type and the entity the run is about, then **Run**. The dialog shows the status of the execution and a link to its details; the run also appears under Recent Executions. You need read/write access to the Workflows settings.
+
+#### Known Limits
+
+- **Scope** is saved but not applied yet ([#1118](https://github.com/databrickslabs/ontos/issues/1118)).
+- **Scheduled** workflows do not run yet ([#941](https://github.com/databrickslabs/ontos/issues/941)).
+- **Approval steps**: `require_all` and `timeout_days` are accepted but not enforced. The first decision resumes the workflow, and a pending approval never expires ([#1119](https://github.com/databrickslabs/ontos/issues/1119)).
 
 #### Blocking vs Non-Blocking
 
@@ -2449,6 +2461,8 @@ Approval steps pause workflow execution:
 3. Workflow status becomes "Paused"
 4. Approver makes decision via notification
 5. Workflow resumes with on_pass or on_fail path
+
+Only the recipients of the step the execution is waiting at can decide it (admins can decide any approval). On an owner approval (`DomainOwner`, `ContractApprover`) the requester can't decide their own request, even when the approval falls back to a role they hold. Approval notifications created before an upgrade to a version with this check don't record their step; any recipient of the execution's approvals can still decide those, as before.
 
 ### Workflow Best Practices
 
@@ -2503,7 +2517,7 @@ Steps:
 #### Performance Considerations
 
 - Avoid complex workflows on high-frequency triggers (on_update)
-- Use scopes to limit workflow execution to relevant entities
+- Use the entity types of the trigger to limit workflow execution to relevant entities (scopes are not applied yet)
 - Disable unnecessary default workflows
 - Monitor workflow execution times in logs
 
@@ -2514,7 +2528,7 @@ Steps:
 1. Check workflow is **Active**
 2. Verify trigger type matches the event
 3. Check entity types include the affected entity
-4. Verify scope includes the entity (project, catalog, domain)
+4. A workflow's scope (project, catalog, domain) is not applied yet, so it cannot be the reason a workflow does not fire
 
 #### Step Failing Unexpectedly
 
@@ -3425,6 +3439,18 @@ Before using Indirect mode, configure the Git repository:
 
 3. Click **Save Settings**
 4. Click **Clone Repository** to clone the repo to the configured volume
+
+The volume comes from **Settings → General → Unity Catalog**. The **Volume** field
+accepts `/Volumes/<catalog>/<schema>/<volume>`, `<catalog>.<schema>.<volume>`, or a
+volume name with the catalog and schema set. Exports go to
+`/Volumes/<catalog>/<schema>/<volume>/git-export/`.
+
+Inside Databricks Apps, a volume isn't mounted on the app's filesystem, so the Git
+working copy is kept on the app's local disk (`GIT_WORK_DIR`, or a directory under
+the system temp directory), and each exported file is also written to the volume
+through the Files API. The app's service principal needs `WRITE VOLUME` on it. After
+the app restarts, click **Clone Repository** again: pushed commits are kept in the
+remote, and exports already written to the volume stay there.
 
 **Creating a GitHub PAT**:
 1. Go to GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)

@@ -49,7 +49,10 @@
   },
   "upload": {
     "success": "Upload Successful",
-    "successMessage": "Successfully processed {{filename}}. {{count}} product(s) processed.",
+    "successMessage_one": "Successfully processed {{filename}}. {{count}} product processed.",
+    "successMessage_other": "Successfully processed {{filename}}. {{count}} products processed.",
+    "successMessage_files_one": "Successfully processed {{files}} files. {{count}} product processed.",
+    "successMessage_files_other": "Successfully processed {{files}} files. {{count}} products processed.",
     "partialSuccess": "Imported with issues",
     "failed": "Upload Failed",
     "unexpectedError": "An unexpected error occurred during upload.",
@@ -369,7 +372,8 @@
       "deleteSupportChannel": "Delete this support channel?",
       "unlinkContract": "Unlink contract from this deliverable?",
       "createGenieSpace": "Create a Genie Space for \"{{name}}\"?"
-    }
+    },
+    "contractDangling": "Contract no longer exists"
   },
   "form": {
     "createTitle": "Create Data Product",
@@ -673,14 +677,25 @@
       "certLevelRequired": "Please select a certification level"
     },
     "errors": {
-      "cannotRequest": "Cannot request {{requestType}} for a product with status '{{productStatus}}'",
+      "cannotRequest": "\"{{requestType}}\" isn't available for a product with status {{productStatus}}.",
       "failedToSubmit": "Failed to submit request"
     },
     "toast": {
       "statusChanged": "Status Changed",
       "statusChangedDesc": "Product status changed from \"{{fromStatus}}\" to \"{{toStatus}}\".",
       "requestSubmitted": "Request Submitted",
-      "requestSubmittedDesc": "Your {{type}} request has been submitted and you will be notified of the decision."
+      "requestSubmittedDesc": "Your {{type}} request has been submitted and you will be notified of the decision.",
+      "workflowFailed": "Request sent, but its workflow failed",
+      "workflowFailedDesc": "Nobody was asked to decide on your {{type}} request: its workflow \"{{workflow}}\" could not start. Please contact an administrator.",
+      "workflowPartiallyFailed": "Some request workflows failed",
+      "workflowPartiallyFailedDesc": "One of the {{type}} request workflows failed: {{workflows}}. Other approvals may still be pending.",
+      "requestTypes": {
+        "access": "access",
+        "review": "review",
+        "publish": "publish",
+        "certify": "certification",
+        "status_change": "status change"
+      }
     },
     "labels": {
       "requestType": "Request Type",

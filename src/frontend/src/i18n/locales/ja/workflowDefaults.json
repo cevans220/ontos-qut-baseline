@@ -96,5 +96,38 @@
     "conceptReviewRequest": {
       "rejected": "概念のレビューは承認されませんでした"
     }
+  },
+  "workflowNames": {
+    "naming-convention-check": "命名規則の検証",
+    "data-product-approval": "データプロダクト公開の承認",
+    "data-contract-validation": "データコントラクトのスキーマ検証",
+    "pii-detection": "PII の検出と分類",
+    "pre-creation-compliance": "作成前のコンプライアンス検証",
+    "table-pre-creation": "作成前のテーブル検証",
+    "contract-review-request": "データコントラクトのレビュー依頼",
+    "contract-deploy-request": "データコントラクトのデプロイ依頼",
+    "product-review-request": "データプロダクトのレビュー依頼",
+    "access-grant-request": "アクセス付与の依頼",
+    "status-change-request": "ステータス変更の依頼",
+    "data-asset-review-request": "データアセットのレビュー依頼",
+    "project-access-request": "プロジェクトへのアクセス依頼",
+    "role-access-request": "ロールへのアクセス依頼",
+    "job-failure-notification": "ジョブ失敗の通知",
+    "job-success-notification": "ジョブ成功の通知",
+    "access-expiring-warning": "アクセス期限切れの警告",
+    "access-revoked-notification": "アクセス取り消しの通知",
+    "approval-response": "承認の応答",
+    "subscription": "サブスクリプション契約",
+    "request-review": "レビューを依頼",
+    "request-access": "アクセスを依頼",
+    "request-publish": "公開を依頼",
+    "request-status-change": "ステータス変更を依頼",
+    "before-status-change-default": "ステータス変更ゲート(デフォルト)",
+    "on-publish-notification": "公開の通知",
+    "on-unpublish-notification": "公開取り消しの通知",
+    "certification-request-review": "認定依頼のレビュー",
+    "publication-request-review": "公開依頼のレビュー",
+    "first-access-welcome": "ようこそ: 利用規約",
+    "on-request-access-grant-permissions-reference": "リファレンス: 依頼者に UC の SELECT を付与 (on_request_access)"
   }
 }

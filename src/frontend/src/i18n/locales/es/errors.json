@@ -23,5 +23,6 @@
     "title": "Error",
     "message": "Ocurrió un error inesperado.",
     "retry": "Reintentar"
-  }
+  },
+  "internalError": "Se produjo un error inesperado. Los detalles están en el registro del servidor (id del error {{errorId}})."
 }

@@ -7,7 +7,7 @@ Defines the API request/response schemas for workflow definitions, steps, and ex
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 import uuid
 
 from src.common.logging import get_logger
@@ -819,9 +819,49 @@ class WorkflowExecutionListResponse(BaseModel):
     total: int
 
 
+class CodedMessage(str):
+    """An English validation message that also carries a code and params.
+
+    It is a ``str``, so lists of messages keep working; WorkflowValidationResult
+    turns the codes into ``issues``. A plain string gets the generic code
+    ``workflow_validation_error``.
+    """
+    code: str
+    params: Dict[str, Any]
+
+    def __new__(cls, message: str, code: str, **params: Any) -> 'CodedMessage':
+        obj = super().__new__(cls, message)
+        obj.code = code
+        obj.params = params
+        return obj
+
+
+class WorkflowValidationIssue(BaseModel):
+    """One validation error with a stable code and its parameters, for translation."""
+    code: str
+    message: str
+    params: Dict[str, Any] = Field(default_factory=dict)
+
+
 class WorkflowValidationResult(BaseModel):
     """Result of workflow validation."""
     valid: bool
     errors: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+    # Same errors as ``errors``, with a code and parameters each.
+    issues: List[WorkflowValidationIssue] = Field(default_factory=list)
+
+    @model_validator(mode='before')
+    @classmethod
+    def _issues_from_errors(cls, data: Any) -> Any:
+        if isinstance(data, dict) and 'issues' not in data:
+            data = {**data, 'issues': [
+                {
+                    'code': getattr(error, 'code', 'workflow_validation_error'),
+                    'message': str(error),
+                    'params': dict(getattr(error, 'params', {}) or {}),
+                }
+                for error in data.get('errors') or []
+            ]}
+        return data
 

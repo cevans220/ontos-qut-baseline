@@ -28,6 +28,7 @@ class TestDataProductRoutes:
             "description": {"purpose": "Test product via API"},
             "version": "1.0.0",
             "productType": "sourceAligned",
+            "status": "draft",
             "owner": "test@example.com",
             "tags": ["api-test"],
         }
@@ -227,7 +228,7 @@ class TestDataProductRoutes:
 
         # Assert
         assert response.status_code == 400
-        assert "mismatch" in response.json()["detail"].lower()
+        assert "does not match" in response.json()["detail"].lower()
 
     def test_update_product_requires_write_permission(
         self, client, mock_test_user, sample_product_data

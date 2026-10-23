@@ -33,6 +33,14 @@ from src.models.process_workflows import (
 )
 from src.repositories.process_workflows_repository import workflow_execution_repo
 from src.common.logging import get_logger
+from src.common.workflow_notification_texts import (
+    DEFAULT_TEMPLATE_MESSAGE,
+    DEFAULT_TEMPLATE_TITLE,
+    TEMPLATE_MESSAGES,
+    TEMPLATE_TITLES,
+    approval_notification_i18n,
+    notification_step_i18n,
+)
 
 logger = get_logger(__name__)
 
@@ -314,6 +322,41 @@ def _underlying_entity(context: 'StepContext') -> Tuple[str, str]:
     return underlying_type, underlying_id
 
 
+def _requester_email(context: 'StepContext') -> Optional[str]:
+    """The user who made the request the workflow handles.
+
+    After an approval, ``resume_workflow`` sets ``context.user_email`` to the
+    approver (the user acting now); the requester stays in the trigger context.
+    """
+    trigger_context = getattr(context, 'trigger_context', None)
+    requester = getattr(trigger_context, 'user_email', None)
+    if requester:
+        return requester
+    if context.user_email:
+        _log_requester_fallback(context)
+    return context.user_email
+
+
+def _log_requester_fallback(context: 'StepContext') -> None:
+    """Warn, once per step, that the acting user stands in for the requester.
+
+    The trigger context has no requester, so recipients, owner exclusion and
+    requester-sourced grants use the acting user, which may be someone else.
+    Emails are left out of the log; the ids locate the execution.
+    """
+    step_id = getattr(context, 'step_id', None)
+    if getattr(context, '_requester_fallback_step', None) == (step_id,):
+        return
+    context._requester_fallback_step = (step_id,)
+    logger.warning(
+        "No requester in the trigger context (workflow=%s, execution=%s, step=%s); "
+        "using the acting user as the requester",
+        getattr(context, 'workflow_id', None),
+        getattr(context, 'execution_id', None),
+        step_id,
+    )
+
+
 def _entity_owner_emails(db: Session, context: 'StepContext') -> List[str]:
     """Owners of the trigger entity (see ``resolve_owner_emails``)."""
     from src.repositories.entity_owners_repository import resolve_owner_emails
@@ -363,7 +406,7 @@ def _owner_approvers(
     else:
         emails = resolve_owner_emails(db, entity_type, entity_id)
     # The requester is often an owner; they must not approve their own request.
-    requester = (context.user_email or '').lower()
+    requester = (_requester_email(context) or '').lower()
     emails = [email for email in emails if email.lower() != requester]
     if emails:
         return [(email, None) for email in emails]
@@ -437,7 +480,8 @@ def _resolve_role_to_users(
 
     # 'trigger_user' is the name the default workflows use for the requester.
     if role_spec in ('requester', 'trigger_user'):
-        return [(context.user_email, None)] if context.user_email else []
+        requester = _requester_email(context)
+        return [(requester, None)] if requester else []
 
     if role_spec == 'entity_owner':
         return [(email, None) for email in _entity_owner_emails(db, context)]
@@ -654,7 +698,7 @@ def _build_approval_subtitle(
             )
         # Fallback: no underlying entity resolved — at least avoid showing
         # the raw access_grant UUID.
-        return f"Access request from {context.user_email or 'unknown user'}"
+        return f"Access request from {_requester_email(context) or 'unknown user'}"
 
     return f"{_humanize_entity_type(context.entity_type)}: {entity_display}"
 
@@ -672,7 +716,7 @@ def _build_approval_description(
     """
     lines: List[str] = []
 
-    requester = context.user_email or "Unknown"
+    requester = _requester_email(context) or "Unknown"
     lines.append(f"Requester: {requester}")
 
     underlying_type = facets.get("underlying_entity_type")
@@ -785,6 +829,12 @@ class ApprovalStepHandler(StepHandler):
                         facets=facets,
                         approval_message=approval_message,
                     )
+                    # Keys of its texts, so the bell shows them in the user's language
+                    i18n_data = approval_notification_i18n(
+                        description, self._config.get('message'), approval_message,
+                        lambda name: substitute_template('${' + name + '}', context),
+                        _ENTITY_TYPE_LABELS,
+                    )
 
                     notification = Notification(
                         id=str(uuid4()),
@@ -806,7 +856,7 @@ class ApprovalStepHandler(StepHandler):
                             "entity_type": context.entity_type,
                             "entity_id": context.entity_id,
                             "entity_name": context.entity_name,
-                            "requester_email": context.user_email,
+                            "requester_email": _requester_email(context),
                             "timeout_days": timeout_days,
                             # Structured request context for the approval
                             # dialog. All optional; only access-grant
@@ -817,6 +867,7 @@ class ApprovalStepHandler(StepHandler):
                         },
                         can_delete=False,  # Must respond to this notification
                         read=False,
+                        data=i18n_data,
                     )
                     notification_repo.create(db=self._db, obj_in=notification)
                     created_count += 1
@@ -876,6 +927,12 @@ class NotificationStepHandler(StepHandler):
             raw_message = custom_message or self._get_template_message(template, context)
             message = substitute_template(raw_message, context)
             title = substitute_template(self._get_template_title(template, context), context)
+            # Keys of the built-in texts, so the bell shows them in the user's language
+            i18n_data = notification_step_i18n(
+                template, custom_message, context.entity_type,
+                context.entity_name or context.entity_id,
+                lambda name: substitute_template('${' + name + '}', context),
+            )
             
             # Determine notification type based on template
             notification_type = self._get_notification_type(template)
@@ -903,6 +960,11 @@ class NotificationStepHandler(StepHandler):
                 )
                 channels = [c for c in channels if c != 'email']
             
+            # Typed-ID manual runs have no entity name: fall back to the id and
+            # leave the subtitle out when neither is known.
+            subtitle_ref = context.entity_name or context.entity_id
+            subtitle = f"{context.entity_type}: {subtitle_ref}" if subtitle_ref else None
+
             created_count = 0
             email_count = 0
 
@@ -915,7 +977,7 @@ class NotificationStepHandler(StepHandler):
                             created_at=datetime.utcnow(),
                             type=notification_type,
                             title=title,
-                            subtitle=f"{context.entity_type}: {context.entity_name}",
+                            subtitle=subtitle,
                             description=message,
                             recipient=recipient_id,
                             recipient_role_id=role_uuid,
@@ -923,6 +985,7 @@ class NotificationStepHandler(StepHandler):
                             action_payload=action_payload,
                             can_delete=can_delete,
                             read=False,
+                            data=i18n_data,
                         )
                         notification_repo.create(db=self._db, obj_in=notification)
                         created_count += 1
@@ -1018,37 +1081,14 @@ class NotificationStepHandler(StepHandler):
 
     def _get_template_title(self, template: str, context: StepContext) -> str:
         """Get notification title from template."""
-        entity_display = context.entity_name or context.entity_id
-        titles = {
-            'validation_failed': "Validation Failed",
-            'validation_passed': "Validation Passed",
-            'product_approved': "Data Product Approved",
-            'product_rejected': "Data Product Rejected",
-            'approval_requested': "Approval Requested",
-            'request_submitted': "Request Submitted",
-            'request_approved': "Request Approved",
-            'request_rejected': "Request Denied",
-            'dataset_updated': "Dataset Updated",
-            'pii_detected': "PII Detected",
-        }
-        return titles.get(template, "Workflow Notification")
+        return TEMPLATE_TITLES.get(template, DEFAULT_TEMPLATE_TITLE)
 
     def _get_template_message(self, template: str, context: StepContext) -> str:
         """Get message from template."""
         entity_display = context.entity_name or context.entity_id
-        templates = {
-            'validation_failed': f"Validation failed for {context.entity_type} '{entity_display}'",
-            'validation_passed': f"Validation passed for {context.entity_type} '{entity_display}'",
-            'product_approved': f"Data product '{entity_display}' has been approved",
-            'product_rejected': f"Data product '{entity_display}' has been rejected",
-            'approval_requested': f"Approval requested for {context.entity_type} '{entity_display}'",
-            'request_submitted': f"Your request for {context.entity_type} '{entity_display}' has been submitted and is pending review.",
-            'request_approved': f"Your request for {context.entity_type} '{entity_display}' has been approved.",
-            'request_rejected': f"Your request for {context.entity_type} '{entity_display}' has been denied.",
-            'dataset_updated': f"Dataset '{entity_display}' has been updated.",
-            'pii_detected': f"Potential PII detected in {context.entity_type} '{entity_display}'. Please review.",
-        }
-        return templates.get(template, f"Workflow notification for {entity_display}")
+        return TEMPLATE_MESSAGES.get(template, DEFAULT_TEMPLATE_MESSAGE).format(
+            entity_type=context.entity_type, entity_name=entity_display,
+        )
 
     def _get_notification_type(self, template: str) -> 'NotificationType':
         """Get notification type based on template."""
@@ -1546,6 +1586,7 @@ class CreateAssetReviewStepHandler(StepHandler):
             
             # Determine asset FQN
             asset_fqns = []
+            title = None
             if use_entity_as_asset:
                 # Try to get FQN from entity (TriggerContext attributes)
                 entity_type = tc.entity_type if tc else ''
@@ -1567,14 +1608,12 @@ class CreateAssetReviewStepHandler(StepHandler):
                            entity_name or entity_id)
                     if fqn:
                         asset_fqns.append(fqn)
-                elif entity_type == 'data_contract':
-                    fqn = context.entity.get('name') or entity_data.get('name') or entity_name or entity_id
-                    if fqn:
-                        asset_fqns.append(f"contract:{fqn}")
-                elif entity_type == 'data_product':
-                    fqn = context.entity.get('name') or entity_data.get('name') or entity_name or entity_id
-                    if fqn:
-                        asset_fqns.append(f"product:{fqn}")
+                elif entity_type in ('data_contract', 'data_product'):
+                    # App entities are reviewed by id (names change and aren't unique)
+                    prefix = 'contract' if entity_type == 'data_contract' else 'product'
+                    if entity_id:
+                        asset_fqns.append(f"{prefix}:{entity_id}")
+                        title = f"Review of {entity_name or entity_id}"[:200]
                 else:
                     # Generic fallback
                     fqn = entity_name or entity_id
@@ -1594,7 +1633,7 @@ class CreateAssetReviewStepHandler(StepHandler):
             from src.repositories.data_asset_reviews_repository import data_asset_review_repo
             from src.models.data_asset_reviews import (
                 DataAssetReviewRequest, ReviewedAsset, 
-                ReviewRequestStatus, ReviewedAssetStatus, AssetType
+                ReviewRequestStatus, ReviewedAssetStatus, AssetType, app_entity_asset_type,
             )
             from uuid import uuid4
             from datetime import datetime
@@ -1604,15 +1643,8 @@ class CreateAssetReviewStepHandler(StepHandler):
             # Build assets list
             assets_to_review = []
             for fqn in asset_fqns:
-                # Determine asset type from FQN prefix
-                if fqn.startswith('dataset:'):
-                    asset_type = AssetType.TABLE  # Datasets map to tables
-                elif fqn.startswith('contract:'):
-                    asset_type = AssetType.TABLE  # Contracts map to tables
-                elif fqn.startswith('product:'):
-                    asset_type = AssetType.TABLE  # Products map to tables
-                else:
-                    asset_type = AssetType.TABLE  # Default for UC assets
+                # Contracts and products by their prefix; datasets and UC assets are tables
+                asset_type = app_entity_asset_type(fqn) or AssetType.TABLE
                 
                 assets_to_review.append(ReviewedAsset(
                     id=str(uuid4()),
@@ -1627,6 +1659,7 @@ class CreateAssetReviewStepHandler(StepHandler):
                 id=review_id,
                 requester_email=requester_email,
                 reviewer_email=reviewer_email,
+                title=title,
                 status=ReviewRequestStatus.QUEUED,
                 notes=full_notes,
                 created_at=datetime.utcnow(),
@@ -1660,7 +1693,7 @@ class CreateAssetReviewStepHandler(StepHandler):
         """The reviewer's email: the one named in the request, else the first
         person ``reviewer_role`` resolves to other than the requester (as the
         approval steps resolve it), else a member of the groups of the role it
-        resolves to (or of ``reviewer_role`` itself)."""
+        resolves to (or of ``reviewer_role`` itself), else an admin."""
         tc = context.trigger_context
         requester = requester_email.lower()
         requested = (tc.entity_data or {}).get('reviewer_email') if tc else None
@@ -1674,8 +1707,12 @@ class CreateAssetReviewStepHandler(StepHandler):
                 roles.append(recipient)
             elif '@' in recipient and recipient.lower() != requester:
                 return recipient
-        # A role (e.g. Data Stewards when a domain has no owner): one of its members
-        for role_name in roles or [reviewer_role]:
+        # A role (e.g. Data Stewards when a domain has no owner): one of its members,
+        # and the admins last, as for owner approvals (``_owner_approvers``)
+        roles = roles or [reviewer_role]
+        if not any(r.lower().replace(' ', '').replace('_', '') == 'admin' for r in roles):
+            roles.append('Admin')
+        for role_name in roles:
             reviewer = self._resolve_reviewer_from_role(role_name, exclude=requester_email)
             if reviewer:
                 return reviewer
@@ -2493,7 +2530,7 @@ class GrantPermissionsStepHandler(StepHandler):
         principal: Optional[str] = None
 
         if config.principal_source == 'requester':
-            principal = context.user_email
+            principal = _requester_email(context)
         elif config.principal_source == 'from_variable':
             if not config.principal_variable:
                 return StepResult(passed=False, error="principal_variable is required when principal_source=from_variable")
@@ -3531,5 +3568,8 @@ class WorkflowExecutor:
             triggered_by=db_execution.triggered_by,
             step_executions=step_executions,
             workflow_name=workflow_name,
+            entity_type=trigger_context.entity_type if trigger_context else None,
+            entity_id=trigger_context.entity_id if trigger_context else None,
+            entity_name=trigger_context.entity_name if trigger_context else None,
         )
 

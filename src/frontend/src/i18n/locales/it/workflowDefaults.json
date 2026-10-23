@@ -96,5 +96,38 @@
     "conceptReviewRequest": {
       "rejected": "La revisione del concetto non è stata approvata"
     }
+  },
+  "workflowNames": {
+    "naming-convention-check": "Convalida delle convenzioni di denominazione",
+    "data-product-approval": "Approvazione della pubblicazione del prodotto dati",
+    "data-contract-validation": "Convalida dello schema del contratto dati",
+    "pii-detection": "Rilevamento e classificazione dei PII",
+    "pre-creation-compliance": "Convalida di conformità prima della creazione",
+    "table-pre-creation": "Convalida della tabella prima della creazione",
+    "contract-review-request": "Richiesta di revisione del contratto dati",
+    "contract-deploy-request": "Richiesta di distribuzione del contratto dati",
+    "product-review-request": "Richiesta di revisione del prodotto dati",
+    "access-grant-request": "Richiesta di concessione dell'accesso",
+    "status-change-request": "Richiesta di modifica dello stato",
+    "data-asset-review-request": "Richiesta di revisione dell'asset di dati",
+    "project-access-request": "Richiesta di accesso al progetto",
+    "role-access-request": "Richiesta di accesso al ruolo",
+    "job-failure-notification": "Notifica di job non riuscito",
+    "job-success-notification": "Notifica di job completato",
+    "access-expiring-warning": "Avviso di accesso in scadenza",
+    "access-revoked-notification": "Notifica di accesso revocato",
+    "approval-response": "Risposta di approvazione",
+    "subscription": "Accordo di sottoscrizione",
+    "request-review": "Richiedi revisione",
+    "request-access": "Richiedi accesso",
+    "request-publish": "Richiedi pubblicazione",
+    "request-status-change": "Richiedi modifica dello stato",
+    "before-status-change-default": "Gate di modifica dello stato (predefinito)",
+    "on-publish-notification": "Notifica di pubblicazione",
+    "on-unpublish-notification": "Notifica di ritiro della pubblicazione",
+    "certification-request-review": "Revisione delle richieste di certificazione",
+    "publication-request-review": "Revisione delle richieste di pubblicazione",
+    "first-access-welcome": "Benvenuto: condizioni d'uso",
+    "on-request-access-grant-permissions-reference": "Riferimento: concedi SELECT UC al richiedente (on_request_access)"
   }
 }

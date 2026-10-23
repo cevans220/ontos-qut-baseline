@@ -4,6 +4,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 
 import i18n from '@/i18n/config';
 import WorkflowApprovalResponseDialog from './workflow-approval-response-dialog';
@@ -67,6 +68,112 @@ describe('WorkflowApprovalResponseDialog default texts', () => {
       expect(screen.getByText('Informe o motivo da sua decisão de aprovar ou rejeitar.')).toBeInTheDocument();
     } finally {
       step.config.title = 'Enter a reason';
+    }
+  });
+});
+
+describe('WorkflowApprovalResponseDialog request details', () => {
+  // The payload of a status change request, as the trigger sends it
+  const statusChange = {
+    execution_id: 'e-2',
+    entity_type: 'data_product',
+    entity_id: 'p-1',
+    entity_name: 'Sales',
+    full_payload: {
+      product_id: 'p-1',
+      product_name: 'Sales',
+      from_status: 'active',
+      target_status: 'deprecated',
+      justification: 'Replaced by Sales v2',
+      sunset_date: '2026-12-01',
+      some_custom_field: 'kept',
+    },
+  };
+
+  it('shows the field labels, the entity type and the statuses in Portuguese', async () => {
+    await i18n.changeLanguage('pt');
+    render(
+      <MemoryRouter>
+        <WorkflowApprovalResponseDialog isOpen onOpenChange={() => {}} payload={statusChange as never} />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Status solicitado')).toBeInTheDocument();
+    expect(screen.getByText('ID do produto')).toBeInTheDocument();
+    expect(screen.getByText('Nome do produto')).toBeInTheDocument();
+    expect(screen.getByText('Status de origem')).toBeInTheDocument();
+    expect(screen.getByText('Data de desativação')).toBeInTheDocument();
+    expect(screen.getByText('Justificativa')).toBeInTheDocument();
+    expect(screen.getByText('Ativo')).toBeInTheDocument();
+    expect(screen.getByText('Obsoleto')).toBeInTheDocument();
+    expect(screen.getByText(/Produto de dados · Sales/)).toBeInTheDocument();
+    // A field the dialog doesn't know keeps its humanised key
+    expect(screen.getByText('Some Custom Field')).toBeInTheDocument();
+    expect(screen.queryByText('Target Status')).not.toBeInTheDocument();
+  });
+
+  it('keeps the English labels in English', async () => {
+    render(
+      <MemoryRouter>
+        <WorkflowApprovalResponseDialog isOpen onOpenChange={() => {}} payload={statusChange as never} />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Requested status')).toBeInTheDocument();
+    expect(screen.getByText('Deprecated')).toBeInTheDocument();
+    expect(screen.getByText(/Data Product · Sales/)).toBeInTheDocument();
+  });
+});
+
+describe('WorkflowApprovalResponseDialog workflow name', () => {
+  const request = (workflowName: string) => ({
+    execution_id: 'e-3',
+    entity_type: 'data_product',
+    entity_id: 'p-1',
+    entity_name: 'Sales',
+    workflow_name: workflowName,
+  });
+
+  it('shows a shipped default workflow name in Portuguese', async () => {
+    await i18n.changeLanguage('pt');
+    render(
+      <MemoryRouter>
+        <WorkflowApprovalResponseDialog isOpen onOpenChange={() => {}} payload={request('Status Change Request') as never} />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Solicitação de mudança de status')).toBeInTheDocument();
+    expect(screen.queryByText('Status Change Request')).not.toBeInTheDocument();
+  });
+
+  it('shows a renamed workflow as named', async () => {
+    await i18n.changeLanguage('pt');
+    render(
+      <MemoryRouter>
+        <WorkflowApprovalResponseDialog isOpen onOpenChange={() => {}} payload={request('EU status changes') as never} />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('EU status changes')).toBeInTheDocument();
+  });
+});
+
+describe('WorkflowApprovalResponseDialog fallbacks', () => {
+  it('uses the translated title and description when the workflow has no step config', async () => {
+    const original = api.get;
+    (api as any).get = async () => ({ data: { id: 'wf', name: 'Approval response', steps: [] } });
+    await i18n.changeLanguage('pt');
+    try {
+      render(
+        <MemoryRouter>
+          <WorkflowApprovalResponseDialog isOpen onOpenChange={() => {}} payload={{ execution_id: 'e-9' } as never} />
+        </MemoryRouter>,
+      );
+      expect(await screen.findByText(i18n.t('workflows:approvalResponse.titleFallback'))).toBeInTheDocument();
+      expect(screen.getByText(i18n.t('workflows:approvalResponse.descriptionFallback'))).toBeInTheDocument();
+      expect(i18n.t('workflows:approvalResponse.titleFallback')).not.toBe('Approve or reject');
+    } finally {
+      (api as any).get = original;
     }
   });
 });

@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from src.common.logging import get_logger
 from src.controller import search_scoring
-from src.tools.base import BaseTool, ToolContext, ToolResult
+from src.tools.base import BaseTool, ToolContext, ToolResult, tool_failure
 # search_scoring is no longer imported here — search tools delegate to
 # SearchManager.query_index() so the active backend (memory or postgres) is used.
 
@@ -248,10 +248,9 @@ class SearchDataProductsTool(BaseTool):
             )
 
         except Exception as e:
-            logger.error(f"[search_data_products] FAILED: {e.__class__.__name__}: {e}", exc_info=True)
             return ToolResult(
                 success=False,
-                error=f"{e.__class__.__name__}: {str(e)}",
+                **tool_failure("search_data_products", e),
                 data={"products": []},
             )
 
@@ -357,8 +356,7 @@ class CreateDraftDataProductTool(BaseTool):
             )
             
         except Exception as e:
-            logger.error(f"[create_draft_data_product] FAILED: {type(e).__name__}: {e}", exc_info=True)
-            return ToolResult(success=False, error=f"{type(e).__name__}: {str(e)}")
+            return ToolResult(success=False, **tool_failure("create_draft_data_product", e))
 
 
 class UpdateDataProductTool(BaseTool):
@@ -448,8 +446,7 @@ class UpdateDataProductTool(BaseTool):
             )
             
         except Exception as e:
-            logger.error(f"[update_data_product] FAILED: {type(e).__name__}: {e}", exc_info=True)
-            return ToolResult(success=False, error=f"{type(e).__name__}: {str(e)}")
+            return ToolResult(success=False, **tool_failure("update_data_product", e))
 
 
 class GetDataProductTool(BaseTool):
@@ -494,8 +491,7 @@ class GetDataProductTool(BaseTool):
             return ToolResult(success=True, data=_serialize_product(product))
 
         except Exception as e:
-            logger.error(f"[get_data_product] FAILED: {type(e).__name__}: {e}", exc_info=True)
-            return ToolResult(success=False, error=f"{type(e).__name__}: {str(e)}")
+            return ToolResult(success=False, **tool_failure("get_data_product", e))
 
 
 class GetDataProductsBulkTool(BaseTool):
@@ -576,8 +572,7 @@ class GetDataProductsBulkTool(BaseTool):
                 },
             )
         except Exception as e:
-            logger.error(f"[get_data_products] FAILED: {type(e).__name__}: {e}", exc_info=True)
-            return ToolResult(success=False, error=f"{type(e).__name__}: {str(e)}")
+            return ToolResult(success=False, **tool_failure("get_data_products", e))
 
 
 class ListDataProductsTool(BaseTool):
@@ -688,6 +683,5 @@ class DeleteDataProductTool(BaseTool):
             )
             
         except Exception as e:
-            logger.error(f"[delete_data_product] FAILED: {type(e).__name__}: {e}", exc_info=True)
-            return ToolResult(success=False, error=f"{type(e).__name__}: {str(e)}")
+            return ToolResult(success=False, **tool_failure("delete_data_product", e))
 

@@ -749,5 +749,11 @@
     "tabMemberships": "Appartenenze",
     "detailsFailed": "Impossibile recuperare i dettagli dell'utente",
     "loadFailed": "Impossibile caricare i dati del profilo"
+  },
+  "importSummary": {
+    "created": "Creati: {{created}}.",
+    "createdSkipped": "Creati: {{created}}, saltati: {{skipped}}.",
+    "createdFailed": "Creati: {{created}}, non riusciti: {{failed}}.",
+    "createdSkippedFailed": "Creati: {{created}}, saltati: {{skipped}}, non riusciti: {{failed}}."
   }
 }

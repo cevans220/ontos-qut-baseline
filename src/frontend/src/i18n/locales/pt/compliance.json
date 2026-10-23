@@ -171,8 +171,9 @@
     "missing_assert": "A regra não tem cláusula ASSERT, então todas as entidades passam."
   },
   "runErrors": {
+    "entities_load_failed": "Não foi possível carregar as entidades {{entityType}}, por isso a regra não pôde ser avaliada.",
     "rule_parse_failed": "Não foi possível interpretar a regra: {{detail}}",
-    "workspace_client_unavailable": "O workspace Databricks não está disponível ({{detail}}) e esta regra verifica objetos do Unity Catalog, por isso não pôde ser executada.",
+    "workspace_client_unavailable": "O workspace Databricks não está disponível e esta regra verifica objetos do Unity Catalog, por isso não pôde ser executada.",
     "tags_load_failed": "Não foi possível carregar as tags das entidades {{entityType}}, por isso a regra não pôde ser avaliada."
   }
 }

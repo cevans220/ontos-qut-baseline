@@ -441,6 +441,8 @@ export interface WorkflowValidationResult {
   valid: boolean;
   errors: string[];
   warnings: string[];
+  /** The same errors with a code and params each (translated by the designer). */
+  issues?: { code: string; message: string; params: Record<string, unknown> }[];
 }
 
 // API responses

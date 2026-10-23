@@ -31,6 +31,8 @@
       "special": "Speziell",
       "requesterOriginalUser": "Antragsteller (ursprünglicher Benutzer)",
       "ownerEntityOwner": "Eigentümer (Entity-Eigentümer)",
+      "domainOwners": "Domänenverantwortliche",
+      "contractApprovers": "Vertragsgenehmiger",
       "appRoles": "App-Rollen",
       "businessRoles": "Geschäftsrollen",
       "noGroups": "Keine Gruppen"
@@ -43,7 +45,8 @@
       "createdSuccess": "Workflow erfolgreich erstellt",
       "updatedSuccess": "Workflow erfolgreich aktualisiert",
       "createFailed": "Workflow konnte nicht erstellt werden: {{error}}",
-      "updateFailed": "Workflow konnte nicht aktualisiert werden: {{error}}"
+      "updateFailed": "Workflow konnte nicht aktualisiert werden: {{error}}",
+      "stepConfigInvalid": "Schritt \"{{step}}\": {{issue}}"
     },
     "badges": {
       "default": "Standard",
@@ -241,6 +244,58 @@
       "timeoutSeconds": "Zeitlimit (Sekunden)",
       "retryCount": "Anzahl Wiederholungen",
       "retryHelp": "Anzahl der Wiederholungen bei Fehler (0-5)."
+    },
+    "conditional": {
+      "condition": "Bedingung",
+      "placeholder": "obj.status = 'active' AND NOT HAS_TAG('pii')",
+      "branchHelp": "Ist die Bedingung wahr, folgt der Workflow dem Pass-Zweig; ist sie falsch, dem Fail-Zweig.",
+      "fieldsHelp": "Schreiben Sie einen Compliance-DSL-Ausdruck ohne MATCH oder ASSERT. Felder der Entität werden als obj.<feld> gelesen; vergleichen Sie mit =, nicht ==.",
+      "examplesTitle": "Beispiele",
+      "errors": {
+        "condition_required": "Geben Sie eine Bedingung ein.",
+        "condition_syntax_error": "Die Bedingung kann nicht geparst werden (Zeile {{line}}, Spalte {{column}}).",
+        "condition_trailing_input": "Unerwartetes \"{{token}}\" nach der Bedingung (Zeile {{line}}, Spalte {{column}}). Verknüpfen Sie Bedingungen mit AND oder OR.",
+        "condition_too_long": "Die Bedingung ist länger als {{maximum}} Zeichen. Kürzen Sie sie oder teilen Sie sie auf mehrere Schritte auf.",
+        "condition_too_complex": "Die Bedingung ist zu tief verschachtelt, um sie zu prüfen. Entfernen Sie einige Klammern oder teilen Sie sie auf mehrere Schritte auf."
+      }
+    },
+    "script": {
+      "language": "Sprache",
+      "languages": {
+        "python": "Python",
+        "sql": "SQL"
+      },
+      "code": "Code",
+      "pythonPlaceholder": "if not entity.get('description'):\n    result = {'passed': False, 'message': 'Missing description'}",
+      "sqlPlaceholder": "SELECT COUNT(*) FROM ${entity_id}",
+      "timeout": "Zeitlimit (Sekunden)",
+      "timeoutHelp": "Der Schritt schlägt fehl, wenn das Skript länger läuft.",
+      "variablesTitle": "Verfügbare Variablen",
+      "pythonVariables": {
+        "entity": "Die Daten der Entität (ein Dictionary)",
+        "entity_type": "Der Typ der Entität",
+        "entity_id": "Die ID der Entität",
+        "entity_name": "Der Name der Entität",
+        "user_email": "E-Mail des Benutzers, der den Workflow ausgelöst hat",
+        "step_results": "Ergebnisse der bereits ausgeführten Schritte, nach Schritt-ID"
+      },
+      "pythonResultHelp": "Setzen Sie result, um den Zweig zu wählen: result = {'passed': False, 'message': '...'} folgt dem Fail-Zweig; ohne result ist der Schritt erfolgreich. Nur grundlegende Built-ins sind verfügbar: keine Imports, Dateien oder Netzwerk.",
+      "sqlHelp": "Läuft auf dem in den Einstellungen festgelegten SQL Warehouse. ${variable}-Platzhalter werden vor der Ausführung ersetzt; der Schritt ist erfolgreich, wenn die Anweisung erfolgreich ist. Die Anweisung wartet bis zu 50 Sekunden.",
+      "errors": {
+        "script_code_required": "Geben Sie den Code des Skripts ein.",
+        "script_timeout_invalid": "Geben Sie eine ganze Zahl an Sekunden ein, mindestens {{minimum}}.",
+        "script_language_unsupported": "Die Sprache \"{{language}}\" wird nicht unterstützt. Unterstützt: {{supported}}."
+      }
+    },
+    "validationIssues": {
+      "stepsRequired": "Ein Workflow braucht mindestens einen Schritt.",
+      "duplicateStepIds": "Zwei Schritte haben dieselbe ID.",
+      "stepUnknownReference": "Schritt \"{{step}}\" verweist mit seinem {{branch}}-Zweig auf \"{{target}}\", der nicht im Workflow ist.",
+      "stepConfigMissing": "Bei Schritt \"{{step}}\" fehlen Pflichteinstellungen: {{fields}}.",
+      "branch": {
+        "on_pass": "Erfolgs",
+        "on_fail": "Fehler"
+      }
     }
   },
   "approvalResponse": {
@@ -274,6 +329,47 @@
     },
     "errors": {
       "own_owner_approval": "Diese Genehmigung ist Sache der Eigentümer; Sie können Ihre eigene Anfrage nicht genehmigen."
+    },
+    "entityTypes": {
+      "entity": "Entität",
+      "data_product": "Datenprodukt",
+      "data_contract": "Datenvertrag",
+      "data_domain": "Datendomäne",
+      "data_asset_review": "Prüfung von Daten-Assets",
+      "access_grant": "Zugriffsberechtigung",
+      "asset": "Asset",
+      "ontology_concept": "Konzept",
+      "concept": "Konzept"
+    },
+    "fields": {
+      "product_id": "Produkt-ID",
+      "product_name": "Produktname",
+      "contract_id": "Vertrags-ID",
+      "contract_name": "Vertragsname",
+      "status": "Status",
+      "from_status": "Ausgangsstatus",
+      "to_status": "Zielstatus",
+      "target_status": "Angeforderter Status",
+      "current_status": "Aktueller Status",
+      "justification": "Begründung",
+      "sunset_date": "Auslaufdatum",
+      "replacement_id": "Ersatz-ID",
+      "replacement_name": "Ersatz",
+      "requested_scope": "Angeforderter Umfang",
+      "publication_scope": "Veröffentlichungsumfang",
+      "requester": "Antragsteller",
+      "requester_message": "Nachricht des Antragstellers",
+      "reviewer_email": "Prüfer",
+      "requested_certification_level": "Angeforderte Zertifizierungsstufe",
+      "certification_level": "Zertifizierungsstufe",
+      "certification_notes": "Zertifizierungsnotizen",
+      "asset_count": "Anzahl der Assets",
+      "asset_fqns": "Assets",
+      "domain_id": "Domänen-ID",
+      "project_id": "Projekt-ID",
+      "project_name": "Projekt",
+      "name": "Name",
+      "notes": "Notizen"
     }
   },
   "approvalWizard": {
@@ -444,6 +540,25 @@
     "endpointPlaceholder": "/api/workspace/groups",
     "endpointHint": "Backend-Endpunkt, der JSON zurückgibt",
     "addField": "Feld hinzufügen"
+  },
+  "runDialog": {
+    "menuLabel": "Ausführen",
+    "title": "„{{name}}“ ausführen",
+    "description": "Startet diesen manuellen Workflow für eine Entität. Er läuft jetzt, in Ihrem Namen.",
+    "entityType": "Entitätstyp",
+    "entity": "Entität",
+    "selectEntity": "Entität auswählen",
+    "loading": "Wird geladen...",
+    "noEntities": "Keine Einträge zur Auswahl vorhanden.",
+    "listFailed": "Die Liste konnte nicht geladen werden. Geben Sie stattdessen die ID ein.",
+    "entityId": "Entitäts-ID",
+    "entityIdPlaceholder": "z. B. main.sales.orders",
+    "entityIdHelp": "Die ID oder der vollständige Name der Entität, für die der Workflow laufen soll.",
+    "run": "Ausführen",
+    "failed": "Der Workflow konnte nicht gestartet werden.",
+    "resultStatus": "Ergebnis",
+    "viewExecution": "Ausführung anzeigen",
+    "resultEntity": "{{type}}: {{name}}"
   },
   "templateVars": {
     "copiedToClipboard": "{{placeholder}} in die Zwischenablage kopiert.",

@@ -753,5 +753,11 @@
     "tabMemberships": "Memberships",
     "detailsFailed": "Failed to fetch user details",
     "loadFailed": "Failed to load profile data"
+  },
+  "importSummary": {
+    "created": "Created: {{created}}.",
+    "createdSkipped": "Created: {{created}}, skipped: {{skipped}}.",
+    "createdFailed": "Created: {{created}}, failed: {{failed}}.",
+    "createdSkippedFailed": "Created: {{created}}, skipped: {{skipped}}, failed: {{failed}}."
   }
 }

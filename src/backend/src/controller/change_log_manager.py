@@ -67,14 +67,21 @@ class ChangeLogManager:
         )
 
     def get_changes_for_entity(
-        self, db: Session, entity_type: str, entity_id: str, limit: int = 100
+        self,
+        db: Session,
+        entity_type: str,
+        entity_id: str,
+        limit: int = 100,
+        action: Optional[str] = None,
     ) -> List[ChangeLogDb]:
         """Change log entries for an entity, newest first (``entry.details`` is parsed).
 
-        Used by the request / approval flows to find who made a request.
+        Used by the request / approval flows to find who made a request. Pass
+        ``action`` to filter in SQL, so an old request is found however many
+        newer entries the entity has; ``limit`` then applies to matching rows only.
         """
         return self.list_changes_for_entity(
-            db, entity_type=entity_type, entity_id=entity_id, limit=limit
+            db, entity_type=entity_type, entity_id=entity_id, limit=limit, action=action
         )
 
     def list_changes_for_entity(
@@ -83,13 +90,15 @@ class ChangeLogManager:
         *, 
         entity_type: str, 
         entity_id: str, 
-        limit: int = 100
+        limit: int = 100,
+        action: Optional[str] = None,
     ) -> List[ChangeLogDb]:
-        """List change log entries for a specific entity."""
+        """List change log entries for a specific entity (optionally one action)."""
         return self._change_log_repo.list_by_entity(
             db, 
             entity_type=entity_type, 
             entity_id=entity_id, 
+            action=action,
             limit=limit
         )
 
