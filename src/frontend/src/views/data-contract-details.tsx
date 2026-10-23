@@ -70,6 +70,7 @@ import { DirectCertifyDialog, DirectPublishDialog } from '@/components/common/di
 import type { CertificationLevel, PublicationScope } from '@/types/lifecycle'
 import { userHasApprovalPrivilege } from '@/lib/permissions'
 import { ApprovalEntity } from '@/types/settings'
+import { apiErrorOf, statusChangeErrorText } from '@/lib/status-change-error'
 
 // Status-based editability constants
 // Only draft/proposed contracts can be edited in place
@@ -219,7 +220,7 @@ const formatDate = (dateString: string | undefined, fallback: string = 'N/A'): s
 
 const getStatusColor = (status: string | undefined): 'default' | 'secondary' | 'destructive' | 'outline' => {
   const lowerStatus = status?.toLowerCase() || '';
-  if (lowerStatus === 'active' || lowerStatus === 'approved' || lowerStatus === 'certified') return 'default';
+  if (lowerStatus === 'active' || lowerStatus === 'approved') return 'default';
   if (lowerStatus === 'draft' || lowerStatus === 'proposed') return 'secondary';
   if (lowerStatus === 'retired' || lowerStatus === 'deprecated' || lowerStatus === 'rejected') return 'outline';
   return 'default';
@@ -988,7 +989,14 @@ export default function DataContractDetails() {
         throw new Error(errorData.detail?.message || t('data-contracts:detailsView.errors.breakingChangesDetected', 'Breaking changes detected'))
       }
 
-      if (!res.ok) throw new Error(t('data-contracts:detailsView.errors.updateFailed', 'Update failed'))
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        throw new Error(statusChangeErrorText(
+          apiErrorOf(body, t('data-contracts:detailsView.errors.updateFailed', 'Update failed')),
+          t,
+          'data-contracts',
+        ))
+      }
       
       console.log('[DEBUG] Calling fetchDetails()...')
       await fetchDetails()
@@ -2659,7 +2667,7 @@ export default function DataContractDetails() {
                 size="sm"
                 variant="outline"
                 onClick={() => setIsLinkProductDialogOpen(true)}
-                disabled={!contract || !['active', 'approved', 'certified'].includes((contract.status || '').toLowerCase())}
+                disabled={!contract || !['active', 'approved'].includes((contract.status || '').toLowerCase())}
               >
                 <Plus className="h-4 w-4 mr-1.5" />
                 {t('data-contracts:detailsView.linkedProducts.linkExisting', 'Link to Existing Product')}
@@ -2667,7 +2675,7 @@ export default function DataContractDetails() {
               <Button
                 size="sm"
                 onClick={() => setIsCreateProductDialogOpen(true)}
-                disabled={!contract || !['active', 'approved', 'certified'].includes((contract.status || '').toLowerCase())}
+                disabled={!contract || !['active', 'approved'].includes((contract.status || '').toLowerCase())}
               >
                 <Plus className="h-4 w-4 mr-1.5" />
                 {t('data-contracts:detailsView.linkedProducts.createProduct', 'Create Data Product')}
@@ -2687,14 +2695,14 @@ export default function DataContractDetails() {
               <div className="text-sm text-muted-foreground mb-4">
                 {t('data-contracts:detailsView.linkedProducts.emptyHint', 'Create a data product that uses this contract to govern a deliverable')}
               </div>
-              {contract && ['active', 'approved', 'certified'].includes((contract.status || '').toLowerCase()) ? (
+              {contract && ['active', 'approved'].includes((contract.status || '').toLowerCase()) ? (
                 <Button onClick={() => setIsCreateProductDialogOpen(true)}>
                   <Plus className="h-4 w-4 mr-2" />
                   {t('data-contracts:detailsView.linkedProducts.createProduct', 'Create Data Product')}
                 </Button>
               ) : (
                 <div className="text-sm text-muted-foreground italic">
-                  {t('data-contracts:detailsView.linkedProducts.statusRequirement', "Contract must be in 'active', 'approved', or 'certified' status")}
+                  {t('data-contracts:detailsView.linkedProducts.statusRequirement', "Contract must be in 'active' or 'approved' status")}
                 </div>
               )}
             </div>

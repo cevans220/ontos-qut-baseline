@@ -198,7 +198,8 @@
     "validationErrorTitle": "Validierungsfehler",
     "nameRequired": "Vertragsname ist erforderlich",
     "versionRequired": "Version ist erforderlich",
-    "saveError": "Vertrag konnte nicht gespeichert werden"
+    "saveError": "Vertrag konnte nicht gespeichert werden",
+    "statusChangeHint": "Der Status wird mit Status ändern auf der Seite geändert, das den Übergang prüft und die Statusänderungs-Workflows ausführt."
   },
   "import": {
     "title": "Datenvertrag importieren",
@@ -345,7 +346,7 @@
       "createProduct": "Datenprodukt erstellen",
       "noneYet": "Noch keine verknüpften Datenprodukte",
       "emptyHint": "Erstellen Sie ein Datenprodukt, das diesen Vertrag zur Steuerung eines Lieferobjekts verwendet",
-      "statusRequirement": "Der Vertrag muss den Status 'active', 'approved' oder 'certified' haben",
+      "statusRequirement": "Der Vertrag muss den Status 'active' oder 'approved' haben",
       "unnamedProduct": "Unbenanntes Produkt",
       "deliverables_one": "Lieferobjekt: {{ports}}",
       "deliverables_other": "Lieferobjekte: {{ports}}"

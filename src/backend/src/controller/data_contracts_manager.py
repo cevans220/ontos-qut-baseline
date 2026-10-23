@@ -59,6 +59,13 @@ from sqlalchemy.orm import Session
 
 from src.models.import_results import BatchImportResult, ImportItemResult
 from src.common.entity_kind import classify_import_entity, describe_import_entity
+from src.common.api_errors import CodedValueError
+from src.common.lifecycle_status import (
+    CONTRACT_STATUSES,
+    check_status_unchanged,
+    import_status,
+    normalize_new_status,
+)
 from src.models.data_contracts import (
     ColumnDefinition,
     DataContract,
@@ -2427,7 +2434,9 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
             # When an owner team is supplied the draft is team-visible from the
             # start, so we leave draft_owner_id unset (tier-2 visibility). The
             # draft_owner_id is cleared again on the draft->proposed transition.
-            status_value = data_dict.get('status', 'draft')
+            # A new contract starts in one of the lifecycle statuses; `certified`
+            # is certification_level, set by the certify action.
+            status_value = normalize_new_status(data_dict.get('status'), CONTRACT_STATUSES)
             draft_owner_id = (
                 current_user
                 if (status_value or '').lower() == 'draft' and not owner_team_id
@@ -2564,6 +2573,11 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
             db_obj = data_contract_repo.get(db, id=contract_id)
             if not db_obj:
                 raise ValueError("Contract not found")
+
+            # The status changes only through transition_status (change-status,
+            # request-status-change, approve/reject), which runs the gates; an
+            # update may only repeat it.
+            check_status_unchanged(db_obj.status, data_dict.get('status'))
             
             # Validate required fields
             if data_dict.get('name') is not None and (not data_dict['name'] or not data_dict['name'].strip()):
@@ -3006,7 +3020,7 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
                 'uploaded_contract'
             )
             version_val = parsed_odcs.get('version', '1.0.0')
-            status_val = parsed_odcs.get('status', 'draft')
+            status_val = normalize_new_status(parsed_odcs.get('status'), CONTRACT_STATUSES)
             owner_val = parsed_odcs.get('owner') or current_user or 'system'
             kind_val = parsed_odcs.get('kind', 'DataContract')
             api_version_val = parsed_odcs.get('apiVersion') or parsed_odcs.get('api_version', 'v3.1.0')
@@ -3350,6 +3364,11 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
                     index += 1
                     continue
                 try:
+                    # A status Ontos doesn't have is imported as draft, with a note
+                    status_value, status_note = import_status(
+                        entity.get('status'), CONTRACT_STATUSES
+                    )
+                    entity = {**entity, 'status': status_value}
                     created = self.create_from_upload(
                         db=db, parsed_odcs=entity, current_user=current_user,
                         create_missing_domains=create_missing_domains,
@@ -3358,6 +3377,19 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
                     result.add(ImportItemResult(
                         index=index, source_file=filename, source_id=source_id,
                         entity_id=created.id, name=created.name, status="created",
+                        **(status_note or {}),
+                    ))
+                except CodedValueError as e:
+                    # The app's own refusal (e.g. ``certified`` as a status):
+                    # its English message is safe to show, and its code lets
+                    # the UI translate it.
+                    logger.info(
+                        "Refused contract at batch index %d (file %s): %s", index, filename, e,
+                    )
+                    result.add(ImportItemResult(
+                        index=index, source_file=filename, source_id=source_id,
+                        name=entity.get('name'), status="failed",
+                        message=str(e), code=e.code, params=e.params or None,
                     ))
                 except Exception as e:
                     # Log full detail (may carry SQL/internal text); keep the
@@ -4110,7 +4142,8 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
         db,
         contract_id: str,
         new_status: str,
-        current_user: Optional[str] = None
+        current_user: Optional[str] = None,
+        also_set: Optional[Dict[str, Any]] = None,
     ) -> DataContractDb:
         """
         Transition contract status. Validates contract exists and transition is valid.
@@ -4121,6 +4154,9 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
             contract_id: Contract UUID
             new_status: New status value
             current_user: Username of current user
+            also_set: Other fields written in the same commit as the status,
+                only once the gates passed (e.g. a review request clears
+                ``draft_owner_id`` with its draft -> proposed change)
             
         Returns:
             Updated DataContractDb instance
@@ -4143,32 +4179,25 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
                 raise ValueError(f"Invalid status transition from {current_status} to {new_status}")
         
         # Run before_status_change workflows (gating)
-        try:
-            from src.common.workflow_triggers import get_trigger_registry
-            from src.models.process_workflows import EntityType as WFEntityType
-            trigger_registry = get_trigger_registry(db)
-            gate_passed, gate_executions = trigger_registry.before_status_change(
-                entity_type=WFEntityType.DATA_CONTRACT,
-                entity_id=contract_id,
-                from_status=current_status,
-                to_status=new_status,
-                entity_name=contract.name,
-                entity_data={"name": contract.name, "status": current_status},
-                user_email=current_user,
-            )
-            if not gate_passed:
-                from src.common.workflow_triggers import StatusChangeBlockedError
-                raise StatusChangeBlockedError(current_status, new_status, gate_executions)
-        except ValueError:
-            raise
-        except Exception as e:
-            logger.warning(f"before_status_change trigger error (non-fatal): {e}")
+        # (a gate that errors refuses the transition when it is fail_closed, #1103)
+        from src.common.workflow_triggers import run_status_gates
+        from src.models.process_workflows import EntityType as WFEntityType
+        run_status_gates(
+            db,
+            entity_type=WFEntityType.DATA_CONTRACT,
+            entity_id=contract_id,
+            from_status=current_status,
+            to_status=new_status,
+            entity_name=contract.name,
+            entity_data={"name": contract.name, "status": current_status},
+            user_email=current_user,
+        )
         
         try:
             updated = data_contract_repo.update(
                 db=db,
                 db_obj=contract,
-                obj_in={"status": new_status, "updated_by": current_user}
+                obj_in={**(also_set or {}), "status": new_status, "updated_by": current_user}
             )
             db.commit()
             db.refresh(updated)
@@ -5366,14 +5395,17 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
         if schema_object_count == 0:
             raise ReviewSchemaRequiredError()
 
-        # Transition to PROPOSED. Clear the personal-draft owner so the contract
-        # is promoted from tier-1 (creator-only) to organisation visibility; a
-        # contract under steward review must be discoverable by stewards and
-        # other team members, not just its author (PRD #442).
-        contract.status = 'proposed'
-        contract.draft_owner_id = None
-        db.add(contract)
-        db.flush()
+        # Transition to PROPOSED through transition_status, so the lifecycle
+        # check and the before_status_change gates run (a gate refusal raises
+        # its coded error here). The same commit clears the personal-draft
+        # owner, so the contract is promoted from tier-1 (creator-only) to
+        # organisation visibility together with its new status; a contract
+        # under steward review must be discoverable by stewards and other team
+        # members, not just its author (PRD #442).
+        contract = self.transition_status(
+            db=db, contract_id=contract_id, new_status='proposed',
+            current_user=current_user, also_set={'draft_owner_id': None},
+        )
         self._update_search_index(contract, db)
         
         now = datetime.utcnow()
@@ -5802,17 +5834,25 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
         from_status = (contract.status or '').lower()
         now = datetime.utcnow()
         
-        # Update contract status based on decision
+        # Update contract status based on decision, through transition_status
+        # so the lifecycle check and the before_status_change gates run
         if decision == 'approve':
             if from_status not in ('proposed', 'under_review'):
                 raise ValueError(f"Cannot approve from status {contract.status}")
-            contract.status = 'approved'
+            contract = self.transition_status(
+                db=db, contract_id=contract_id, new_status='approved',
+                current_user=current_user,
+            )
             notification_title = "Contract Review Approved"
             notification_desc = f"Your contract '{contract.name}' has been approved by the data steward."
         elif decision == 'reject':
             if from_status not in ('proposed', 'under_review'):
                 raise ValueError(f"Cannot reject from status {contract.status}")
-            contract.status = 'draft'  # ODCS: rejected contracts return to draft for revisions
+            # ODCS: rejected contracts return to draft for revisions
+            contract = self.transition_status(
+                db=db, contract_id=contract_id, new_status='draft',
+                current_user=current_user,
+            )
             notification_title = "Contract Review Rejected"
             notification_desc = f"Your contract '{contract.name}' was rejected and needs revisions."
         else:  # clarify
@@ -6305,12 +6345,15 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
             allowed_transitions = self._get_allowed_status_transitions(from_status)
             if target_status_lower not in allowed_transitions:
                 raise ValueError(f"Invalid transition from '{from_status}' to '{target_status}'")
-            
-            contract.status = target_status_lower
-            contract.updated_at = now
-            db.commit()
-            db.refresh(contract)
-            self._update_search_index(contract, db)
+
+            # Through transition_status, like a product's approved request, so
+            # the before_status_change gates run and on_status_change fires.
+            contract = self.transition_status(
+                db=db,
+                contract_id=contract_id,
+                new_status=target_status_lower,
+                current_user=current_user,
+            )
             
             notification_title = "Status Change Approved"
             notification_desc = f"Your request to change status of contract '{contract.name}' from '{from_status}' to '{target_status}' has been approved."
@@ -6374,18 +6417,14 @@ class DataContractsManager(DeliveryMixin, SearchableAsset):
         }
     
     def _get_allowed_status_transitions(self, current_status: str) -> List[str]:
-        """Get allowed status transitions from current status."""
-        transitions = {
-            'draft': ['proposed', 'deprecated'],
-            'proposed': ['draft', 'under_review', 'deprecated'],
-            'under_review': ['draft', 'approved', 'deprecated'],
-            'approved': ['active', 'deprecated'],
-            'active': ['certified', 'deprecated'],
-            'certified': ['deprecated'],
-            'deprecated': ['retired'],
-            'retired': [],
-        }
-        return transitions.get(current_status.lower(), [])
+        """Get allowed status transitions from current status.
+
+        The lifecycle map's (``DATA_CONTRACT_TRANSITIONS``), the one
+        ``transition_status`` applies. Certification isn't a status.
+        """
+        from src.models.lifecycle import DATA_CONTRACT_TRANSITIONS
+
+        return list(DATA_CONTRACT_TRANSITIONS.get((current_status or 'draft').lower(), []))
     
     def get_team_members_for_import(
         self,

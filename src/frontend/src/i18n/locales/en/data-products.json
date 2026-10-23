@@ -541,7 +541,8 @@
       "failedToSerialize": "Failed to serialize UI state to JSON.",
       "unexpectedError": "An unexpected error occurred."
     },
-    "syntaxErrorLabel": "Syntax Error:"
+    "syntaxErrorLabel": "Syntax Error:",
+    "statusChangeHint": "The status changes with Change Status on the page, which checks the transition and runs the status change workflows."
   },
   "import": {
     "title": "Import Data Product",
@@ -929,7 +930,8 @@
       "createNewContract": "Create New Contract",
       "linkContract": "Link Contract",
       "linking": "Linking..."
-    }
+    },
+    "statusFilterNote": "Only showing contracts with 'active' or 'approved' status. Pick a specific version: same-named contracts show their version inline."
   },
   "hierarchy": {
     "title": "Data Hierarchy",

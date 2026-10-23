@@ -541,7 +541,8 @@
       "failedToSerialize": "UI-Status konnte nicht in JSON serialisiert werden.",
       "unexpectedError": "Ein unerwarteter Fehler ist aufgetreten."
     },
-    "syntaxErrorLabel": "Syntaxfehler:"
+    "syntaxErrorLabel": "Syntaxfehler:",
+    "statusChangeHint": "Der Status wird mit Status ändern auf der Seite geändert, das den Übergang prüft und die Statusänderungs-Workflows ausführt."
   },
   "import": {
     "title": "Datenprodukt importieren",
@@ -929,7 +930,8 @@
       "createNewContract": "Neuen Vertrag erstellen",
       "linkContract": "Vertrag verknüpfen",
       "linking": "Wird verknüpft..."
-    }
+    },
+    "statusFilterNote": "Es werden nur Verträge mit dem Status 'active' oder 'approved' angezeigt. Wählen Sie eine bestimmte Version: Gleichnamige Verträge zeigen ihre Version daneben."
   },
   "hierarchy": {
     "title": "Datenhierarchie",

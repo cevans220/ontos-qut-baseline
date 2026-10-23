@@ -198,7 +198,8 @@
     "validationErrorTitle": "Validatiefout",
     "nameRequired": "Contractnaam is vereist",
     "versionRequired": "Versie is vereist",
-    "saveError": "Opslaan van contract mislukt"
+    "saveError": "Opslaan van contract mislukt",
+    "statusChangeHint": "De status wijzig je met Status wijzigen op de pagina, dat de overgang controleert en de workflows voor statuswijziging uitvoert."
   },
   "import": {
     "title": "Datacontract Importeren",
@@ -345,7 +346,7 @@
       "createProduct": "Dataproduct aanmaken",
       "noneYet": "Nog geen gekoppelde dataproducten",
       "emptyHint": "Maak een dataproduct aan dat dit contract gebruikt om een deliverable te beheren",
-      "statusRequirement": "Contract moet de status 'active', 'approved' of 'certified' hebben",
+      "statusRequirement": "Contract moet de status 'active' of 'approved' hebben",
       "unnamedProduct": "Naamloos product",
       "deliverables_one": "Deliverable: {{ports}}",
       "deliverables_other": "Deliverables: {{ports}}"
