@@ -520,7 +520,9 @@
       "invalidTransition": "El contrato ahora está en {{fromStatus}} y ya no se puede aprobar ni rechazar. Recargue la página para ver su estado actual.",
       "approveFailed": "Error al aprobar",
       "rejectFailed": "Error al rechazar",
-      "startProfilingFailed": "Error al iniciar el perfilado"
+      "startProfilingFailed": "Error al iniciar el perfilado",
+      "invalidVersionFormat": "\"{{version}}\" no es una versión válida: una nueva versión tiene la forma X.Y.Z, por ejemplo 2.0.0.",
+      "draftVersionFormat": "La versión \"{{version}}\" de este contrato no tiene la forma X.Y.Z, así que no se puede crear un borrador personal a partir de ella. Crea una nueva versión (por ejemplo 2.0.0)."
     }
   },
   "list": {

@@ -1088,8 +1088,10 @@
     "versionPlaceholder": "p. ej., v1.1, v2.0-beta",
     "createButton": "Crear versión",
     "errors": {
-      "versionEmpty": "La cadena de versión no puede estar vacía."
-    }
+      "versionEmpty": "La cadena de versión no puede estar vacía.",
+      "versionFormat": "\"{{version}}\" no tiene la forma X.Y.Z (por ejemplo 2.0.0)."
+    },
+    "versionPlaceholderSemver": "p. ej., 2.0.0"
   },
   "graphView": {
     "unnamedProduct": "Producto sin nombre",

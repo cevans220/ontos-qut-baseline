@@ -64,6 +64,7 @@ import type { DataProduct } from '@/types/data-product'
 import type { DataProfilingRun } from '@/types/data-contract'
 import { useCopilotContext } from '@/hooks/use-copilot-context'
 import { useApi } from '@/hooks/use-api'
+import { contractDraftErrorText, contractVersionErrorText } from '@/lib/contract-version-error'
 import CertificationBadge from '@/components/common/certification-badge'
 import PublicationScopeBadge from '@/components/common/publication-scope-badge'
 import { DirectCertifyDialog, DirectPublishDialog } from '@/components/common/direct-lifecycle-dialogs'
@@ -803,15 +804,11 @@ export default function DataContractDetails() {
   const handleCloneForEditing = async () => {
     if (!contractId) return
     try {
-      const res = await fetch(`/api/data-contracts/${contractId}/clone-for-editing`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      })
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}))
-        throw new Error(errorData.detail || t('data-contracts:detailsView.errors.createDraftFailed', 'Failed to create personal draft'))
+      const response = await post<{ id: string }>(`/api/data-contracts/${contractId}/clone-for-editing`, {})
+      if (response.error || !response.data?.id) {
+        throw new Error(contractDraftErrorText(response, contract?.version, t))
       }
-      const data = await res.json()
+      const data = response.data
       toast({
         title: t('data-contracts:detailsView.toast.draftCreatedTitle', 'Personal Draft Created'),
         description: t('data-contracts:detailsView.toast.draftCreatedDesc', 'You can now edit this draft. It will only be visible to you until committed.'),
@@ -914,17 +911,14 @@ export default function DataContractDetails() {
     if (!contractId) return
     toast({ title: t('data-contracts:detailsView.toast.creatingVersionTitle', 'Creating New Version'), description: t('data-contracts:detailsView.toast.creatingVersionDesc', 'Creating version {{version}}...', { version: newVersionString }) })
     try {
-      const res = await fetch(`/api/data-contracts/${contractId}/versions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ new_version: newVersionString.trim() })
+      // A full copy (schema, quality, servers ...), like the versioning dialog
+      const response = await post<{ id?: string }>(`/api/data-contracts/${contractId}/clone`, {
+        new_version: newVersionString.trim(),
       })
-      if (!res.ok) {
-        const text = await res.text().catch(() => '')
-        throw new Error(text || t('data-contracts:detailsView.errors.createVersionFailed', 'Failed to create new version.'))
+      if (response.error) {
+        throw new Error(contractVersionErrorText(response, newVersionString.trim(), t))
       }
-      const data = await res.json()
-      const newId = data?.id
+      const newId = response.data?.id
       if (!newId) throw new Error(t('data-contracts:detailsView.errors.invalidVersionResponse', 'Invalid response when creating version.'))
       toast({ title: t('common:status.success', 'Success'), description: t('data-contracts:detailsView.toast.versionCreated', 'Version {{version}} created successfully!', { version: newVersionString }) })
       setIsVersionDialogOpen(false)
@@ -2861,27 +2855,27 @@ export default function DataContractDetails() {
                 </Button>
               )}
             </div>
-            {contract.sla && Object.keys(contract.sla).length > 0 ? (
+            {contract.sla && Object.values(contract.sla).some(v => v != null) ? (
               <div className="grid grid-cols-2 gap-3 pl-4">
-                {contract.sla.uptimeTarget !== undefined && (
+                {contract.sla.uptimeTarget != null && (
                   <div className="space-y-1">
                     <Label className="text-sm">{t('data-contracts:detailsView.sla.uptimeTarget', 'Uptime Target')}:</Label>
                     <span className="text-sm text-muted-foreground block">{contract.sla.uptimeTarget}%</span>
                   </div>
                 )}
-                {contract.sla.maxDowntimeMinutes !== undefined && (
+                {contract.sla.maxDowntimeMinutes != null && (
                   <div className="space-y-1">
                     <Label className="text-sm">{t('data-contracts:detailsView.sla.maxDowntime', 'Max Downtime')}:</Label>
                     <span className="text-sm text-muted-foreground block">{t('data-contracts:detailsView.sla.minutesUnit', '{{value}} min', { value: contract.sla.maxDowntimeMinutes })}</span>
                   </div>
                 )}
-                {contract.sla.queryResponseTimeMs !== undefined && (
+                {contract.sla.queryResponseTimeMs != null && (
                   <div className="space-y-1">
                     <Label className="text-sm">{t('data-contracts:detailsView.sla.queryResponseTime', 'Query Response Time')}:</Label>
                     <span className="text-sm text-muted-foreground block">{t('data-contracts:detailsView.sla.msUnit', '{{value}} ms', { value: contract.sla.queryResponseTimeMs })}</span>
                   </div>
                 )}
-                {contract.sla.dataFreshnessMinutes !== undefined && (
+                {contract.sla.dataFreshnessMinutes != null && (
                   <div className="space-y-1">
                     <Label className="text-sm">{t('data-contracts:detailsView.sla.dataFreshness', 'Data Freshness')}:</Label>
                     <span className="text-sm text-muted-foreground block">{t('data-contracts:detailsView.sla.minutesUnit', '{{value}} min', { value: contract.sla.dataFreshnessMinutes })}</span>
@@ -3266,6 +3260,7 @@ export default function DataContractDetails() {
           currentVersion={contract.version}
           productTitle={contract.name}
           onSubmit={submitNewVersion}
+          requireSemver
         />
       )}
 

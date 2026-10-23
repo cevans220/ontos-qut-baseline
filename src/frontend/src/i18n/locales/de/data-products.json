@@ -1088,8 +1088,10 @@
     "versionPlaceholder": "z. B. v1.1, v2.0-beta",
     "createButton": "Version erstellen",
     "errors": {
-      "versionEmpty": "Die Versionszeichenkette darf nicht leer sein."
-    }
+      "versionEmpty": "Die Versionszeichenkette darf nicht leer sein.",
+      "versionFormat": "\"{{version}}\" hat nicht die Form X.Y.Z (zum Beispiel 2.0.0)."
+    },
+    "versionPlaceholderSemver": "z. B. 2.0.0"
   },
   "graphView": {
     "unnamedProduct": "Unbenanntes Produkt",

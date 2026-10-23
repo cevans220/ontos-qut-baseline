@@ -8,7 +8,7 @@ from uuid import uuid4
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, Depends, Request, Body, Query, BackgroundTasks
 from fastapi.responses import JSONResponse
 
-from src.controller.data_contracts_manager import DataContractsManager
+from src.controller.data_contracts_manager import DataContractsManager, InvalidVersionFormatError
 from src.common.dependencies import (
     DBSessionDep,
     AuditManagerDep,
@@ -1965,6 +1965,7 @@ async def get_schema_properties(
     Use limit=0 to return all properties without pagination (e.g. for the edit dialog).
     """
     from sqlalchemy import func as sa_func
+    from src.utils.property_custom_properties import SCHEMA_PROPERTY_ORDER
 
     schema_obj = (
         db.query(SchemaObjectDb)
@@ -1979,7 +1980,7 @@ async def get_schema_properties(
     query = (
         db.query(SchemaPropertyDb)
         .filter(SchemaPropertyDb.object_id == schema_obj.id)
-        .order_by(SchemaPropertyDb.name)
+        .order_by(*SCHEMA_PROPERTY_ORDER)  # the contract's column order
     )
     if limit > 0:
         query = query.offset(skip).limit(limit)
@@ -2001,7 +2002,8 @@ async def get_schema_properties(
             "physicalType": p.physical_type,
             "required": p.required,
             "unique": p.unique,
-            "primaryKey": p.primary_key,
+            # Rows stored before `primary_key` was set only have the position
+            "primaryKey": bool(p.primary_key) or (p.primary_key_position is not None and p.primary_key_position >= 0),
             "primaryKeyPosition": p.primary_key_position,
             "partitioned": p.partitioned,
             "partitionKeyPosition": p.partition_key_position,
@@ -3935,6 +3937,9 @@ async def clone_contract_for_new_version(
         from src.models.data_contracts_api import DataContractRead
         return DataContractRead.model_validate(new_contract, from_attributes=True).model_dump()
 
+    except InvalidVersionFormatError as e:
+        # Sent with its code and the version, so the page can say it in the user's language
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except ValueError as e:
         logger.error("Validation error cloning contract %s: %s", contract_id, e)
         raise HTTPException(status_code=400, detail="Invalid contract data")

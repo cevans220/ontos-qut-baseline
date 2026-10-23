@@ -520,7 +520,9 @@
       "invalidTransition": "The contract is now {{fromStatus}} and can no longer be approved or rejected. Reload the page to see its current status.",
       "approveFailed": "Approve failed",
       "rejectFailed": "Reject failed",
-      "startProfilingFailed": "Failed to start profiling"
+      "startProfilingFailed": "Failed to start profiling",
+      "invalidVersionFormat": "\"{{version}}\" is not a valid version: a new version uses the X.Y.Z form, for example 2.0.0.",
+      "draftVersionFormat": "This contract's version \"{{version}}\" isn't in the X.Y.Z form, so a personal draft can't be made from it. Create a new version (for example 2.0.0) instead."
     }
   },
   "list": {

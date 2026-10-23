@@ -1088,8 +1088,10 @@
     "versionPlaceholder": "ad es. v1.1, v2.0-beta",
     "createButton": "Crea versione",
     "errors": {
-      "versionEmpty": "La stringa di versione non può essere vuota."
-    }
+      "versionEmpty": "La stringa di versione non può essere vuota.",
+      "versionFormat": "\"{{version}}\" non è nel formato X.Y.Z (per esempio 2.0.0)."
+    },
+    "versionPlaceholderSemver": "es. 2.0.0"
   },
   "graphView": {
     "unnamedProduct": "Prodotto senza nome",
