@@ -222,8 +222,6 @@ class SemanticLinksManager:
         
         # Incrementally update the in-memory RDF graph via the shared manager on app.state
         try:
-            # Access global app.state manager through SQLAlchemy session bind info when available
-            # Fallback: attempt to import a locator util
             manager = self._semantic_models_manager
             if manager is None:
                 try:

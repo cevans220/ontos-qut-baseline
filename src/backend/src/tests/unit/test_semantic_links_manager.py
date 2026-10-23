@@ -372,6 +372,12 @@ class TestSemanticLinksManager:
 
         assert result is True
         mock_repo.remove.assert_called_once_with(manager._db, id="1")
+        manager._semantic_models_manager.remove_entity_semantic_link_from_graph.assert_called_once_with(
+            "data_product",
+            "entity-123",
+            "http://example.com/schema/Product",
+        )
+        manager._semantic_models_manager._invalidate_cache.assert_called_once()
 
     @patch('src.controller.semantic_links_manager.entity_semantic_links_repo')
     def test_remove_link_not_found(self, mock_repo, manager):
@@ -381,6 +387,8 @@ class TestSemanticLinksManager:
         result = manager.remove("nonexistent", removed_by="user@example.com")
 
         assert result is False
+        manager._semantic_models_manager.remove_entity_semantic_link_from_graph.assert_not_called()
+        manager._semantic_models_manager._invalidate_cache.assert_not_called()
 
     @patch('src.controller.semantic_links_manager.change_log_manager')
     @patch('src.controller.semantic_links_manager.entity_semantic_links_repo')
