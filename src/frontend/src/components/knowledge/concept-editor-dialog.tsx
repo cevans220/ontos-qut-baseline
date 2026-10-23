@@ -23,6 +23,7 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ConceptModeSwitch, useConceptMode } from '@/components/concepts/mode-switch';
+import ConceptSelectDialog from '@/components/semantic/concept-select-dialog';
 import {
   OntologyConcept,
   ConceptCreate,
@@ -54,9 +55,12 @@ interface ConceptEditorDialogProps {
   onPromote?: (concept: OntologyConcept) => void;
   onViewHistory?: (concept: OntologyConcept) => void;
   readOnly?: boolean;
+  /** Create mode only: preset concept type (e.g. from the Explore Create menu).
+   *  Still validated against the target scheme via allowedConceptTypes. */
+  initialConceptType?: EditorConceptType;
 }
 
-type EditorConceptType = 'class' | 'concept' | 'property' | 'individual' | 'term';
+export type EditorConceptType = 'class' | 'concept' | 'property' | 'individual' | 'term';
 
 // Concept types a collection of each kind may hold. Glossaries carry terms and
 // SKOS concepts, taxonomies only SKOS concepts, ontologies the OWL-ish kinds.
@@ -71,6 +75,20 @@ const ALL_CONCEPT_TYPES: EditorConceptType[] = ['concept', 'class', 'property', 
 // Types offered for a target collection type. Unknown / missing type -> all.
 export function allowedConceptTypes(collectionType?: string | null): EditorConceptType[] {
   return (collectionType && ALLOWED_TYPES_BY_COLLECTION[collectionType as CollectionType]) || ALL_CONCEPT_TYPES;
+}
+
+// Label for the Parent (broader) field, by concept type.
+export function parentFieldLabelKey(conceptType: EditorConceptType): { key: string; defaultLabel: string } {
+  if (conceptType === 'class') return { key: 'semantic-models:conceptEditor.parentClass', defaultLabel: 'Parent Class' };
+  if (conceptType === 'property') return { key: 'semantic-models:conceptEditor.parentProperty', defaultLabel: 'Parent Property' };
+  return { key: 'semantic-models:conceptEditor.parentConcept', defaultLabel: 'Parent Concept' };
+}
+
+// Short display name for an IRI (local name after # or the last /).
+function iriLocalName(iri: string): string {
+  const hash = iri.lastIndexOf('#');
+  const tail = hash >= 0 ? iri.slice(hash + 1) : iri.slice(iri.lastIndexOf('/') + 1);
+  return tail || iri;
 }
 
 const statusColors: Record<ConceptStatus, string> = {
@@ -93,6 +111,7 @@ export const ConceptEditorDialog: React.FC<ConceptEditorDialogProps> = ({
   onPromote,
   onViewHistory,
   readOnly = false,
+  initialConceptType,
 }) => {
   const { t } = useTranslation();
   const [mode] = useConceptMode();
@@ -128,6 +147,7 @@ export const ConceptEditorDialog: React.FC<ConceptEditorDialogProps> = ({
   ];
   const [newSynonym, setNewSynonym] = useState('');
   const [newExample, setNewExample] = useState('');
+  const [parentPickerOpen, setParentPickerOpen] = useState(false);
 
   const isNew = !concept;
   const canEdit = !readOnly && (!concept?.status || concept.status === 'draft');
@@ -180,7 +200,9 @@ export const ConceptEditorDialog: React.FC<ConceptEditorDialogProps> = ({
         collection_iri: collection?.iri || '',
         label: '',
         definition: '',
-        concept_type: 'concept',
+        // Preset from the caller; the allowed-type effect above resets it to
+        // 'concept' if the target scheme does not accept it.
+        concept_type: initialConceptType || 'concept',
         property_type: 'object',
         domain: '',
         range: '',
@@ -191,7 +213,7 @@ export const ConceptEditorDialog: React.FC<ConceptEditorDialogProps> = ({
         related_iris: [],
       });
     }
-  }, [concept, collection, open]);
+  }, [concept, collection, open, initialConceptType]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -359,6 +381,24 @@ export const ConceptEditorDialog: React.FC<ConceptEditorDialogProps> = ({
                 </div>
               )}
 
+              {/* Simple mode: the Type selector is hidden, so name a non-default
+                  (preset) type and point properties at the Advanced fields. */}
+              {!advanced && formData.concept_type !== 'concept' && (
+                <div className="grid gap-1" data-testid="simple-type-hint">
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-muted-foreground">{t('Type')}:</span>
+                    <Badge variant="outline">
+                      {conceptTypes.find((ct) => ct.value === formData.concept_type)?.label ?? formData.concept_type}
+                    </Badge>
+                  </div>
+                  {formData.concept_type === 'property' && (
+                    <p className="text-xs text-muted-foreground">
+                      {t('semantic-models:conceptEditor.domainRangeInAdvanced', 'Domain and range are set in Advanced view.')}
+                    </p>
+                  )}
+                </div>
+              )}
+
               {/* Label */}
               <div className="grid gap-2">
                 <Label htmlFor="label">{t('semantic-models:conceptEditor.label')}</Label>
@@ -387,6 +427,48 @@ export const ConceptEditorDialog: React.FC<ConceptEditorDialogProps> = ({
                   rows={3}
                   disabled={!canEdit}
                 />
+              </div>
+
+              {/* Parent (broader): shown in Simple and Advanced. Saved as
+                  broader_iris; the backend picks the predicate by type
+                  (skos:broader / rdfs:subClassOf / rdfs:subPropertyOf). */}
+              <div className="grid gap-2" data-testid="parent-field">
+                <Label>
+                  {t(parentFieldLabelKey(formData.concept_type).key, parentFieldLabelKey(formData.concept_type).defaultLabel)}
+                </Label>
+                <div className="flex flex-wrap gap-2">
+                  {formData.broader_iris.map((iri) => (
+                    <Badge key={iri} variant="secondary" className="flex items-center gap-1" title={iri}>
+                      {iriLocalName(iri)}
+                      {canEdit && (
+                        <button
+                          type="button"
+                          aria-label={t('semantic-models:conceptEditor.removeParent', { defaultValue: 'Remove {{name}}', name: iriLocalName(iri) })}
+                          onClick={() =>
+                            setFormData((prev) => ({
+                              ...prev,
+                              broader_iris: prev.broader_iris.filter((p) => p !== iri),
+                            }))
+                          }
+                          className="ml-1 hover:text-destructive"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
+                    </Badge>
+                  ))}
+                  {formData.broader_iris.length === 0 && !canEdit && (
+                    <span className="text-sm text-muted-foreground">-</span>
+                  )}
+                </div>
+                {canEdit && (
+                  <div>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setParentPickerOpen(true)}>
+                      <Plus className="h-4 w-4 mr-1" />
+                      {t('semantic-models:conceptEditor.addParent', 'Add Parent')}
+                    </Button>
+                  </div>
+                )}
               </div>
 
               {/* Property-specific fields — ontology layer, Advanced only. */}
@@ -645,6 +727,22 @@ export const ConceptEditorDialog: React.FC<ConceptEditorDialogProps> = ({
           )}
         </DialogFooter>
       </DialogContent>
+      {/* Mounted only while open: the picker fetches on mount. */}
+      {parentPickerOpen && (
+        <ConceptSelectDialog
+          isOpen={parentPickerOpen}
+          onOpenChange={setParentPickerOpen}
+          entityType={formData.concept_type === 'property' ? 'property' : 'class'}
+          onSelect={(iri) => {
+            setFormData((prev) =>
+              prev.broader_iris.includes(iri) || iri === concept?.iri
+                ? prev
+                : { ...prev, broader_iris: [...prev.broader_iris, iri] },
+            );
+            setParentPickerOpen(false);
+          }}
+        />
+      )}
     </Dialog>
   );
 };

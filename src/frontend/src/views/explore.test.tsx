@@ -49,7 +49,7 @@ vi.mock('@/stores/knowledge-graph-store', () => ({
 const setHiddenSourcesSpy = vi.fn();
 vi.mock('@/stores/glossary-preferences-store', () => ({
   useGlossaryPreferencesStore: () => ({
-    hiddenSources: [],
+    hiddenSources: hiddenSourcesMock,
     groupByDimension: 'none',
     groupBySource: false,
     showProperties: false,
@@ -67,6 +67,35 @@ vi.mock('@/stores/glossary-preferences-store', () => ({
 
 // availableSources is overridable per-test so the ?source= path has real sources.
 let availableSourcesMock: string[] = [];
+// Collections are overridable per-test for the scheme-aware Create menu.
+let collectionsMock: any[] = [];
+// Hidden sources are overridable per-test (source filter narrows the focus).
+let hiddenSourcesMock: string[] = [];
+
+// Simple/Advanced mode, controllable per test.
+let modeMock: 'simple' | 'advanced' = 'simple';
+vi.mock('@/components/concepts/mode-switch', () => ({
+  useConceptMode: () => [modeMock, vi.fn()],
+  ConceptModeSwitch: () => null,
+}));
+
+vi.mock('@/components/search/kg-search', () => ({
+  default: () => <div data-testid="kg-search" />,
+}));
+
+// Inline stand-in for the Radix dropdown: always renders its items as buttons
+// (driving Radix pointer/portal machinery in jsdom is flaky in CI).
+vi.mock('@/components/ui/dropdown-menu', () => ({
+  DropdownMenu: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuTrigger: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+  DropdownMenuContent: ({ children }: { children?: React.ReactNode }) => (
+    <div data-testid="create-menu">{children}</div>
+  ),
+  DropdownMenuItem: ({ children, onClick }: { children?: React.ReactNode; onClick?: () => void }) => (
+    <button type="button" role="menuitem" onClick={onClick}>{children}</button>
+  ),
+  DropdownMenuSeparator: () => <hr data-testid="menu-separator" />,
+}));
 
 // A stable filtered selection returned by the single source-of-truth hook.
 const FILTERED: OntologyConcept[] = [
@@ -79,7 +108,7 @@ vi.mock('@/hooks/use-explore-concepts', async () => ({
   ...(await vi.importActual<typeof import('@/hooks/use-explore-concepts')>('@/hooks/use-explore-concepts')),
   useExploreConcepts: () => ({
     isLoading: false,
-    collections: [],
+    collections: collectionsMock,
     groupedConcepts: {},
     groupedProperties: {},
     stats: null,
@@ -96,6 +125,7 @@ vi.mock('@/hooks/use-explore-concepts', async () => ({
 let conceptsTabConcepts: OntologyConcept[] | null = null;
 let conceptsTabViewMode: string | null = null;
 let graphTabConcepts: OntologyConcept[] | null = null;
+let editorProps: any = null;
 
 vi.mock('@/components/knowledge', () => ({
   ConceptsTab: ({ filteredConcepts, viewMode }: { filteredConcepts: OntologyConcept[]; viewMode?: string }) => {
@@ -123,7 +153,10 @@ vi.mock('@/components/knowledge', () => ({
     </div>
   ),
   CollectionEditorDialog: () => null,
-  ConceptEditorDialog: () => null,
+  ConceptEditorDialog: (props: any) => {
+    editorProps = props;
+    return null;
+  },
   ImportConceptsDialog: () => null,
 }));
 
@@ -135,6 +168,10 @@ beforeEach(() => {
   conceptsTabViewMode = null;
   graphTabConcepts = null;
   availableSourcesMock = [];
+  collectionsMock = [];
+  hiddenSourcesMock = [];
+  modeMock = 'simple';
+  editorProps = null;
   useExploreSessionStore.setState({ showSystemSources: false });
   setHiddenSourcesSpy.mockClear();
   setStaticSegmentsSpy.mockClear();
@@ -252,5 +289,98 @@ describe('Explore unified surface', () => {
     await waitFor(() => {
       expect(observe().pathname).toBe(`/concepts/browser/${encodeURIComponent(iri)}`);
     });
+  });
+});
+
+const ONTOLOGY = { iri: 'urn:ontology:core', label: 'Core', collection_type: 'ontology', is_editable: true };
+const TAXONOMY = { iri: 'urn:taxonomy:regions', label: 'Regions', collection_type: 'taxonomy', is_editable: true };
+const GLOSSARY = { iri: 'urn:glossary:business', label: 'Business', collection_type: 'glossary', is_editable: true };
+
+function menuLabels() {
+  return screen.getAllByRole('menuitem').map((el) => el.textContent);
+}
+
+describe('Explore Create menu adapts to the scheme in focus', () => {
+  it('glossary in focus: New Term, then New Concept Scheme', () => {
+    collectionsMock = [GLOSSARY];
+    renderExplore();
+    expect(menuLabels()).toEqual(['New Term', 'New Concept Scheme']);
+  });
+
+  it('taxonomy in focus: New Concept', () => {
+    collectionsMock = [TAXONOMY];
+    renderExplore();
+    expect(menuLabels()).toEqual(['New Concept', 'New Concept Scheme']);
+  });
+
+  it('ontology in focus: New Class, New Property, New Concept', () => {
+    collectionsMock = [ONTOLOGY];
+    renderExplore();
+    expect(menuLabels()).toEqual(['New Class', 'New Property', 'New Concept', 'New Concept Scheme']);
+    expect(screen.getByTestId('menu-separator')).toBeInTheDocument();
+  });
+
+  it('several editable schemes, none in focus: generic set', () => {
+    collectionsMock = [GLOSSARY, TAXONOMY, ONTOLOGY];
+    renderExplore();
+    expect(menuLabels()).toEqual(['New Concept', 'New Term', 'New Class', 'New Property', 'New Concept Scheme']);
+  });
+
+  it('generic set only offers types some editable scheme accepts', () => {
+    collectionsMock = [GLOSSARY, TAXONOMY];
+    renderExplore();
+    expect(menuLabels()).toEqual(['New Concept', 'New Term', 'New Concept Scheme']);
+  });
+
+  it('source filter leaving one editable scheme visible focuses it', () => {
+    collectionsMock = [GLOSSARY, ONTOLOGY];
+    hiddenSourcesMock = ['business'];
+    renderExplore();
+    expect(menuLabels()).toEqual(['New Class', 'New Property', 'New Concept', 'New Concept Scheme']);
+  });
+
+  it('picking an item opens the editor preset to that type and scheme', async () => {
+    collectionsMock = [ONTOLOGY];
+    renderExplore();
+    fireEvent.click(screen.getByRole('menuitem', { name: /New Property/ }));
+    await waitFor(() => expect(editorProps.open).toBe(true));
+    expect(editorProps.initialConceptType).toBe('property');
+    expect(editorProps.collection).toEqual(ONTOLOGY);
+  });
+
+  it('generic pick targets the first scheme that accepts the type', async () => {
+    collectionsMock = [GLOSSARY, TAXONOMY, ONTOLOGY];
+    renderExplore();
+    fireEvent.click(screen.getByRole('menuitem', { name: /New Class/ }));
+    await waitFor(() => expect(editorProps.open).toBe(true));
+    expect(editorProps.initialConceptType).toBe('class');
+    expect(editorProps.collection).toEqual(ONTOLOGY);
+  });
+});
+
+describe('Explore SPARQL panel', () => {
+  it('has no SPARQL toggle in Simple view', () => {
+    renderExplore();
+    expect(screen.queryByRole('button', { name: /SPARQL/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('kg-search')).not.toBeInTheDocument();
+  });
+
+  it('Advanced view: toggle is adv-only and opens/closes the full-width panel', async () => {
+    modeMock = 'advanced';
+    renderExplore();
+    const toggle = screen.getByRole('button', { name: /SPARQL/ });
+    expect(toggle).toHaveClass('adv-only');
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByTestId('explore-sparql-panel')).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    const panel = await screen.findByTestId('explore-sparql-panel');
+    expect(panel).toHaveClass('adv-only');
+    expect(panel.className).toContain('min-h-[420px]');
+    expect(screen.getByTestId('kg-search')).toBeInTheDocument();
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(screen.queryByTestId('explore-sparql-panel')).not.toBeInTheDocument());
   });
 });

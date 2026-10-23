@@ -5,16 +5,11 @@ import i18n from 'i18next';
 import {
   ArrowLeft,
   AlertCircle,
-  ExternalLink,
   Loader2,
   Pencil,
   Trash2,
-  Layers,
-  BookOpen,
-  Zap,
-  User,
   Network,
-  Code2,
+  Send,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -62,27 +57,14 @@ import { PublishVersionDialog } from '@/components/semantic/publish-version-dial
 import { VersionHistoryPanel } from '@/components/semantic/version-history-panel';
 import { DeprecateConceptDialog } from '@/components/semantic/deprecate-concept-dialog';
 import { TurtleSerializationPanel } from '@/components/semantic/turtle-serialization-panel';
-import { StatusProgressBar } from '@/components/semantic/status-progress-bar';
-import KGSearch from '@/components/search/kg-search';
 import ApprovalWizardDialog from '@/components/workflows/approval-wizard-dialog';
-import { RequestConceptActionMenu } from '@/components/concepts/request-concept-action-menu';
+import {
+  RequestConceptActionDialog,
+  type ConceptNewVersionOption,
+  type ConceptTransitionItem,
+} from '@/components/concepts/request-concept-action-dialog';
+import { ConceptSummaryPanel } from '@/components/concepts/concept-summary-panel';
 import { CommentSidebar } from '@/components/comments';
-
-const typeIcons: Record<string, React.ReactNode> = {
-  concept: <Layers className="h-5 w-5 text-emerald-500 shrink-0" />,
-  class: <BookOpen className="h-5 w-5 text-blue-500 shrink-0" />,
-  property: <Zap className="h-5 w-5 text-purple-500 shrink-0" />,
-  individual: <User className="h-5 w-5 text-violet-500 shrink-0" />,
-  term: <Layers className="h-5 w-5 text-emerald-500 shrink-0" />,
-};
-
-const typeColors: Record<string, string> = {
-  concept: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30',
-  class: 'bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30',
-  property: 'bg-purple-500/15 text-purple-700 dark:text-purple-400 border-purple-500/30',
-  individual: 'bg-violet-500/15 text-violet-700 dark:text-violet-400 border-violet-500/30',
-  term: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30',
-};
 
 // Bound list-like sections to ~10 rows of vertical real-estate via internal
 // scrolling, so the page stays compact regardless of how many relations or
@@ -226,7 +208,7 @@ export default function ConceptDetailView() {
   // Defaults to the relations list (per wireframe); graph is opt-in.
   const [relationsView, setRelationsView] = useState<'list' | 'graph'>('list');
   const [deprecateOpen, setDeprecateOpen] = useState(false);
-  const [sparqlDialogOpen, setSparqlDialogOpen] = useState(false);
+  const [requestDialogOpen, setRequestDialogOpen] = useState(false);
   const [submitReviewOpen, setSubmitReviewOpen] = useState(false);
   const [reviewerEmail, setReviewerEmail] = useState<string | null>(null);
   const [reviewNotes, setReviewNotes] = useState('');
@@ -813,8 +795,6 @@ export default function ConceptDetailView() {
 
   const conceptTitle = resolveLabel(concept, selectedLanguage);
   const conceptDefinition = resolveComment(concept, selectedLanguage);
-  const hasSynonymsOrExamples =
-    (concept.synonyms?.length ?? 0) > 0 || (concept.examples?.length ?? 0) > 0;
   const isProperty = concept.concept_type === 'property';
   const hasDomainRange = isProperty && (concept.domain || concept.range);
 
@@ -831,6 +811,18 @@ export default function ConceptDetailView() {
     canWrite && collection?.is_editable
       ? reachableStatuses(currentStatus).filter((s) => s.isNextStep)
       : [];
+  const requestTransitions: ConceptTransitionItem[] = nextStepStatuses;
+  const requestNewVersion: ConceptNewVersionOption | null = canPublishVersion
+    ? {
+        disabled: versionLockedForDraft,
+        disabledReason: t(
+          'semantic-models:versionHistory.saveNewVersionDraftLocked',
+          'Available after this concept is approved (v1 must be approved before a new version).',
+        ),
+        onSelect: () => setPublishOpen(true),
+      }
+    : null;
+  const hasRequestActions = requestTransitions.length > 0 || requestNewVersion != null;
 
   return (
     <div className="py-4 space-y-3">
@@ -845,35 +837,25 @@ export default function ConceptDetailView() {
           {t('semantic-models:details.backToList', 'Back to Concepts')}
         </Button>
         <div className="flex items-center gap-2">
-          {/* Single "Request" menu (mirrors data products): the direct next
-              lifecycle step(s) — Request review on a draft (wizard / dialog
-              flow unchanged), then approve / request changes / publish /
-              certify / deprecate / archive for users who may run them today —
-              plus "New version". "Save new version" is available for any
-              non-retired editable concept, NOT just drafts: publishing v2 is
-              exactly how a certified concept's definition changes. It stays
-              visible-but-disabled while the concept is draft / under review.
-              Properties have no lifecycle actions or version publishing. */}
-          {!isProperty && (
-            <RequestConceptActionMenu
-              transitions={nextStepStatuses}
-              onTransition={(status, action) => {
-                void handleStatusTransition(status, action);
-              }}
-              busy={statusBusy}
-              newVersion={
-                canPublishVersion
-                  ? {
-                      disabled: versionLockedForDraft,
-                      disabledReason: t(
-                        'semantic-models:versionHistory.saveNewVersionDraftLocked',
-                        'Available after this concept is approved (v1 must be approved before a new version).',
-                      ),
-                      onSelect: () => setPublishOpen(true),
-                    }
-                  : null
-              }
-            />
+          {/* Single "Request" entry point (mirrors data products): opens the
+              action-picker dialog offering the direct next lifecycle step(s)
+              (Request review on a draft, wizard / dialog flow unchanged; then
+              approve / request changes / publish / certify / deprecate /
+              archive for users who may run them today) plus "New version".
+              "Save new version" is available for any non-retired editable
+              concept, NOT just drafts, and stays disabled while the concept is
+              draft / under review. Properties have no lifecycle actions or
+              version publishing. */}
+          {!isProperty && hasRequestActions && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={statusBusy}
+              onClick={() => setRequestDialogOpen(true)}
+            >
+              <Send className="mr-2 h-4 w-4" />
+              {t('semantic-models:lifecycle.request', 'Request')}
+            </Button>
           )}
           {currentStatus === 'under_review' && canWrite && (
             <Button
@@ -910,183 +892,75 @@ export default function ConceptDetailView() {
             onToggle={() => setIsCommentSidebarOpen(!isCommentSidebarOpen)}
             className="h-8"
           />
-          {/* Power-user SPARQL — Advanced view only. Opens the query surface in
-              a modal on this page instead of navigating to the legacy Search
-              Concepts page. Seeded with a query scoped to this concept. */}
-          <Button
-            variant="outline"
-            size="sm"
-            className="adv-only"
-            onClick={() => setSparqlDialogOpen(true)}
-          >
-            <Code2 className="mr-2 h-4 w-4" />
-            {t('semantic-models:concept.sparql', 'SPARQL')}
-          </Button>
         </div>
       </div>
 
-      {/* Title + meta block. Name row carries the icon + title; a single badge
-          row underneath holds type / status / version / source so nothing is
-          orphaned under the icon. The raw IRI is a separate advanced-only row. */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-2 min-w-0">
-          {typeIcons[concept.concept_type] || typeIcons.concept}
-          <h1 className="text-2xl font-bold truncate" title={conceptTitle}>
-            {conceptTitle}
-          </h1>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Version badge first (leftmost). Wired to the engine's real current
-              version (single integer, e.g. v2). Hidden until a version row
-              exists (freshly-created concepts before their first version load). */}
-          {currentVersion != null && !isProperty && (
-            <Badge variant="secondary" className="font-mono text-xs">v{currentVersion}</Badge>
-          )}
-          {/* "Compare" removed: today only the definition changes across
-              versions, and that diff is already shown in the version-history
-              panel below. A dedicated compare view adds nothing until we version
-              more fields, so it was just a scroll-to-history shortcut that
-              confused users. Re-add when there's a real side-by-side diff. */}
-          <Badge
-            variant="outline"
-            className={typeColors[concept.concept_type] || ''}
-          >
-            {t(`semantic-models:types.${concept.concept_type}`)}
-          </Badge>
-          {concept.status && !isProperty && (
-            <Badge variant="outline">
-              {t(`semantic-models:status.${concept.status}`, concept.status)}
-            </Badge>
-          )}
-          {concept.source_context && (
-            <span className="text-xs text-muted-foreground">
-              · {systemRdfNamespaceDisplayLabel(concept.source_context, t)}
-            </span>
-          )}
-        </div>
-        {/* Full-lifecycle visibility: the compact stepper shows the whole chain
-            and where this concept sits, complementing the single-hop
-            "Change status" dropdown. */}
-        {concept.status && !isProperty && (
-          <StatusProgressBar status={concept.status} className="mt-0.5" />
-        )}
-        {/* Raw IRI + external link — ontology layer, advanced only, own row. */}
-        <div className="adv-only flex items-center gap-2 text-xs text-muted-foreground min-w-0">
-          <code
-            className="px-1.5 py-0.5 bg-muted rounded font-mono truncate"
-            title={concept.iri}
-          >
-            {concept.iri}
-          </code>
-          <a
-            href={concept.iri}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center text-muted-foreground hover:text-foreground shrink-0"
-            aria-label={t('semantic-models:details.openIriAria')}
-          >
-            <ExternalLink className="h-3 w-3" />
-          </a>
-        </div>
-      </div>
-
-      {/* Definition + property domain/range collapsed into a single compact
-          card so short definitions don't get an entire page section to
-          themselves. */}
-      {(conceptDefinition || hasDomainRange) && (
-        <section className="rounded-lg border bg-muted/20 p-3 space-y-2">
-          {conceptDefinition && (
-            <p className="text-sm whitespace-pre-line">{conceptDefinition}</p>
-          )}
-          {hasDomainRange && (
-            <div className="flex flex-wrap items-center gap-2 text-xs pt-1">
-              {concept.domain && (
-                <span className="inline-flex items-center gap-1">
-                  <span className="text-muted-foreground uppercase tracking-wide">
-                    {t('semantic-models:fields.domain')}:
-                  </span>
-                  <Badge
-                    variant="secondary"
-                    className="cursor-pointer"
-                    onClick={() => handleNavigateToConcept(concept.domain!)}
-                  >
-                    {concept.domain.split(/[/#]/).pop() || concept.domain}
-                  </Badge>
-                </span>
-              )}
-              {concept.range && (
-                <span className="inline-flex items-center gap-1">
-                  <span className="text-muted-foreground uppercase tracking-wide">
-                    {t('semantic-models:fields.range')}:
-                  </span>
-                  <Badge
-                    variant="secondary"
-                    className="cursor-pointer"
-                    onClick={() => handleNavigateToConcept(concept.range!)}
-                  >
-                    {concept.range.split(/[/#]/).pop() || concept.range}
-                  </Badge>
-                </span>
-              )}
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* Synonyms and examples — each on its own row (a shared card), so they
-          are not cramped together. Aligned label column keeps them scannable. */}
-      {hasSynonymsOrExamples && (
-        <section className="rounded-lg border bg-card p-3 text-xs space-y-2">
-          {concept.synonyms?.length > 0 && (
-            <div className="flex items-baseline gap-2">
-              <span className="w-20 shrink-0 font-semibold uppercase tracking-wide text-muted-foreground">
-                {t('semantic-models:fields.synonyms')}
-              </span>
-              <div className="flex flex-wrap gap-1">
-                {concept.synonyms.map((s) => (
-                  <Badge key={s} variant="outline" className="text-[10px]">
-                    {s}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          )}
-          {concept.examples?.length > 0 && (
-            <div className="flex items-baseline gap-2">
-              <span className="w-20 shrink-0 font-semibold uppercase tracking-wide text-muted-foreground">
-                {t('semantic-models:fields.examples')}
-              </span>
-              <div className="flex flex-wrap gap-1">
-                {concept.examples.map((e) => (
-                  <Badge key={e} variant="outline" className="text-[10px]">
-                    {e}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* Two-column panel grid (item 7 of CB v2 changes).
-          Layout (md breakpoint):
-          - Row 1: Owners + Details
-          - Row 2: Related concepts + Hierarchy
-          - Row 3: Linked assets (full width)
-          - Row 4: Version history (full width)
-          - Row 5: Relations / neighbourhood graph (full width)
-          - Advanced-only: Turtle serialization (full width)
-          - Last row: Metadata (full width; always last in Simple + Advanced) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Row 1: Owners panel */}
-        <OwnershipPanel
-          objectType="business_term"
-          objectId={concept.iri}
-          canAssign={canLinkEntities}
+      {/* Single-column panel stack (mirrors the Data Contracts detail page):
+          one full-width panel per row, in this order:
+          Summary, Definition, Owners, Details, Hierarchy, Linked assets,
+          Version history, Relations / neighbourhood graph,
+          Turtle (Advanced only), Metadata (always last in Simple + Advanced). */}
+      <div className="flex flex-col gap-4" data-testid="concept-panels">
+        <ConceptSummaryPanel
+          concept={concept}
+          title={conceptTitle}
+          currentVersion={currentVersion}
         />
 
-        {/* Row 1: Details — scheme/source/created, plus IRI + type in advanced. */}
-        <div className="rounded-lg border bg-card p-3">
+          {/* Definition + property domain/range in one compact full-width card
+            so short definitions don't get an entire page section to
+            themselves. */}
+        {(conceptDefinition || hasDomainRange) && (
+          <section className="rounded-lg border bg-card p-3 space-y-2" data-panel="definition">
+            {conceptDefinition && (
+              <p className="text-sm whitespace-pre-line">{conceptDefinition}</p>
+            )}
+            {hasDomainRange && (
+              <div className="flex flex-wrap items-center gap-2 text-xs pt-1">
+                {concept.domain && (
+                  <span className="inline-flex items-center gap-1">
+                    <span className="text-muted-foreground uppercase tracking-wide">
+                      {t('semantic-models:fields.domain')}:
+                    </span>
+                    <Badge
+                      variant="secondary"
+                      className="cursor-pointer"
+                      onClick={() => handleNavigateToConcept(concept.domain!)}
+                    >
+                      {concept.domain.split(/[/#]/).pop() || concept.domain}
+                    </Badge>
+                  </span>
+                )}
+                {concept.range && (
+                  <span className="inline-flex items-center gap-1">
+                    <span className="text-muted-foreground uppercase tracking-wide">
+                      {t('semantic-models:fields.range')}:
+                    </span>
+                    <Badge
+                      variant="secondary"
+                      className="cursor-pointer"
+                      onClick={() => handleNavigateToConcept(concept.range!)}
+                    >
+                      {concept.range.split(/[/#]/).pop() || concept.range}
+                    </Badge>
+                  </span>
+                )}
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* Owners panel */}
+        <div data-panel="ownership">
+          <OwnershipPanel
+            objectType="business_term"
+            objectId={concept.iri}
+            canAssign={canLinkEntities}
+          />
+        </div>
+
+        {/* Details: scheme/source/created, plus IRI + type in advanced. */}
+        <div className="rounded-lg border bg-card p-3" data-panel="details">
           <h3 className="text-sm font-medium mb-2">
             {t('semantic-models:details.title', 'Details')}
           </h3>
@@ -1147,10 +1021,10 @@ export default function ConceptDetailView() {
           </dl>
         </div>
 
-        {/* Row 2: Hierarchy — broader (parents) / narrower (children) concepts.
+        {/* Hierarchy: broader (parents) / narrower (children) concepts.
             Relations moved into the shared "Relations / Graph" block below
             (they were the same /neighbors data rendered twice). */}
-        <div className="rounded-lg border bg-card p-3 md:col-span-2">
+        <div className="rounded-lg border bg-card p-3" data-panel="hierarchy">
           <h3 className="text-sm font-medium mb-2">
             {t('semantic-models:hierarchy.title', 'Hierarchy')}
           </h3>
@@ -1203,8 +1077,8 @@ export default function ConceptDetailView() {
           )}
         </div>
 
-        {/* Row 3: Linked assets (full width) */}
-        <div className="md:col-span-2">
+        {/* Linked assets */}
+        <div data-panel="linked-assets">
           <LinkedObjectsPanel
             conceptIri={concept.iri}
             conceptLabel={conceptTitle}
@@ -1214,11 +1088,11 @@ export default function ConceptDetailView() {
           />
         </div>
 
-        {/* Row 4: Version history (full width) — live, drives versioning
+        {/* Version history: live, drives versioning
             contract §1 + §2. Shown for every concept type. On a read-only
             (imported / non-editable) scheme it stays visible but read-only,
             with a note instead of silently hiding the version controls. */}
-        <div id="concept-version-history" className="md:col-span-2">
+        <div id="concept-version-history" data-panel="version-history">
           <VersionHistoryPanel
             conceptIri={concept.iri}
             refreshNonce={versionRefreshNonce}
@@ -1233,10 +1107,10 @@ export default function ConceptDetailView() {
           />
         </div>
 
-        {/* Row 5: Relations + neighbourhood graph — ONE block, two views over
+        {/* Relations + neighbourhood graph: ONE block, two views over
             the same /neighbors data. List = relations; Graph = node-link. */}
-        <Collapsible open={neighbourhoodOpen} onOpenChange={setNeighbourhoodOpen} className="md:col-span-2">
-          <div className="border rounded-lg">
+        <Collapsible open={neighbourhoodOpen} onOpenChange={setNeighbourhoodOpen}>
+          <div className="border rounded-lg bg-card" data-panel="relations">
             <div className="flex items-center justify-between p-3 hover:bg-muted/50">
               <CollapsibleTrigger className="flex items-center gap-2 flex-1 text-left">
                 {neighbourhoodOpen ? (
@@ -1308,13 +1182,13 @@ export default function ConceptDetailView() {
         {/* Advanced-only: RDF (Turtle) serialization — sits directly above
             Metadata so toggling Advanced only inserts it there and never
             reshuffles Version history / Relations above it. */}
-        <div className="adv-only md:col-span-2">
+        <div className="adv-only" data-panel="turtle">
           <TurtleSerializationPanel conceptIri={concept.iri} />
         </div>
 
         {/* Metadata (notes / links / documents) — full width, ALWAYS the last
             panel (in both Simple and Advanced view). */}
-        <div className="md:col-span-2">
+        <div data-panel="metadata">
           <EntityMetadataPanel entityType="concept" entityId={concept.iri} />
         </div>
       </div>
@@ -1366,24 +1240,20 @@ export default function ConceptDetailView() {
         }}
       />
 
-      <Dialog open={sparqlDialogOpen} onOpenChange={setSparqlDialogOpen}>
-        <DialogContent className="sm:max-w-[900px] max-h-[85vh] overflow-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {t('semantic-models:concept.sparqlTitle', 'SPARQL query')}
-            </DialogTitle>
-            <DialogDescription>
-              {t(
-                'semantic-models:concept.sparqlDescription',
-                'Query the knowledge graph. Pre-seeded with this concept.',
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          <KGSearch
-            initialSparql={`SELECT ?p ?o WHERE { <${concept.iri}> ?p ?o } LIMIT 100`}
-          />
-        </DialogContent>
-      </Dialog>
+      {!isProperty && (
+        <RequestConceptActionDialog
+          open={requestDialogOpen}
+          onOpenChange={setRequestDialogOpen}
+          conceptLabel={conceptTitle}
+          currentStatus={currentStatus}
+          transitions={requestTransitions}
+          newVersion={requestNewVersion}
+          onTransition={(status, action) => {
+            void handleStatusTransition(status, action);
+          }}
+          busy={statusBusy}
+        />
+      )}
 
       {/* Approval wizard — opens instead of the plain submit-review dialog when
           a `for_request_status_change` approval workflow is configured for the

@@ -7,9 +7,12 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { useConceptMode } from '@/components/concepts/mode-switch';
+import KGSearch from '@/components/search/kg-search';
 
 // Strip known URN prefixes so an incoming ?source= (which may be a full IRI
 // like urn:glossary:test) matches availableSources (which are already stripped).
@@ -30,6 +33,8 @@ import {
   List,
   Network,
   Globe2,
+  Code2,
+  X,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -52,6 +57,7 @@ import {
   GlossaryFilterPanel,
   ImportConceptsDialog,
 } from '@/components/knowledge';
+import { allowedConceptTypes } from '@/components/knowledge/concept-editor-dialog';
 
 // ---------------------------------------------------------------------------
 // Explore — the ONE unified browse surface for concepts.
@@ -74,6 +80,42 @@ const VIEW_MODES: { id: ViewMode; labelKey: string; defaultLabel: string; icon: 
   { id: 'graph', labelKey: 'concepts:explore.viewGraph', defaultLabel: 'Graph', icon: Globe2 },
 ];
 
+// Concept types the Create menu can preset, in menu order per scheme type.
+type CreatableConceptType = 'term' | 'concept' | 'class' | 'property';
+
+const CREATE_ITEMS: Record<CreatableConceptType, { labelKey: string; defaultLabel: string }> = {
+  term: { labelKey: 'concepts:explore.createTerm', defaultLabel: 'New Term' },
+  concept: { labelKey: 'concepts:explore.createConcept', defaultLabel: 'New Concept' },
+  class: { labelKey: 'concepts:explore.createClass', defaultLabel: 'New Class' },
+  property: { labelKey: 'concepts:explore.createProperty', defaultLabel: 'New Property' },
+};
+
+const CREATE_TYPES_BY_SCHEME: Record<string, CreatableConceptType[]> = {
+  glossary: ['term'],
+  taxonomy: ['concept'],
+  ontology: ['class', 'property', 'concept'],
+};
+
+// Generic set (no single scheme in focus), in display order.
+const GENERIC_CREATE_TYPES: CreatableConceptType[] = ['concept', 'term', 'class', 'property'];
+
+/**
+ * Create-menu concept types for the scheme in focus. A known scheme type gets
+ * its own set; otherwise the generic set, limited to types at least one
+ * editable scheme accepts (all of them when no scheme is known).
+ */
+export function createMenuTypes(
+  focused: KnowledgeCollection | undefined,
+  editable: KnowledgeCollection[],
+): CreatableConceptType[] {
+  const byScheme = focused?.collection_type ? CREATE_TYPES_BY_SCHEME[focused.collection_type] : undefined;
+  if (byScheme) return byScheme;
+  if (editable.length === 0) return GENERIC_CREATE_TYPES;
+  return GENERIC_CREATE_TYPES.filter((ct) =>
+    editable.some((c) => allowedConceptTypes(c.collection_type).includes(ct)),
+  );
+}
+
 function parseViewMode(value: string | null): ViewMode {
   if (value === 'tree' || value === 'graph') return value;
   return 'list';
@@ -88,6 +130,12 @@ export default function ExploreView() {
   const bumpKnowledgeGraphRefresh = useKnowledgeGraphStore((s) => s.bumpRefreshNonce);
 
   const canWrite = hasPermission('semantic-models', FeatureAccessLevel.READ_WRITE);
+
+  // SPARQL / knowledge-graph search panel: Advanced view only, session-only
+  // open state (not persisted, not in the URL).
+  const [conceptMode] = useConceptMode();
+  const advanced = conceptMode === 'advanced';
+  const [sparqlOpen, setSparqlOpen] = useState(false);
 
   // Single source of concept data — fetch + filteredConcepts live here.
   const {
@@ -132,6 +180,9 @@ export default function ExploreView() {
   const [editingCollection, setEditingCollection] = useState<KnowledgeCollection | null>(null);
   const [conceptEditorOpen, setConceptEditorOpen] = useState(false);
   const [editingConcept, setEditingConcept] = useState<OntologyConcept | null>(null);
+  // Create-menu preset: the concept type and target scheme for a new concept.
+  const [createConceptType, setCreateConceptType] = useState<CreatableConceptType | undefined>(undefined);
+  const [createCollection, setCreateCollection] = useState<KnowledgeCollection | undefined>(undefined);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
 
   // Language selection - defaults to UI language
@@ -229,7 +280,18 @@ export default function ExploreView() {
   }, []);
 
   // Concept CRUD handlers (creation flow only; edit/delete live on detail page).
-  const handleCreateConcept = () => setConceptEditorOpen(true);
+  const handleCreateConcept = (conceptType: CreatableConceptType) => {
+    setEditingConcept(null);
+    setCreateConceptType(conceptType);
+    // Target the focused scheme; otherwise the first editable scheme that
+    // accepts this type (the dialog re-validates if the user switches scheme).
+    setCreateCollection(
+      focusedCollection ??
+        editableCollections.find((c) => allowedConceptTypes(c.collection_type).includes(conceptType)) ??
+        defaultCollection,
+    );
+    setConceptEditorOpen(true);
+  };
 
   const handleSaveConcept = async (data: any, isNew: boolean) => {
     try {
@@ -330,6 +392,18 @@ export default function ExploreView() {
   const editableCollections = useMemo(() => collections.filter((c) => c.is_editable), [collections]);
   const defaultCollection = editableCollections[0];
 
+  // The scheme the user is working in: the only editable scheme, or the only
+  // editable scheme left visible by the source filter. Otherwise none (the
+  // Create menu then offers the generic set).
+  const focusedCollection = useMemo(() => {
+    if (editableCollections.length === 1) return editableCollections[0];
+    const visible = editableCollections.filter(
+      (c) => !hiddenSources.includes(stripSourcePrefix(c.iri)),
+    );
+    return visible.length === 1 ? visible[0] : undefined;
+  }, [editableCollections, hiddenSources]);
+  const createTypes = createMenuTypes(focusedCollection, editableCollections);
+
   return (
     <div className="flex flex-col pt-3 pb-6">
       {/* Header — page description only (the section tab strip already names
@@ -346,6 +420,18 @@ export default function ExploreView() {
         </div>
 
         <div className="flex items-center gap-3 flex-shrink-0">
+          {advanced && (
+            <Button
+              variant={sparqlOpen ? 'secondary' : 'outline'}
+              className="adv-only"
+              aria-pressed={sparqlOpen}
+              aria-controls="explore-sparql-panel"
+              onClick={() => setSparqlOpen((open) => !open)}
+            >
+              <Code2 className="h-4 w-4 mr-2" />
+              {t('concepts:explore.sparql', 'SPARQL')}
+            </Button>
+          )}
           {canWrite && (
             <>
               <DropdownMenu>
@@ -357,10 +443,13 @@ export default function ExploreView() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={handleCreateConcept}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    {t('concepts:explore.createConcept', 'New Concept')}
-                  </DropdownMenuItem>
+                  {createTypes.map((ct) => (
+                    <DropdownMenuItem key={ct} onClick={() => handleCreateConcept(ct)}>
+                      <Plus className="h-4 w-4 mr-2" />
+                      {t(CREATE_ITEMS[ct].labelKey, CREATE_ITEMS[ct].defaultLabel)}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleCreateCollection}>
                     <FolderTree className="h-4 w-4 mr-2" />
                     {t('concepts:explore.createScheme', 'New Concept Scheme')}
@@ -380,6 +469,33 @@ export default function ExploreView() {
           )}
         </div>
       </div>
+
+      {/* SPARQL / knowledge-graph search: full-width inline panel above the
+          results (Advanced view only). Not bound to any one concept. */}
+      {advanced && sparqlOpen && (
+        <section
+          id="explore-sparql-panel"
+          data-testid="explore-sparql-panel"
+          aria-label={t('concepts:explore.sparqlPanel', 'SPARQL and knowledge graph search')}
+          className="adv-only mb-4 rounded-lg border bg-card p-4 min-h-[420px]"
+        >
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <h2 className="text-sm font-medium">
+              {t('concepts:explore.sparqlPanel', 'SPARQL and knowledge graph search')}
+            </h2>
+            <Button
+              variant="ghost"
+              size="icon"
+              title={t('common:actions.close', 'Close')}
+              aria-label={t('common:actions.close', 'Close')}
+              onClick={() => setSparqlOpen(false)}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+          <KGSearch />
+        </section>
+      )}
 
       {isLoading ? (
         <div className="flex-1 flex flex-col gap-4">
@@ -494,8 +610,9 @@ export default function ExploreView() {
           if (!open) setEditingConcept(null);
         }}
         concept={editingConcept}
-        collection={editingConcept ? undefined : defaultCollection}
+        collection={editingConcept ? undefined : (createCollection ?? defaultCollection)}
         collections={editableCollections}
+        initialConceptType={editingConcept ? undefined : createConceptType}
         onSave={handleSaveConcept}
       />
 
