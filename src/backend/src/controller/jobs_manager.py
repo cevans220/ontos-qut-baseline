@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Callable, Dict, List, Optional, Any
 import json
 import configparser
 import time
@@ -42,6 +42,26 @@ class JobsManager:
         # workflow-free deployment lets Lakebase idle down); True = at least one.
         # Authoritative because JobsManager is a single app-state singleton.
         self._has_installations: Optional[bool] = None
+        # Per-workflow callbacks invoked by the poller when a run terminates:
+        # handler(db, run_id, result_state). Lets features that track their
+        # own run records (e.g. Metadata Generation) finish runs nobody watches.
+        self._run_terminated_handlers: Dict[str, Callable[[Session, int, Optional[str]], None]] = {}
+
+    def register_run_terminated_handler(
+        self, workflow_id: str, handler: Callable[[Session, int, Optional[str]], None]
+    ) -> None:
+        """Register a callback for terminated runs of ``workflow_id``."""
+        self._run_terminated_handlers[workflow_id] = handler
+
+    def _notify_run_terminated(self, workflow_id: str, run_id: int, result_state: Optional[str], db: Session) -> None:
+        handler = self._run_terminated_handlers.get(workflow_id)
+        if handler is None:
+            return
+        try:
+            handler(db, run_id, result_state)
+        except Exception as e:
+            logger.error(f"Run-terminated handler for workflow '{workflow_id}' failed on run {run_id}: {e}", exc_info=True)
+            db.rollback()
 
     def list_available_workflows(self) -> List[Dict[str, str]]:
         root = self._workflows_root
@@ -1155,6 +1175,15 @@ class JobsManager:
                                 workflow_installation_id=installation.id,
                                 run_data=run_data
                             )
+
+                            if (run.state.life_cycle_state == RunLifeCycleState.TERMINATED and
+                                    not job_run.notified_at):
+                                self._notify_run_terminated(
+                                    installation.workflow_id,
+                                    run.run_id,
+                                    run.state.result_state.value if run.state.result_state else None,
+                                    db,
+                                )
 
                             # Create notification if job terminated unsuccessfully (failed, canceled, timed out, etc.)
                             if (run.state.life_cycle_state == RunLifeCycleState.TERMINATED and
