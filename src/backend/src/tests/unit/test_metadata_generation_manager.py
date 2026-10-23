@@ -271,3 +271,9 @@ def test_jobs_manager_run_terminated_handler_dispatch():
     handler.side_effect = RuntimeError("boom")
     jobs._notify_run_terminated(WORKFLOW_ID, 7, "FAILED", db)
     db.rollback.assert_called_once()
+
+
+def test_start_run_rejects_malformed_selection_before_job_check(db_session):
+    bad = StartRunRequest(selection=[SelectionItem(type="table", fqn="main.sales")])
+    with pytest.raises(ValueError, match="not a valid table"):
+        _manager().start_run(db_session, user_id="a@x.com", request=bad)

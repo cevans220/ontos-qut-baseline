@@ -90,5 +90,9 @@
   "about": {
     "name": "Sobre",
     "description": "Informações sobre o aplicativo e seus recursos."
+  },
+  "metadata-generation": {
+    "name": "__TODO__ Metadata Generation",
+    "description": "__TODO__ Generate, review and apply Unity Catalog descriptions with dbxmetagen."
   }
 }

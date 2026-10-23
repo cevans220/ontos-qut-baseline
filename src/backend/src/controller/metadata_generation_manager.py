@@ -85,6 +85,8 @@ class MetadataGenerationManager:
         """Create a Generation Run and launch the background job."""
         if metagen_runs_repo.count_active_for_user(db, user_id) >= MAX_ACTIVE_RUNS_PER_USER:
             raise ActiveRunLimitError("You already have a Generation Run in progress. Wait for it to finish or cancel it.")
+        selection = [item.model_dump() for item in request.selection]
+        table_names = selection_to_table_names(selection)
         if not self._jobs:
             raise ValueError("Jobs manager not available")
 
@@ -96,8 +98,6 @@ class MetadataGenerationManager:
                 "Ask an administrator to enable it under Settings > Jobs."
             )
 
-        selection = [item.model_dump() for item in request.selection]
-        table_names = selection_to_table_names(selection)
         model = request.model or self._settings.LLM_ENDPOINT or DEFAULT_MODEL
         options = {
             "comment_style": request.comment_style.value,
