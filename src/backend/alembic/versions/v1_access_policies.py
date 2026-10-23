@@ -1,14 +1,14 @@
 """Add Access Policies (W3C ODRL): policies, policy index, audiences, asset collections
 
 Revision ID: v1_access_policies
-Revises: b2_contract_deploy_default
+Revises: b6_contract_item_position
 Create Date: 2026-10-17
 """
 import sqlalchemy as sa
 from alembic import op
 
 revision = 'v1_access_policies'
-down_revision = 'b2_contract_deploy_default'
+down_revision = 'b6_contract_item_position'
 branch_labels = None
 depends_on = None
 

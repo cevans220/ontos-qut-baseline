@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from src.common import odrl
 from src.common.logging import get_logger
-from src.tools.base import BaseTool, ToolContext, ToolResult
+from src.tools.base import BaseTool, ToolContext, ToolResult, tool_failure
 
 logger = get_logger(__name__)
 
@@ -59,8 +59,7 @@ class CheckAccessTool(BaseTool):
             )
             return ToolResult(success=True, data=_manager().check_access(ctx.db, req))
         except Exception as e:
-            logger.error(f"[check_access] failed: {e}", exc_info=True)
-            return ToolResult(success=False, error=f"Access check failed: {e}")
+            return ToolResult(success=False, **tool_failure("check_access", e))
 
 
 class ListAccessPoliciesTool(BaseTool):
