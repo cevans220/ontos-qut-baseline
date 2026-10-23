@@ -272,3 +272,50 @@ def test_timeline_logging_does_not_commit(policies, rm, db_session: Session, mon
     assert commits == []
     from src.db_models.comments import CommentDb
     assert db_session.query(CommentDb).filter(CommentDb.entity_id == r.id).count() == 1
+
+
+# ------------------------------------------------------------ /review findings (2nd pass)
+
+def test_applying_a_release_keeps_delivered_releases_confirmable(policies, rm, db_session: Session):
+    _active_policy(policies, db_session, SALES)
+    git = FakeGit()
+    delivered = rm.deliver(db_session, _approved_release(rm, db_session).id, ADMIN, Delivery([DeliveryMode.INDIRECT], git=git))
+    _active_policy(policies, db_session, {"permission": [{"target": "uc:other", "action": "read", "assignee": "group:x"}]}, name="Other")
+    draft = rm.create_release(db_session, "uc", AUTHOR)
+    rm.change_status(db_session, draft.id, "under_review", AUTHOR)
+    rm.change_status(db_session, draft.id, "approved", APPROVER)
+    rm.deliver(db_session, draft.id, ADMIN, Delivery([DeliveryMode.DIRECT], FakeGrants()))
+    db_session.refresh(delivered)
+    assert delivered.status == "delivered"
+    assert rm.confirm_applied(db_session, delivered.id, ADMIN).status == "applied"
+
+
+def test_revoke_expired_ships_newly_expired_grants_despite_pending_delivered_revocation(policies, rm, db_session: Session):
+    _active_policy(policies, db_session, {"permission": [
+        {"target": "uc:main.a", "action": "read", "assignee": "group:t",
+         "constraint": [{"leftOperand": "dateTime", "operator": "lteq", "rightOperand": "2098-01-01T00:00:00Z"}]},
+        {"target": "uc:other.b", "action": "read", "assignee": "group:t",
+         "constraint": [{"leftOperand": "dateTime", "operator": "lteq", "rightOperand": "2099-01-01T00:00:00Z"}]}]})
+    rm.deliver(db_session, _approved_release(rm, db_session).id, ADMIN, Delivery([DeliveryMode.DIRECT], FakeGrants()))
+    git = FakeGit()
+    first = rm.revoke_expired(db_session, "uc", "system", Delivery([DeliveryMode.INDIRECT], git=git),
+                              now=datetime(2098, 1, 2, tzinfo=timezone.utc))
+    second = rm.revoke_expired(db_session, "uc", "system", Delivery([DeliveryMode.INDIRECT], git=git),
+                               now=datetime(2099, 1, 2, tzinfo=timezone.utc))
+    assert first.id != second.id and first.status == second.status == "delivered"
+    first_keys = {g["securable_name"] for g in first.changes["remove"] + first.changes["untrack"]}
+    second_keys = {g["securable_name"] for g in second.changes["remove"] + second.changes["untrack"]}
+    assert "other.b" in second_keys and not (first_keys & second_keys)
+
+
+def test_manual_delivery_does_not_commit_the_request(policies, rm, db_session: Session, monkeypatch):
+    from src.controller.notifications_manager import NotificationsManager
+    _active_policy(policies, db_session, SALES)
+    release = _approved_release(rm, db_session)
+    commits = []
+    monkeypatch.setattr(db_session, "commit", lambda: commits.append(1))
+    svc = Delivery([DeliveryMode.MANUAL])
+    svc.set_notifications_manager(NotificationsManager(settings_manager=None))
+    r = rm.deliver(db_session, release.id, ADMIN, svc)
+    assert r.status == "delivered" and commits == []
+    assert r.delivery_results[-1]["results"][0]["success"] is True

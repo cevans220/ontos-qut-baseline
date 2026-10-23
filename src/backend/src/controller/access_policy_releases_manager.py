@@ -22,6 +22,7 @@ from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.common import uc_policy_adapter as uc
@@ -72,6 +73,10 @@ RELEASE_TRANSITIONS: Dict[str, Tuple[str, ...]] = {
     R_DISCARDED: (),
 }
 OPEN_STATUSES = (R_DRAFT, R_UNDER_REVIEW, R_APPROVED, R_DELIVERED, R_FAILED)
+# Applying a release makes these stale (they were diffed against an older ledger). Delivered
+# releases are not among them: their artifact may still be applied (CI, runbook) and must stay
+# confirmable so the ledger learns about it.
+SUPERSEDABLE_STATUSES = (R_DRAFT, R_UNDER_REVIEW, R_APPROVED, R_FAILED)
 DELIVERABLE_STATUSES = (R_APPROVED, R_DELIVERED, R_FAILED)
 
 LEDGER_ACTIVE = "active"
@@ -84,16 +89,6 @@ LIVE_DIFF_MAX_SECURABLES = 200
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _parse_iso(value: Optional[str]) -> Optional[datetime]:
-    if not value:
-        return None
-    try:
-        d = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
 
 
 def _ledger_grant(row: AccessGrantLedgerDb) -> uc.UCGrant:
@@ -184,20 +179,31 @@ class PolicyReleaseManager:
             "ledger_fingerprint": self._fingerprint(db, target),
         }
 
+    @staticmethod
+    def _insert(db: Session, row: AccessPolicyReleaseDb, attempts: int = 5) -> AccessPolicyReleaseDb:
+        """Insert with the next per-target sequence number; retries if a concurrent insert took it."""
+        for _ in range(attempts):
+            row.sequence = (db.query(func.max(AccessPolicyReleaseDb.sequence))
+                            .filter(AccessPolicyReleaseDb.target == row.target).scalar() or 0) + 1
+            try:
+                with db.begin_nested():
+                    db.add(row)
+                    db.flush()
+                return row
+            except IntegrityError:
+                continue
+        raise AccessPolicyError("Could not allocate a release number — please retry", 409)
+
     def create_release(self, db: Session, target: str, user: Optional[str], notes: Optional[str] = None, *,
                        resolve_object_kind: Optional[uc.ObjectKindResolver] = None) -> AccessPolicyReleaseDb:
         compiled = self.compile(db, target, resolve_object_kind=resolve_object_kind)
-        seq = (db.query(func.max(AccessPolicyReleaseDb.sequence))
-               .filter(AccessPolicyReleaseDb.target == target).scalar() or 0) + 1
-        row = AccessPolicyReleaseDb(
-            target=target, sequence=seq, release_kind=KIND_POLICY_RELEASE, status=R_DRAFT, notes=notes,
+        row = self._insert(db, AccessPolicyReleaseDb(
+            target=target, release_kind=KIND_POLICY_RELEASE, status=R_DRAFT, notes=notes,
             plan=compiled["plan"], changes=compiled["changes"], issues=compiled["issues"],
             source_policies=compiled["source_policies"], ledger_fingerprint=compiled["ledger_fingerprint"],
             created_by=user,
-        )
-        db.add(row)
-        db.flush()
-        self._log_timeline(db, row, f"Release #{seq} compiled from {len(compiled['source_policies'])} active "
+        ))
+        self._log_timeline(db, row, f"Release #{row.sequence} compiled from {len(compiled['source_policies'])} active "
                                     f"policies: {self._summary(row)}", user)
         return row
 
@@ -273,12 +279,8 @@ class PolicyReleaseManager:
         """
         live: Dict[Tuple[str, str], Optional[set]] = {}
         securables = sorted({(g.securable_type, g.securable_name) for g in adds})
-        for stype, sname in securables[:LIVE_DIFF_MAX_SECURABLES] if get_grants else []:
-            try:
-                res = get_grants(stype, sname) or {}
-            except Exception as e:  # pragma: no cover - platform read is best-effort
-                logger.warning(f"Could not read live grants on {stype} {sname}: {e}")
-                res = {}
+        results = uc.read_live_grants(securables[:LIVE_DIFF_MAX_SECURABLES], get_grants) if get_grants else {}
+        for (stype, sname), res in results.items():
             if res.get("success"):
                 live[(stype, sname)] = {(row.get("principal") or "").lower() + "|" + str(p).upper().replace(" ", "_")
                                         for row in res.get("grants") or [] for p in row.get("privileges") or []}
@@ -323,11 +325,14 @@ class PolicyReleaseManager:
         row = self.require(db, release_id)
         if row.status not in DELIVERABLE_STATUSES:
             raise AccessPolicyError(f"Only approved, delivered or failed releases can be delivered; this one is '{row.status}'", 409)
-        if row.status == R_APPROVED and row.ledger_fingerprint != self._fingerprint(db, row.target):
+        # Revocation releases are computed against the ledger at delivery time (``_remaining``), so a
+        # moved ledger never makes them stale; policy releases need a recompile.
+        if (row.status == R_APPROVED and row.release_kind == KIND_POLICY_RELEASE
+                and row.ledger_fingerprint != self._fingerprint(db, row.target)):
             raise AccessPolicyError("The Grant Ledger changed since this release was compiled — recompile it", 409)
         chosen = self._delivery_modes(delivery_service, modes)
         if get_grants is None:
-            get_grants = getattr(getattr(delivery_service, "_grant_manager", None), "get_grants", None)
+            get_grants = getattr(getattr(delivery_service, "grant_manager", None), "get_grants", None)
 
         adds, removes, untracks = self._remaining(db, row)
         preexisting, live_checked = self._preexisting(adds, get_grants)
@@ -415,7 +420,8 @@ class PolicyReleaseManager:
         row.status, row.applied_by, row.applied_at = R_APPLIED, user, _now()
         for other in (db.query(AccessPolicyReleaseDb)
                       .filter(AccessPolicyReleaseDb.target == row.target, AccessPolicyReleaseDb.id != row.id,
-                              AccessPolicyReleaseDb.status.in_(OPEN_STATUSES)).all()):
+                              AccessPolicyReleaseDb.release_kind == KIND_POLICY_RELEASE,
+                              AccessPolicyReleaseDb.status.in_(SUPERSEDABLE_STATUSES)).all()):
             other.status = R_SUPERSEDED
             self._log_timeline(db, other, f"Superseded by release #{row.sequence}", user)
         self._log_timeline(db, row, f"Release {how}", user)
@@ -451,7 +457,7 @@ class PolicyReleaseManager:
     def expired_grants(self, db: Session, target: str, now: Optional[datetime] = None) -> List[AccessGrantLedgerDb]:
         now = now or _now()
         return [r for r in self.active_ledger(db, target)
-                if (exp := _parse_iso(r.expires_at)) is not None and exp <= now]
+                if (exp := uc.parse_iso(r.expires_at)) is not None and exp <= now]
 
     def revoke_expired(self, db: Session, target: str, user: Optional[str], delivery_service: Any,
                        now: Optional[datetime] = None) -> Optional[AccessPolicyReleaseDb]:
@@ -462,34 +468,38 @@ class PolicyReleaseManager:
             return None
         # Validate delivery before writing anything, so a misconfiguration leaves no orphaned release.
         self._delivery_modes(delivery_service, None)
-        in_flight = (db.query(AccessPolicyReleaseDb)
-                     .filter(AccessPolicyReleaseDb.target == target,
-                             AccessPolicyReleaseDb.release_kind == KIND_REVOCATION,
-                             AccessPolicyReleaseDb.status.in_((R_APPROVED, R_DELIVERED, R_FAILED)))
-                     .order_by(AccessPolicyReleaseDb.sequence.desc()).first())
-        if in_flight is not None:
-            # Don't stack revocation releases: an Indirect/Manual one awaits confirmation, a failed one is retried.
-            if in_flight.status == R_DELIVERED:
-                return in_flight
-            return self.deliver(db, in_flight.id, user, delivery_service)
+        open_revocations = (db.query(AccessPolicyReleaseDb)
+                            .filter(AccessPolicyReleaseDb.target == target,
+                                    AccessPolicyReleaseDb.release_kind == KIND_REVOCATION,
+                                    AccessPolicyReleaseDb.status.in_((R_APPROVED, R_DELIVERED, R_FAILED)))
+                            .order_by(AccessPolicyReleaseDb.sequence.desc()).all())
+        retry = next((r for r in open_revocations if r.status in (R_APPROVED, R_FAILED)), None)
+        if retry is not None:
+            # Finish the undelivered / failed one first; the next sweep covers anything newer.
+            return self.deliver(db, retry.id, user, delivery_service)
+        # Grants already in a delivered revocation awaiting confirmation aren't shipped twice,
+        # but grants that expired since get a release of their own.
+        pending = {(g["principal"], g["securable_type"], g["securable_name"], g["privilege"])
+                   for r in open_revocations
+                   for g in (r.changes or {}).get("remove", []) + (r.changes or {}).get("untrack", [])}
+        expired = [r for r in expired if _key(r) not in pending]
+        if not expired:
+            return open_revocations[0] if open_revocations else None
         expired_keys = {_key(r) for r in expired}
         remaining = [_ledger_grant(r) for r in self.active_ledger(db, target) if _key(r) not in expired_keys]
         gone = sorted((_ledger_grant(r) for r in expired), key=lambda g: g.key)
         diff = uc.GrantDiff(remove=[g for g in gone if not g.preexisting], untrack=[g for g in gone if g.preexisting])
         changes = diff.to_dict()
         changes["sql"] = uc.render_sql(diff)
-        seq = (db.query(func.max(AccessPolicyReleaseDb.sequence))
-               .filter(AccessPolicyReleaseDb.target == target).scalar() or 0) + 1
         row = AccessPolicyReleaseDb(
-            target=target, sequence=seq, release_kind=KIND_REVOCATION, status=R_APPROVED,
+            target=target, release_kind=KIND_REVOCATION, status=R_APPROVED,
             notes=f"Automatic revocation of {len(expired)} expired grant(s)",
             plan={"grants": [g.to_dict() for g in remaining]}, changes=changes, issues=[],
             source_policies=[], ledger_fingerprint=self._fingerprint(db, target),
             created_by=user, submitted_by=user, approved_by=user,
         )
-        db.add(row)
-        db.flush()
-        self._log_timeline(db, row, f"Revocation release #{seq} created for {len(expired)} expired grant(s)", user)
+        self._insert(db, row)
+        self._log_timeline(db, row, f"Revocation release #{row.sequence} created for {len(expired)} expired grant(s)", user)
         return self.deliver(db, row.id, user, delivery_service)
 
     # ------------------------------------------------------------ live state
@@ -503,8 +513,7 @@ class PolicyReleaseManager:
         truncated = len(securables) > LIVE_DIFF_MAX_SECURABLES
         live: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
         errors: List[str] = []
-        for stype, sname in securables[:LIVE_DIFF_MAX_SECURABLES]:
-            res = get_grants(stype, sname) or {}
+        for (stype, sname), res in uc.read_live_grants(securables[:LIVE_DIFF_MAX_SECURABLES], get_grants).items():
             if res.get("success"):
                 live[(stype, sname)] = res.get("grants") or []
             else:
@@ -541,7 +550,7 @@ class PolicyReleaseManager:
         out = []
         for r in q.order_by(AccessGrantLedgerDb.securable_name, AccessGrantLedgerDb.principal,
                             AccessGrantLedgerDb.privilege).all():
-            exp = _parse_iso(r.expires_at)
+            exp = uc.parse_iso(r.expires_at)
             out.append({
                 "id": r.id, "target": r.target, "principal": r.principal, "securable_type": r.securable_type,
                 "securable_name": r.securable_name, "privilege": r.privilege, "implied": bool(r.implied),

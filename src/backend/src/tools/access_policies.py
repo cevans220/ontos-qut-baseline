@@ -164,8 +164,7 @@ class PreviewAccessReleaseTool(BaseTool):
                                                                       "source_policies")}
                               | {"gated": out["plan"]["gated"], "grant_count": len(out["plan"]["grants"])})
         except Exception as e:
-            logger.error(f"[preview_access_release] failed: {e}", exc_info=True)
-            return ToolResult(success=False, error=f"Release preview failed: {e}")
+            return ToolResult(success=False, **tool_failure("preview_access_release", e))
 
 
 class ListAccessGrantsTool(BaseTool):
@@ -192,5 +191,4 @@ class ListAccessGrantsTool(BaseTool):
             rows = PolicyReleaseManager(_manager()).ledger(ctx.db, target or "uc", status or None, principal)
             return ToolResult(success=True, data={"grants": rows, "count": len(rows)})
         except Exception as e:
-            logger.error(f"[list_access_grants] failed: {e}", exc_info=True)
-            return ToolResult(success=False, error=f"Listing grants failed: {e}")
+            return ToolResult(success=False, **tool_failure("list_access_grants", e))

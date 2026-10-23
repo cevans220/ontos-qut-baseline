@@ -166,6 +166,11 @@ class DeliveryService:
     def set_grant_manager(self, grant_manager: 'GrantManager') -> None:
         """Set the grant manager for direct mode."""
         self._grant_manager = grant_manager
+
+    @property
+    def grant_manager(self) -> Optional['GrantManager']:
+        """Grant manager for direct mode (also used to read live grants)."""
+        return self._grant_manager
     
     def set_notifications_manager(self, notifications_manager: 'NotificationsManager') -> None:
         """Set the notifications manager for manual mode."""

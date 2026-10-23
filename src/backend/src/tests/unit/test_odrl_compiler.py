@@ -212,3 +212,34 @@ def test_preexisting_ledger_grants_are_untracked_not_revoked():
     diff = uc.diff_grants([], [shared, own])
     assert [g.privilege for g in diff.remove] == ["SELECT"] and [g.privilege for g in diff.untrack] == ["USE_CATALOG"]
     assert uc.render_sql(diff) == ["REVOKE SELECT ON TABLE `main`.`s`.`t` FROM `account users`;"]
+
+
+# ------------------------------------------------------------ /review findings (2nd pass)
+
+def test_void_policy_prohibitions_have_no_effect_on_other_policies():
+    void = _policy({  # no conflict strategy → spec default 'invalid'
+        "permission": [{"target": "uc:main.hr", "action": "read", "assignee": "group:g"}],
+        "prohibition": [{"target": "uc:main.hr", "action": "read", "assignee": "group:g"}]}, conflict=None)
+    other = _policy({"permission": [{"target": "uc:main.hr", "action": "read", "assignee": "group:g"}]},
+                    uid="urn:ontos:policy:p2", name="P2")
+    for order in ((void, other), (other, void)):
+        plan = _compile(*order)
+        assert [e.source.policy_uid for e in plan.entitlements] == ["urn:ontos:policy:p2"]
+        assert [i.code for i in plan.issues if i.severity == "error"] == ["policy_conflict_invalid"]
+
+
+def test_scheduled_prohibition_becomes_the_grant_expiry():
+    plan = _compile(
+        _policy({"permission": [{"target": "uc:main.hr", "action": "read", "assignee": "group:g"}]}),
+        _policy({"prohibition": [{"target": "uc:main", "action": "use", "assignee": "group:g",
+                                  "constraint": [{"leftOperand": "dateTime", "operator": "gteq",
+                                                  "rightOperand": "2026-11-01T00:00:00Z"}]}]},
+                uid="urn:ontos:policy:p2", name="P2"))
+    assert [(e.securable, e.expires_at) for e in plan.entitlements] == [("uc:main.hr", "2026-11-01T00:00:00Z")]
+    assert not plan.has_errors
+
+
+def test_live_diff_ignores_principal_case():
+    desired = [uc.UCGrant("jane.doe@corp.com", "table", "m.s.t", "SELECT")]
+    out = uc.live_diff(desired, desired, {("table", "m.s.t"): [{"principal": "Jane.Doe@corp.com", "privileges": ["SELECT"]}]})
+    assert out["in_sync"] and out["missing"] == [] and out["unmanaged"] == []

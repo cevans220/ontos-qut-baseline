@@ -396,6 +396,8 @@ class _Prohibition:
     securables: Set[str]
     source: RuleRef
     conflict: str
+    # A prohibition that only takes effect later: overlapping grants get it as their expiry.
+    starts_at: Optional[datetime] = None
 
 
 def compile_policies(
@@ -433,10 +435,23 @@ def compile_policies(
             plan.obligations.append({"source": src.to_dict(), "action": rule.get("action"),
                                      "enforcement": odrl.ENFORCEMENT_WORKFLOW})
 
+    # Pass 1 — a policy under the 'invalid' strategy whose own permission and prohibition conflict
+    # is void: none of its rules (prohibitions included) has any effect.
+    for pro in prohibitions:
+        if pro.conflict != "invalid" or pro.source.policy_uid in invalid_policies:
+            continue
+        if any(e.source and e.source.policy_uid == pro.source.policy_uid and _overlap(e, pro) is not None
+               for e in candidates):
+            invalid_policies.add(pro.source.policy_uid)
+            plan.issue(SEVERITY_ERROR, "policy_conflict_invalid",
+                       f"{pro.source.policy_name}: permission and prohibition conflict under the 'invalid' "
+                       "strategy — the policy is void and has no effect", pro.source)
+    prohibitions = [p for p in prohibitions if p.source.policy_uid not in invalid_policies]
+    candidates = [e for e in candidates if not (e.source and e.source.policy_uid in invalid_policies)]
+
+    # Pass 2 — prohibitions subtract from permissions (any deny wins across policies).
     kept: List[Entitlement] = []
     for e in candidates:
-        if e.source and e.source.policy_uid in invalid_policies:
-            continue
         denied = False
         for pro in prohibitions:
             verdict = _overlap(e, pro)
@@ -445,13 +460,16 @@ def compile_policies(
             same_policy = e.source is not None and e.source.policy_uid == pro.source.policy_uid
             if same_policy and pro.conflict == "perm":
                 continue  # Within a perm-strategy policy, permissions override its prohibitions.
-            if same_policy and pro.conflict == "invalid":
-                invalid_policies.add(pro.source.policy_uid)
-                plan.issue(SEVERITY_ERROR, "policy_conflict_invalid",
-                           f"{pro.source.policy_name}: permission and prohibition conflict under the 'invalid' "
-                           "strategy — the policy is void and grants nothing", pro.source)
-                denied = True
-                break
+            if verdict == "full" and pro.starts_at is not None:
+                # Scheduled deny: end the grant when the prohibition starts (the expiry sweep revokes it).
+                cap = pro.starts_at
+                cur = odrl._to_comparable(e.expires_at) if e.expires_at else None
+                if not isinstance(cur, datetime) or cap < cur:
+                    e.expires_at = _iso(cap)
+                    plan.issue(SEVERITY_INFO, "expires_at_prohibition",
+                               f"{e.principal} {e.action} {e.securable} expires at {_iso(cap)} when "
+                               f"{pro.source.label()} takes effect", e.source)
+                continue
             if verdict == "full":
                 plan.issue(SEVERITY_INFO, "denied_by_prohibition",
                            f"{e.principal} {e.action} {e.securable} removed by {pro.source.label()}", e.source)
@@ -464,7 +482,7 @@ def compile_policies(
             break
         if not denied:
             kept.append(e)
-    plan.entitlements = [e for e in kept if not (e.source and e.source.policy_uid in invalid_policies)]
+    plan.entitlements = kept
     return plan
 
 
@@ -524,9 +542,13 @@ def _compile_prohibition(rule: Dict[str, Any], src: RuleRef, conflict: str, part
     if not action:
         return None
     start, end, rest = _time_window(rule.get("constraint") or [])
-    if (end is not None and end <= now) or (start is not None and start > now):
-        plan.issue(SEVERITY_INFO, "prohibition_inactive", f"{src.label()} is outside its time window", src)
+    if end is not None and end <= now:
+        plan.issue(SEVERITY_INFO, "prohibition_inactive", f"{src.label()} ended at {_iso(end)}", src)
         return None
+    scheduled = start if start is not None and start > now else None
+    if scheduled is not None:
+        plan.issue(SEVERITY_INFO, "prohibition_scheduled",
+                   f"{src.label()} takes effect at {_iso(scheduled)} — overlapping grants expire then", src)
     if rest or rule.get("action_refinement"):
         # Fail closed: an unenforceable condition never lets a prohibition lapse.
         plan.issue(SEVERITY_WARNING, "prohibition_unconditional",
@@ -539,7 +561,7 @@ def _compile_prohibition(rule: Dict[str, Any], src: RuleRef, conflict: str, part
                        f"{src.label()}: {what} — {reason}; a prohibition must be exact to be enforced", src)
     if party.inexact or asset.inexact:
         return None
-    return _Prohibition(party, action, set(asset.securables), src, conflict)
+    return _Prohibition(party, action, set(asset.securables), src, conflict, scheduled)
 
 
 def _overlap(e: Entitlement, pro: _Prohibition) -> Optional[str]:

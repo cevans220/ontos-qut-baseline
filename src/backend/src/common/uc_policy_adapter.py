@@ -122,8 +122,14 @@ def securable_kind(name: str, resolve_object_kind: Optional[ObjectKindResolver] 
     return kind if kind in (KIND_TABLE, KIND_VOLUME, KIND_FUNCTION, KIND_MODEL) else KIND_TABLE
 
 
-def _parse_iso(value: str) -> datetime:
-    d = datetime.fromisoformat(value.replace("Z", "+00:00"))
+def parse_iso(value: Optional[str]) -> Optional[datetime]:
+    """ISO 8601 (``...Z`` allowed) → aware UTC datetime; None for empty / unparseable."""
+    if not value:
+        return None
+    try:
+        d = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
     return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
 
 
@@ -131,7 +137,10 @@ def _merge_expiry(a: Optional[str], b: Optional[str]) -> Optional[str]:
     """Unbounded wins; otherwise the later expiry (compared as instants, not strings)."""
     if a is None or b is None:
         return None
-    return a if _parse_iso(a) >= _parse_iso(b) else b
+    pa, pb = parse_iso(a), parse_iso(b)
+    if pa is None or pb is None:
+        return None  # Unparseable expiry: treat as unbounded rather than revoke early.
+    return a if pa >= pb else b
 
 
 def build_grants(plan: EntitlementPlan, resolve_object_kind: Optional[ObjectKindResolver] = None) -> List[UCGrant]:
@@ -241,13 +250,17 @@ def live_diff(managed: Iterable[UCGrant], desired: Iterable[UCGrant],
 
     ``live_by_securable[(type, name)]`` = ``[{"principal", "privileges"}]`` from ``GrantManager.get_grants``.
     """
-    desired_keys = {g.key for g in desired}
-    managed_keys = {g.key for g in managed}
+    def norm(key: GrantKey) -> GrantKey:
+        # UC resolves principals case-insensitively and may echo a different case.
+        return ((key[0] or "").lower(), key[1], key[2], key[3])
+
+    desired_keys = {norm(g.key) for g in desired}
+    managed_keys = {norm(g.key) for g in managed}
     live: set = set()
     for (stype, sname), rows in live_by_securable.items():
         for row in rows or []:
             for priv in row.get("privileges") or []:
-                live.add((row.get("principal"), stype, sname, str(priv).upper().replace(" ", "_")))
+                live.add(norm((row.get("principal"), stype, sname, str(priv).upper().replace(" ", "_"))))
     missing = sorted(desired_keys - live)
     unmanaged = sorted(k for k in live - desired_keys if k not in managed_keys)
     stale = sorted(k for k in live & managed_keys if k not in desired_keys)
@@ -278,3 +291,22 @@ def render_sql(diff: GrantDiff) -> List[str]:
             out.append(f"{verb} {privs} ON {_SQL_KIND[item['securable_type']]} "
                        f"{_quote_name(item['securable_name'])} {prep} `{principal}`;")
     return out
+
+
+def read_live_grants(securables: Iterable[Tuple[str, str]], get_grants: Callable[[str, str], Dict[str, Any]],
+                     max_workers: int = 8) -> Dict[Tuple[str, str], Dict[str, Any]]:
+    """``get_grants`` for many securables in parallel (SDK calls are I/O-bound). Errors become failed results."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    items = list(securables)
+
+    def one(item: Tuple[str, str]) -> Dict[str, Any]:
+        try:
+            return get_grants(*item) or {}
+        except Exception as e:  # pragma: no cover - platform read is best-effort
+            return {"success": False, "error": type(e).__name__}
+
+    if not items:
+        return {}
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(items))) as pool:
+        return dict(zip(items, pool.map(one, items)))

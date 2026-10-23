@@ -127,7 +127,7 @@ async def policy_validation(entity_id: str, request: Request, db: DBSessionDep, 
 # ------------------------------------------------- releases & ledger (Phase 2)
 
 def _grant_manager(delivery_service: Any) -> Any:
-    gm = getattr(delivery_service, "_grant_manager", None) if delivery_service else None
+    gm = delivery_service.grant_manager if delivery_service else None
     if gm is None:
         try:
             from src.controller.grant_manager import get_grant_manager
