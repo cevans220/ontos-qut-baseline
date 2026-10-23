@@ -8,7 +8,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from src.common.logging import get_logger
-from src.tools.base import BaseTool, ToolContext, ToolResult
+from src.tools.base import BaseTool, ToolContext, ToolResult, tool_failure
 
 logger = get_logger(__name__)
 
@@ -196,8 +196,7 @@ class CreateDraftDataContractTool(BaseTool):
             )
             
         except Exception as e:
-            logger.error(f"[create_draft_data_contract] FAILED: {type(e).__name__}: {e}", exc_info=True)
-            return ToolResult(success=False, error=f"{type(e).__name__}: {str(e)}")
+            return ToolResult(success=False, **tool_failure("create_draft_data_contract", e))
 
 
 class UpdateDataContractTool(BaseTool):
@@ -312,8 +311,7 @@ class UpdateDataContractTool(BaseTool):
             )
             
         except Exception as e:
-            logger.error(f"[update_data_contract] FAILED: {type(e).__name__}: {e}", exc_info=True)
-            return ToolResult(success=False, error=f"{type(e).__name__}: {str(e)}")
+            return ToolResult(success=False, **tool_failure("update_data_contract", e))
 
 
 class SearchDataContractsTool(BaseTool):
@@ -440,8 +438,7 @@ class SearchDataContractsTool(BaseTool):
             )
 
         except Exception as e:
-            logger.error(f"[search_data_contracts] FAILED: {e.__class__.__name__}: {e}", exc_info=True)
-            return ToolResult(success=False, error=f"{e.__class__.__name__}: {str(e)}", data={"contracts": []})
+            return ToolResult(success=False, **tool_failure("search_data_contracts", e), data={"contracts": []})
 
 
 class GetDataContractTool(BaseTool):
@@ -491,8 +488,7 @@ class GetDataContractTool(BaseTool):
             return ToolResult(success=True, data=_serialize_contract(contract))
 
         except Exception as e:
-            logger.error(f"[get_data_contract] FAILED: {type(e).__name__}: {e}", exc_info=True)
-            return ToolResult(success=False, error=f"{type(e).__name__}: {str(e)}")
+            return ToolResult(success=False, **tool_failure("get_data_contract", e))
 
 
 class GetDataContractsBulkTool(BaseTool):
@@ -575,8 +571,7 @@ class GetDataContractsBulkTool(BaseTool):
                 },
             )
         except Exception as e:
-            logger.error(f"[get_data_contracts] FAILED: {type(e).__name__}: {e}", exc_info=True)
-            return ToolResult(success=False, error=f"{type(e).__name__}: {str(e)}")
+            return ToolResult(success=False, **tool_failure("get_data_contracts", e))
 
 
 class ListDataContractsTool(BaseTool):
@@ -686,6 +681,5 @@ class DeleteDataContractTool(BaseTool):
             )
             
         except Exception as e:
-            logger.error(f"[delete_data_contract] FAILED: {type(e).__name__}: {e}", exc_info=True)
-            return ToolResult(success=False, error=f"{type(e).__name__}: {str(e)}")
+            return ToolResult(success=False, **tool_failure("delete_data_contract", e))
 
