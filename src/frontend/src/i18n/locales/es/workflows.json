@@ -475,11 +475,17 @@
     "titleFallback": "Ejecución del flujo de trabajo",
     "executionId": "ID de ejecución: {{id}}...",
     "stepsProgress": "{{done}}/{{total}} pasos",
+    "stepsProgressWithRemoved_one": "{{done}}/{{total}} pasos (+{{count}} eliminado)",
+    "stepsProgressWithRemoved_other": "{{done}}/{{total}} pasos (+{{count}} eliminados)",
     "triggeredBy": "Activado por: {{user}}",
     "workflowSteps": "Pasos del flujo de trabajo",
     "loadDefinitionFailed": "No se pudo cargar la definición del flujo de trabajo",
+    "removedSteps": "Pasos eliminados",
+    "removedStepsHint": "Estos pasos se ejecutaron en esta ejecución y luego se eliminaron del workflow.",
     "stepErrors": {
-      "rule_entity_load_failed": "No se pudo cargar {{entityType}} {{entityId}} para evaluar la regla"
+      "approval_rejected": "Solicitud denegada",
+      "rule_entity_load_failed": "No se pudo cargar {{entityType}} {{entityId}} para evaluar la regla",
+      "rule_entity_not_found": "No se encontró {{entityType}} {{entityId}}, por lo que no se puede evaluar la regla"
     },
     "states": {
       "pending": "Pendiente",

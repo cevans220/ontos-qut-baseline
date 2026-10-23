@@ -224,9 +224,20 @@ def _decide_waiting_review_workflows(
     from src.models.process_workflows import TriggerType
     from src.routes.workflows_routes import _mark_step_notifications_handled
 
-    paused = db.query(WorkflowExecutionDb).filter(
+    # The text filters (quoted values, so another id that contains this one
+    # doesn't match) and the join on the current approval step narrow the
+    # candidates in SQL; the JSON checks below are the exact ones.
+    paused = db.query(WorkflowExecutionDb).join(
+        WorkflowStepDb,
+        (WorkflowStepDb.workflow_id == WorkflowExecutionDb.workflow_id)
+        & (WorkflowStepDb.step_id == WorkflowExecutionDb.current_step_id),
+    ).filter(
         WorkflowExecutionDb.status == 'paused',
-        WorkflowExecutionDb.trigger_context.contains(contract_id),
+        WorkflowStepDb.step_type == 'approval',
+        WorkflowExecutionDb.trigger_context.contains(json.dumps(contract_id)),
+        WorkflowExecutionDb.trigger_context.contains(
+            json.dumps(TriggerType.ON_REQUEST_REVIEW.value)
+        ),
     ).all()
     waiting = []
     for execution in paused:
@@ -235,16 +246,10 @@ def _decide_waiting_review_workflows(
         except ValueError:
             continue
         if (
-            context.get('entity_type') != 'data_contract'
-            or context.get('entity_id') != contract_id
-            or context.get('trigger_type') != TriggerType.ON_REQUEST_REVIEW.value
+            context.get('entity_type') == 'data_contract'
+            and context.get('entity_id') == contract_id
+            and context.get('trigger_type') == TriggerType.ON_REQUEST_REVIEW.value
         ):
-            continue
-        step = db.query(WorkflowStepDb).filter(
-            WorkflowStepDb.workflow_id == execution.workflow_id,
-            WorkflowStepDb.step_id == execution.current_step_id,
-        ).first()
-        if step is not None and step.step_type == 'approval':
             waiting.append((execution.id, execution.current_step_id))
 
     resumed = 0

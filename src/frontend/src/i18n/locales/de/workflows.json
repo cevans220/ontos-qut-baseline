@@ -475,11 +475,17 @@
     "titleFallback": "Workflow-Ausführung",
     "executionId": "Ausführungs-ID: {{id}}...",
     "stepsProgress": "{{done}}/{{total}} Schritte",
+    "stepsProgressWithRemoved_one": "{{done}}/{{total}} Schritte (+{{count}} entfernt)",
+    "stepsProgressWithRemoved_other": "{{done}}/{{total}} Schritte (+{{count}} entfernt)",
     "triggeredBy": "Ausgelöst von: {{user}}",
     "workflowSteps": "Workflow-Schritte",
     "loadDefinitionFailed": "Workflow-Definition konnte nicht geladen werden",
+    "removedSteps": "Entfernte Schritte",
+    "removedStepsHint": "Diese Schritte liefen in dieser Ausführung und wurden später aus dem Workflow entfernt.",
     "stepErrors": {
-      "rule_entity_load_failed": "{{entityType}} {{entityId}} konnte nicht geladen werden, um die Regel auszuwerten"
+      "approval_rejected": "Anfrage abgelehnt",
+      "rule_entity_load_failed": "{{entityType}} {{entityId}} konnte nicht geladen werden, um die Regel auszuwerten",
+      "rule_entity_not_found": "{{entityType}} {{entityId}} wurde nicht gefunden, die Regel kann nicht ausgewertet werden"
     },
     "states": {
       "pending": "Ausstehend",
