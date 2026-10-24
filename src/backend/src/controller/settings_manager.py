@@ -100,8 +100,6 @@ DEFAULT_ROLE_PERMISSIONS = {
         'estate-manager': FeatureAccessLevel.ADMIN,
         'master-data': FeatureAccessLevel.ADMIN,
         'security-features': FeatureAccessLevel.ADMIN,
-        'entitlements': FeatureAccessLevel.ADMIN,
-        'entitlements-sync': FeatureAccessLevel.ADMIN,
         'data-asset-reviews': FeatureAccessLevel.ADMIN,
         'catalog-commander': FeatureAccessLevel.FULL,
         'comments': FeatureAccessLevel.READ_WRITE,  # All users can comment
@@ -147,8 +145,6 @@ DEFAULT_ROLE_PERMISSIONS = {
     },
     "Security Officer": {
         'security-features': FeatureAccessLevel.ADMIN,
-        'entitlements': FeatureAccessLevel.ADMIN,
-        'entitlements-sync': FeatureAccessLevel.ADMIN,
         'compliance': FeatureAccessLevel.READ_WRITE,
         'access-policies': FeatureAccessLevel.ADMIN,
         'process-workflows': FeatureAccessLevel.READ_ONLY,  # View workflows, Admin manages
