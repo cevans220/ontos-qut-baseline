@@ -1869,6 +1869,9 @@ class SettingsManager:
         FEATURE_ID_MIGRATIONS = {
             'security': 'security-features',
         }
+        # Retired features: dropped, deliberately not mapped. The Entitlements mockups never granted
+        # anything; Access Policies push real grants, so inheriting their Admin level would escalate.
+        RETIRED_FEATURE_IDS = {'entitlements', 'entitlements-sync'}
 
         try:
             feature_permissions_raw = json.loads(role_db.feature_permissions or '{}') # Handle None
@@ -1876,6 +1879,7 @@ class SettingsManager:
             feature_permissions_raw = {
                 FEATURE_ID_MIGRATIONS.get(k, k): v 
                 for k, v in feature_permissions_raw.items()
+                if k not in RETIRED_FEATURE_IDS
             }
             feature_permissions = {
                 k: FeatureAccessLevel(v) 
