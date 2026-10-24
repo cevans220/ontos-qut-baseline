@@ -41,10 +41,10 @@ tasks:
         - "{{job.parameters.product_version}}"
     environment_key: "access-reconcile-env"
 
-# The job's schedule drives reconciliation; it covers every Access Target with a reconcile
-# schedule set (or the targets listed in the "targets" parameter).
+# The job wakes up hourly and reconciles the Access Targets whose own reconcile schedule
+# (cron) fired since their last report — or the targets listed in the "targets" parameter.
 schedule:
-  quartz_cron_expression: "0 0 5 * * ?"  # Daily at 5 AM (after compliance checks)
+  quartz_cron_expression: "0 0 * * * ?"  # Hourly; each target's cron decides whether it is due
   timezone_id: "UTC"
   pause_status: "PAUSED"
 
@@ -62,7 +62,7 @@ parameters:
 configurable_parameters:
   - name: "targets"
     type: "string"
-    description: "'scheduled' = targets with a reconcile schedule; or comma-separated target keys"
+    description: "'scheduled' = targets whose reconcile schedule is due; or comma-separated target keys"
     required: true
     default: "scheduled"
 

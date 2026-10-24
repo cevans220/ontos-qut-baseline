@@ -8,7 +8,7 @@ import { useApi } from '@/hooks/use-api';
 import { useToast } from '@/hooks/use-toast';
 import type { DriftGrant, DriftReport } from '@/types/access-policy';
 
-const VARIANT = { in_sync: 'secondary', drift: 'destructive', error: 'outline' } as const;
+const VARIANT = { in_sync: 'secondary', drift: 'destructive', partial: 'outline', error: 'outline' } as const;
 
 function GrantList({ rows }: { rows: DriftGrant[] }) {
   return (
@@ -31,31 +31,46 @@ export default function DriftPanel({ targetKey, canRun, readable }: { targetKey:
   const [latest, setLatest] = useState<DriftReport | null>(null);
   const [running, setRunning] = useState(false);
 
-  const load = useCallback(async () => {
-    const res = await get<DriftReport[]>(`/api/access-policies/drift-reports?target=${encodeURIComponent(targetKey)}&limit=10`);
-    const rows = Array.isArray(res.data) ? res.data : [];
-    setReports(rows);
-    if (rows[0]) {
-      const full = await get<DriftReport>(`/api/access-policies/drift-reports/${rows[0].id}`);
-      setLatest(full.data || null);
-    } else {
-      setLatest(null);
-    }
-  }, [get, targetKey]);
+  const load = useCallback(
+    async (isCurrent: () => boolean = () => true) => {
+      try {
+        const res = await get<DriftReport[]>(
+          `/api/access-policies/drift-reports?target=${encodeURIComponent(targetKey)}&limit=10`,
+        );
+        const rows = Array.isArray(res.data) ? res.data : [];
+        const full = rows[0] ? await get<DriftReport>(`/api/access-policies/drift-reports/${rows[0].id}`) : null;
+        if (!isCurrent()) return; // another target's panel by now
+        setReports(rows);
+        setLatest(full?.data || null);
+      } catch {
+        if (isCurrent()) setLatest(null);
+      }
+    },
+    [get, targetKey],
+  );
 
   useEffect(() => {
-    load();
+    let current = true;
+    load(() => current);
+    return () => {
+      current = false;
+    };
   }, [load]);
 
   const run = async () => {
     setRunning(true);
-    const res = await post<DriftReport>('/api/access-policies/drift-reports', { target: targetKey });
-    setRunning(false);
-    if (res.error || !res.data) {
-      toast({ title: t('access-policies:drift.failed'), description: res.error || '', variant: 'destructive' });
-      return;
+    try {
+      const res = await post<DriftReport>('/api/access-policies/drift-reports', { target: targetKey });
+      if (res.error || !res.data) {
+        toast({ title: t('access-policies:drift.failed'), description: res.error || '', variant: 'destructive' });
+        return;
+      }
+      await load();
+    } catch (e: any) {
+      toast({ title: t('access-policies:drift.failed'), description: e?.message || '', variant: 'destructive' });
+    } finally {
+      setRunning(false);
     }
-    load();
   };
 
   return (

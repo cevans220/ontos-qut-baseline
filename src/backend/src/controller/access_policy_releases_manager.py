@@ -17,6 +17,7 @@ them are separate: the ledger is what drives time-bound (GDPR) revocation —
 release through the same Delivery Modes.
 """
 import hashlib
+import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -740,40 +741,61 @@ class PolicyReleaseManager:
 
     # ------------------------------------------------------------ drift (report only)
 
-    def reconcile(self, db: Session, target: str, get_grants: Callable[[str, str], Dict[str, Any]],
-                  user: Optional[str], *, max_securables: int = RECONCILE_MAX_SECURABLES) -> AccessDriftReportDb:
+    def reconcile(self, db: Session, target: str, grant_manager: Any, user: Optional[str], *,
+                  max_securables: int = RECONCILE_MAX_SECURABLES) -> AccessDriftReportDb:
         """Compare the target's Grant Ledger with live grants and store a drift report. Changes nothing.
 
         Drift is reported, never fixed (Lars, 2026-10-17): a missing grant may have been revoked on
         purpose, an unmanaged one granted by another process. Admins are notified when it changes.
+
+        * ``missing`` — tracked by Ontos, not on the platform.
+        * ``unmanaged`` — on a securable Ontos grants on explicitly, for a principal Ontos doesn't
+          track there. Parents that only carry implied USE / USAGE grants are skipped: shared
+          catalogs and schemas always have grants of their own.
+        * ``partial`` — some securables couldn't be read (or the check was truncated): never "in sync".
         """
         resolved = self.resolve(db, target, include_deprecated=True)
-        if pt.CAP_READ_GRANTS not in resolved.adapter.capabilities:
+        reader = resolved.adapter.grant_reader(grant_manager)
+        if pt.CAP_READ_GRANTS not in resolved.adapter.capabilities or reader is None:
             raise AccessPolicyError(f"Live grants can't be read from {resolved.adapter.label} yet", 409)
         managed = [_ledger_grant(r) for r in self.active_ledger(db, target) if r.securable_type != uc.ABAC_POLICY]
         securables = sorted({(g.securable_type, g.securable_name) for g in managed})
         live: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
         errors: List[str] = []
-        for (stype, sname), res in uc.read_live_grants(securables[:max_securables], get_grants).items():
+        for (stype, sname), res in uc.read_live_grants(securables[:max_securables], reader).items():
             if res.get("success"):
                 live[(stype, sname)] = res.get("grants") or []
             else:
                 errors.append(f"{stype} {sname}: {res.get('error') or 'unreadable'}")
         checked = [g for g in managed if (g.securable_type, g.securable_name) in live]
-        report = uc.live_diff(checked, checked, live)
-        report.update({"securables_checked": len(live), "securables_tracked": len(securables),
-                       "truncated": len(securables) > max_securables, "errors": errors[:50]})
-        counts = {"missing": len(report["missing"]), "unmanaged": len(report["unmanaged"]),
-                  "tracked": len(managed), "errors": len(errors)}
-        status = ("error" if errors and not live else
-                  "drift" if counts["missing"] or counts["unmanaged"] else "in_sync")
+        diff = uc.live_diff(checked, checked, live)
+        leaves = {(g.securable_type, g.securable_name) for g in checked if not g.implied}
+        unmanaged = [u for u in diff["unmanaged"] if (u["securable_type"], u["securable_name"]) in leaves]
+        truncated = len(securables) > max_securables
+        report = {"missing": diff["missing"], "unmanaged": unmanaged, "securables_checked": len(live),
+                  "securables_tracked": len(securables), "truncated": truncated, "errors": errors[:50]}
+        report["fingerprint"] = hashlib.sha256(json.dumps(
+            [diff["missing"], unmanaged], sort_keys=True).encode()).hexdigest()
+        counts = {"missing": len(diff["missing"]), "unmanaged": len(unmanaged), "tracked": len(managed),
+                  "errors": len(errors)}
+        if errors and not live:
+            status = "error"
+        elif counts["missing"] or counts["unmanaged"]:
+            status = "drift"
+        elif errors or truncated:
+            status = "partial"
+        else:
+            status = "in_sync"
         previous = (db.query(AccessDriftReportDb).filter(AccessDriftReportDb.target == target)
                     .order_by(AccessDriftReportDb.checked_at.desc()).first())
         row = AccessDriftReportDb(target=target, status=status, checked_by=user, counts=counts, report=report,
                                   checked_at=_now())
         db.add(row)
         db.flush()
-        if status != "in_sync" and (previous is None or previous.status != status or previous.counts != counts):
+        # Notify on what changed — the drift itself (fingerprint) or the status — not on ledger growth.
+        changed = previous is None or previous.status != status or \
+            (previous.report or {}).get("fingerprint") != report["fingerprint"]
+        if status != "in_sync" and changed:
             self._notify_drift(db, resolved, row)
         return row
 
@@ -786,8 +808,10 @@ class PolicyReleaseManager:
             from src.models.notifications import Notification, NotificationType
             from src.repositories.notification_repository import notification_repo
             c = row.counts or {}
-            what = (f"{c.get('missing', 0)} tracked grant(s) missing, {c.get('unmanaged', 0)} unmanaged"
-                    if row.status == "drift" else f"live grants could not be read ({c.get('errors', 0)} errors)")
+            what = {
+                "drift": f"{c.get('missing', 0)} tracked grant(s) missing, {c.get('unmanaged', 0)} unmanaged",
+                "partial": f"only partly checked ({c.get('errors', 0)} securables unreadable)",
+            }.get(row.status, f"live grants could not be read ({c.get('errors', 0)} errors)")
             with db.begin_nested():
                 notification_repo.create(db, obj_in=Notification(
                     id=str(uuid.uuid4()), type=NotificationType.WARNING,
@@ -806,6 +830,13 @@ class PolicyReleaseManager:
         return q.order_by(AccessDriftReportDb.checked_at.desc()).limit(limit).all()
 
     @staticmethod
+    def drift_report(db: Session, report_id: str) -> AccessDriftReportDb:
+        row = db.get(AccessDriftReportDb, report_id)
+        if row is None:
+            raise AccessPolicyError("Drift report not found", 404)
+        return row
+
+    @staticmethod
     def drift_to_dict(row: AccessDriftReportDb, *, full: bool = False) -> Dict[str, Any]:
         out = {"id": row.id, "target": row.target, "status": row.status, "checked_at": row.checked_at,
                "checked_by": row.checked_by, "counts": row.counts or {}}
@@ -813,14 +844,40 @@ class PolicyReleaseManager:
             out["report"] = row.report or {}
         return out
 
-    def reconcile_scheduled(self, db: Session, get_grants: Callable[[str, str], Dict[str, Any]], user: Optional[str],
-                            keys: Optional[List[str]] = None) -> List[AccessDriftReportDb]:
-        """The job's entry point: every readable target with a reconcile schedule (or the given keys)."""
+    def due_targets(self, db: Session, keys: Optional[List[str]] = None,
+                    now: Optional[datetime] = None) -> List[pt.ResolvedTarget]:
+        """Readable targets to reconcile now: the named ones, or those whose cron fired since their last report."""
+        now = now or _now()
         out = []
         for t in self.targets(db, include_deprecated=True):
-            wanted = t.key in keys if keys else bool(t.reconcile_schedule)
-            if wanted and pt.CAP_READ_GRANTS in t.adapter.capabilities:
-                out.append(self.reconcile(db, t.key, get_grants, user))
+            if pt.CAP_READ_GRANTS not in t.adapter.capabilities:
+                continue
+            if keys:
+                if t.key in keys:
+                    out.append(t)
+                continue
+            if not t.reconcile_schedule or pt.cron_problem(t.reconcile_schedule):
+                continue
+            last = self.drift_reports(db, t.key, 1)
+            if pt.cron_due(t.reconcile_schedule, last[0].checked_at if last else None, now):
+                out.append(t)
+        return out
+
+    def reconcile_scheduled(self, db: Session, grant_manager: Any, user: Optional[str],
+                            keys: Optional[List[str]] = None, now: Optional[datetime] = None) -> List[AccessDriftReportDb]:
+        """The job's entry point. Each target is isolated: one failing never loses the others' reports."""
+        out = []
+        for t in self.due_targets(db, keys, now):
+            try:
+                with db.begin_nested():
+                    out.append(self.reconcile(db, t.key, grant_manager, user))
+            except Exception as e:
+                logger.error("Drift reconcile of %s failed: %s", t.key, e, exc_info=True)
+                row = AccessDriftReportDb(target=t.key, status="error", checked_by=user, checked_at=_now(),
+                                          counts={"errors": 1}, report={"errors": [type(e).__name__]})
+                db.add(row)
+                db.flush()
+                out.append(row)
         return out
 
     # ------------------------------------------------------------ read model

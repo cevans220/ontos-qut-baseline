@@ -1,7 +1,8 @@
 """
 Access Policy Drift Reconcile Workflow (report only)
 
-For every Access Target with a reconcile schedule (or the targets passed in), reads the
+For every Access Target whose reconcile schedule (cron) fired since its last report, or the
+targets passed in, reads the
 live Unity Catalog grants of the securables in its Grant Ledger and stores a drift report
 (tracked-but-missing / unmanaged grants). Nothing is granted or revoked: drift is reported,
 admins decide. Reuses the Compliance Checks job's database / backend-source helpers.
@@ -30,21 +31,31 @@ def _add_backend_source(path: Optional[str]) -> Optional[str]:
     if p.is_dir():
         import_path = str(p)
     elif p.suffix.lower() == ".zip" and p.is_file():
+        # Same as compliance_checks._add_backend_source_path (which can't be imported before this).
+        import shutil
         import tempfile
-        from zipfile import ZipFile
+        from io import BytesIO
+        from zipfile import BadZipFile, ZipFile
 
         import_path = tempfile.mkdtemp(prefix="ontos-reconcile-backend-")
         root = Path(import_path).resolve()
-        with ZipFile(p) as archive:
-            for member in archive.infolist():
-                if not (root / member.filename).resolve().is_relative_to(root):
-                    raise RuntimeError(f"unsafe zip member escapes extraction root: {member.filename}")
-            archive.extractall(import_path)
-        if not (root / "src" / "__init__.py").is_file():
-            raise RuntimeError("archive does not contain the src package")
+        try:
+            # Read fully first: the /Workspace FUSE path may not support seeking.
+            with ZipFile(BytesIO(p.read_bytes())) as archive:
+                for member in archive.infolist():
+                    if not (root / member.filename).resolve().is_relative_to(root):
+                        raise RuntimeError(f"unsafe zip member escapes extraction root: {member.filename}")
+                archive.extractall(import_path)
+            if not (root / "src" / "__init__.py").is_file():
+                raise RuntimeError("archive does not contain the src package")
+        except (BadZipFile, OSError, RuntimeError) as exc:
+            shutil.rmtree(import_path, ignore_errors=True)
+            raise RuntimeError(f"Failed to extract backend source archive {p}: {exc}") from exc
     else:
         print(f"WARNING: unsupported backend source path: {path}", file=sys.stderr)
         return None
+    while import_path in sys.path:
+        sys.path.remove(import_path)
     sys.path.insert(0, import_path)
     print(f"Backend source added to sys.path: {import_path}")
     return import_path
@@ -100,7 +111,7 @@ def main() -> None:
     grants = GrantManager(ws_client=ws)
     db = sessionmaker(autocommit=False, autoflush=False, bind=engine)()
     try:
-        reports = PolicyReleaseManager().reconcile_scheduled(db, grants.get_grants, "system:reconcile-job",
+        reports = PolicyReleaseManager().reconcile_scheduled(db, grants, "system:reconcile-job",
                                                              _target_keys(args.targets))
         db.commit()
         for r in reports:
@@ -108,9 +119,9 @@ def main() -> None:
             print(f"  {r.target}: {r.status} — {c.get('missing', 0)} missing, {c.get('unmanaged', 0)} unmanaged, "
                   f"{c.get('tracked', 0)} tracked, {c.get('errors', 0)} read errors")
         if not reports:
-            print("No target to reconcile (set a reconcile schedule on an Access Target, or pass --targets).")
-        # Drift is a finding, not a job failure; unreadable targets are.
-        if any(r.status == "error" for r in reports):
+            print("No target due (each Access Target's reconcile schedule decides; or pass --targets).")
+        # Drift is a finding, not a job failure; targets that couldn't be (fully) read are.
+        if any(r.status in ("error", "partial") for r in reports):
             sys.exit(1)
     except Exception:
         db.rollback()

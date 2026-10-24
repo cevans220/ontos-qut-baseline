@@ -755,7 +755,7 @@ export default function AccessPolicyDetails() {
       )}
 
       {target && target.status !== 'draft' && (
-        <DriftPanel targetKey={target.key} canRun={canWrite} readable={target.system === 'uc'} />
+        <DriftPanel targetKey={target.key} canRun={canWrite} readable={(target.capabilities || []).includes('read_grants')} />
       )}
 
       {policy && <CheckAccessPanel policyId={policy.id} />}

@@ -423,7 +423,7 @@
   },
   "drift": {
     "title": "__TODO__ Drift",
-    "hint": "__TODO__ Report only: the Grant Ledger compared with the live grants. Nothing is granted or revoked. The scheduled job checks targets with a reconcile schedule.",
+    "hint": "__TODO__ Report only: the Grant Ledger compared with the live grants. Nothing is granted or revoked. The hourly job checks each target when its reconcile schedule is due.",
     "unreadable": "__TODO__ Live grants can't be read from this platform yet — no drift check.",
     "run": "__TODO__ Check now",
     "none": "__TODO__ No drift report yet.",
@@ -431,7 +431,8 @@
     "status": {
       "in_sync": "__TODO__ In sync",
       "drift": "__TODO__ Drift",
-      "error": "__TODO__ Unreadable"
+      "error": "__TODO__ Unreadable",
+      "partial": "__TODO__ Partly checked"
     },
     "counts": "__TODO__ {{missing}} missing · {{unmanaged}} unmanaged · {{tracked}} tracked",
     "missing": "__TODO__ Tracked by Ontos, not on the platform",

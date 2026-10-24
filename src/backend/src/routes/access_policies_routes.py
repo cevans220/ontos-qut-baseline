@@ -406,11 +406,10 @@ async def list_drift_reports(db: DBSessionDep, target: Optional[str] = Query(Non
 
 @router.get("/drift-reports/{report_id}")
 async def get_drift_report(report_id: str, db: DBSessionDep, _: bool = _READ):
-    from src.db_models.access_policies import AccessDriftReportDb
-    row = db.get(AccessDriftReportDb, report_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Drift report not found")
-    return releases.drift_to_dict(row, full=True)
+    try:
+        return releases.drift_to_dict(releases.drift_report(db, report_id), full=True)
+    except AccessPolicyError as e:
+        raise _http(e)
 
 
 @router.post("/drift-reports", status_code=201)
@@ -418,11 +417,9 @@ def reconcile_target(db: DBSessionDep, current_user: AuditCurrentUserDep,
                      payload: RevokeExpiredRequest = Body(default_factory=RevokeExpiredRequest),
                      delivery_service: Any = Depends(get_delivery_service), _: bool = _ADMIN):
     """Read live grants for a target's ledger and store a drift report (changes nothing)."""
-    gm = _grant_manager(delivery_service)
-    if gm is None:
-        raise HTTPException(status_code=503, detail="Unity Catalog grants are not readable (no workspace client)")
     try:
-        row = releases.reconcile(db, payload.target, gm.get_grants, _email(current_user))
+        # The target's adapter picks the reader (UC: the GrantManager) — never UC for another platform.
+        row = releases.reconcile(db, payload.target, _grant_manager(delivery_service), _email(current_user))
     except AccessPolicyError as e:
         raise _http(e)
     return releases.drift_to_dict(row, full=True)

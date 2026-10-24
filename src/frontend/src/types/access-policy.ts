@@ -120,6 +120,7 @@ export interface AccessTarget extends AccessEntityBase {
   key: string;
   system: string;
   system_label: string;
+  capabilities: string[];
   connection: Record<string, unknown>;
   scope: string[];
   delivery_modes: DeliveryModeKey[];
@@ -438,7 +439,7 @@ export interface DriftGrant {
 export interface DriftReport {
   id: string;
   target: string;
-  status: 'in_sync' | 'drift' | 'error';
+  status: 'in_sync' | 'drift' | 'partial' | 'error';
   checked_at: string;
   checked_by: string | null;
   counts: { missing?: number; unmanaged?: number; tracked?: number; errors?: number };
