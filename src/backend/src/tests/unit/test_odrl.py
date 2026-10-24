@@ -305,3 +305,33 @@ def test_inheriting_from_an_offer_takes_terms_not_entitlements():
     assert not errors
     assert [r["target"] for r in merged["permission"]] == ["uc:main.sales.orders"]  # the Offer's read isn't inherited
     assert [(r["action"], r["assignee"]) for r in merged["prohibition"]] == [("distribute", "user:ana@x.com")]
+
+
+def test_odrl_shapes_ttl_in_sync():
+    """data/taxonomies/ontos-odrl-shapes.ttl is the generated SHACL and lists every profile term."""
+    from pathlib import Path
+
+    import rdflib
+    from rdflib.collection import Collection
+
+    from src.common.odrl_shacl import shapes_turtle
+
+    path = Path(__file__).resolve().parents[2] / "data" / "taxonomies" / "ontos-odrl-shapes.ttl"
+    assert path.read_text() == shapes_turtle(), "regenerate with src.common.odrl_shacl.shapes_turtle()"
+    g = rdflib.Graph()
+    g.parse(data=shapes_turtle(), format="turtle")
+    SH = rdflib.Namespace("http://www.w3.org/ns/shacl#")
+    ODRL = rdflib.Namespace(odrl.ODRL_NS)
+
+    def listed(path_term):
+        for prop in g.subjects(SH.path, path_term):
+            for lst in g.objects(prop, SH["in"]):
+                return {str(x) for x in Collection(g, lst)}
+        return set()
+
+    def iri(key):
+        return odrl.ONTOS_NS + key.split(":", 1)[1] if key.startswith("ontos:") else odrl.ODRL_NS + key
+
+    assert listed(ODRL.leftOperand) == {iri(k) for k in odrl.LEFT_OPERANDS}
+    assert listed(ODRL.operator) == {odrl.ODRL_NS + k for k in odrl.OPERATORS}
+    assert listed(rdflib.RDF.value) == {iri(k) for k in odrl.ACTIONS}
