@@ -134,3 +134,108 @@ def test_read_generated_attributes_rows_to_this_run(job):
 
 def test_quote_fqn_escapes_backticks(job):
     assert job.quote_fqn("a.b`c.d") == "`a`.`b``c`.`d`"
+
+
+RUN_ID = "11111111-2222-3333-4444-555555555555"
+
+
+class MainFakeSpark(FakeSpark):
+    """FakeSpark that also supports first() and captures DataFrame writes."""
+
+    def __init__(self, responses):
+        super().__init__(responses)
+        self.written = []
+
+    def sql(self, query):
+        if query.startswith("DELETE") or "unix_micros(current_timestamp())" in query:
+            self.queries.append(query)
+            result = MagicMock()
+            result.first.return_value = Row(us=1000)
+            return result
+        return super().sql(query)
+
+    def createDataFrame(self, rows, schema):
+        self.written.append(list(rows))
+        return MagicMock()
+
+
+def _describe(rows):
+    return [Row(col_name=c, data_type="string", comment=comment) for c, comment in rows]
+
+
+def _main_spark():
+    return MainFakeSpark([
+        ("SHOW TABLES IN `main`.`sales`", [
+            Row(database="sales", tableName="orders", isTemporary=False),
+            Row(database="sales", tableName="customers", isTemporary=False),
+            Row(database="sales", tableName="revenue", isTemporary=False),
+        ]),
+        ("DESCRIBE TABLE EXTENDED `main`.`sales`.`orders`",
+         _describe([("id", None), ("amount", "Total amount")]) + [Row(col_name="Type", data_type="MANAGED", comment="")]),
+        ("DESCRIBE TABLE EXTENDED `main`.`sales`.`customers`",
+         _describe([("id", "Customer id")]) + [Row(col_name="", data_type="", comment=""),
+                                                 Row(col_name="Comment", data_type="Customers", comment="")]),
+        ("DESCRIBE TABLE EXTENDED `main`.`sales`.`revenue`",
+         _describe([("country", None)]) + [Row(col_name="", data_type="", comment=""),
+                                            Row(col_name="Type", data_type="VIEW", comment="")]),
+        ("metadata_generation_log", [
+            Row(table="main.sales.orders", catalog="main", schema="sales", table_name="orders",
+                ddl_type="table", column_name=None, column_content="Orders.", model="m", _created_at=1),
+            Row(table="main.sales.orders", catalog="main", schema="sales", table_name="orders",
+                ddl_type="column", column_name="id", column_content="Order id.", model="m", _created_at=2),
+            Row(table="main.sales.orders", catalog="main", schema="sales", table_name="orders",
+                ddl_type="column", column_name="ghost", column_content="Not a column.", model="m", _created_at=3),
+            Row(table="main.sales.revenue", catalog="main", schema="sales", table_name="revenue",
+                ddl_type="table", column_name=None, column_content="Revenue by country.", model="m", _created_at=4),
+        ]),
+    ])
+
+
+def _run_main(job, monkeypatch, spark, *extra_args):
+    calls = []
+    dbxmetagen_main_module = ModuleType("dbxmetagen.main")
+    dbxmetagen_main_module.main = calls.append
+    monkeypatch.setitem(sys.modules, "dbxmetagen", ModuleType("dbxmetagen"))
+    monkeypatch.setitem(sys.modules, "dbxmetagen.main", dbxmetagen_main_module)
+    session = MagicMock()
+    session.builder.getOrCreate.return_value = spark
+    monkeypatch.setattr(job, "SparkSession", session)
+    monkeypatch.setattr(sys, "argv", [
+        "metagen_generate.py", "--ontos_run_id", RUN_ID, "--table_names", "main.sales",
+        "--output_catalog", "app", "--output_schema", "ontos", "--model", "endpoint-x", *extra_args,
+    ])
+    job.main()
+    return calls
+
+
+def test_main_generates_only_for_undescribed_objects_and_writes_normalized_rows(job, monkeypatch):
+    spark = _main_spark()
+    calls = _run_main(job, monkeypatch, spark)
+
+    [kwargs] = calls
+    assert kwargs["table_names"] == "main.sales.orders,main.sales.revenue"  # customers fully described
+    assert (kwargs["catalog_name"], kwargs["schema_name"]) == ("app", "ontos")
+    assert kwargs["model"] == "endpoint-x"
+    assert kwargs["apply_ddl"] == "false" and kwargs["allow_data"] == "false"
+    assert any(q.startswith("DELETE") and RUN_ID in q for q in spark.queries)
+
+    rows = spark.written[-1]
+    assert [(r[0], r[1], r[2], r[3], r[4], r[5]) for r in rows] == [
+        (RUN_ID, "table", "main.sales.orders", None, None, "Orders."),
+        (RUN_ID, "column", "main.sales.orders", "id", None, "Order id."),
+        (RUN_ID, "view", "main.sales.revenue", None, None, "Revenue by country."),
+    ]  # 'ghost' isn't a column of orders and is dropped
+
+
+def test_main_regenerate_existing_includes_described_tables(job, monkeypatch):
+    calls = _run_main(job, monkeypatch, _main_spark(), "--regenerate_existing", "true")
+    assert calls[0]["table_names"] == "main.sales.orders,main.sales.customers,main.sales.revenue"
+
+
+def test_main_rejects_a_non_uuid_run_id(job, monkeypatch):
+    monkeypatch.setattr(sys, "argv", [
+        "metagen_generate.py", "--ontos_run_id", "x' OR '1'='1", "--table_names", "main.sales",
+        "--output_catalog", "app", "--output_schema", "ontos", "--model", "m",
+    ])
+    with pytest.raises(ValueError):
+        job.main()
