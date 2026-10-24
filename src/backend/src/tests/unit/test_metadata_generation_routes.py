@@ -122,7 +122,7 @@ def test_start_run_error_mapping_and_audit(error, status):
     audit = MagicMock()
     body = StartRunRequest(selection=[SelectionItem(type="schema", fqn="main.sales")])
     with pytest.raises(HTTPException) as exc:
-        routes.start_run(_request(manager), body, db=MagicMock(), audit_manager=audit, current_user=OWNER)
+        routes.start_run(_request(manager), body, MagicMock(), db=MagicMock(), audit_manager=audit, current_user=OWNER)
     assert exc.value.status_code == status
     assert audit.log_action.call_args.kwargs["success"] is False
     if status == 500:
@@ -134,7 +134,7 @@ def test_start_run_success_is_audited():
     manager.start_run.return_value = _run(status="running")
     audit = MagicMock()
     body = StartRunRequest(selection=[SelectionItem(type="schema", fqn="main.sales")])
-    resp = routes.start_run(_request(manager), body, db=MagicMock(), audit_manager=audit, current_user=OWNER)
+    resp = routes.start_run(_request(manager), body, MagicMock(), db=MagicMock(), audit_manager=audit, current_user=OWNER)
     assert resp.status == "running"
     assert audit.log_action.call_args.kwargs["success"] is True
     assert audit.log_action.call_args.kwargs["details"]["run_id"] == "run-1"
@@ -170,3 +170,17 @@ async def test_get_run_defers_ingest_to_a_background_task():
         await routes.get_run("run-1", _request(manager), background_tasks, db=MagicMock(), current_user=OWNER)
     background_tasks.add_task.assert_called_once_with(manager.ingest_run_by_id, "run-1")
     manager.ingest_results.assert_not_called()
+
+
+def test_start_run_defers_ingest_of_finished_runs_to_background():
+    manager = _manager()
+
+    def start(db, *, user_id, request, defer_ingest):
+        defer_ingest("finished-run")
+        return _run(status="running")
+
+    manager.start_run.side_effect = start
+    background_tasks = MagicMock()
+    body = StartRunRequest(selection=[SelectionItem(type="schema", fqn="main.sales")])
+    routes.start_run(_request(manager), body, background_tasks, db=MagicMock(), audit_manager=MagicMock(), current_user=OWNER)
+    background_tasks.add_task.assert_called_once_with(manager.ingest_run_by_id, "finished-run")

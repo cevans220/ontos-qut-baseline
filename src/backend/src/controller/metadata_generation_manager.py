@@ -106,16 +106,27 @@ class MetadataGenerationManager:
     # ------------------------------------------------------------------
     # Start / cancel / delete
     # ------------------------------------------------------------------
-    def start_run(self, db: Session, *, user_id: str, request: StartRunRequest) -> MetadataGenerationRunDb:
-        """Create a Generation Run and launch the background job."""
-        self._refresh_active_runs(db)
-        if metagen_runs_repo.count_active_for_user(db, user_id) >= MAX_ACTIVE_RUNS_PER_USER:
+    def start_run(
+        self,
+        db: Session,
+        *,
+        user_id: str,
+        request: StartRunRequest,
+        defer_ingest: Optional[Callable[[str], None]] = None,
+    ) -> MetadataGenerationRunDb:
+        """Create a Generation Run and launch the background job.
+
+        ``defer_ingest`` is passed on to the refresh of active runs, so a
+        finished run's ingest doesn't run inside this request.
+        """
+        active = self._refresh_active_runs(db, defer_ingest=defer_ingest)
+        if sum(1 for r in active if r.user_id == user_id) >= MAX_ACTIVE_RUNS_PER_USER:
             raise ActiveRunLimitError("You already have a Generation Run in progress. Wait for it to finish or cancel it.")
         selection = [item.model_dump() for item in request.selection]
         table_names = selection_to_table_names(selection)
         if not self._jobs:
             raise ValueError("Jobs manager not available")
-        self._check_no_overlapping_run(db, table_names)
+        self._check_no_overlapping_run(active, table_names)
 
         from src.repositories.workflow_installations_repository import workflow_installation_repo
         installation = workflow_installation_repo.get_by_workflow_id(db=db, workflow_id=WORKFLOW_ID)
@@ -174,14 +185,14 @@ class MetadataGenerationManager:
         db.refresh(run)
         return run
 
-    def _check_no_overlapping_run(self, db: Session, table_names: List[str]) -> None:
+    def _check_no_overlapping_run(self, active: List[MetadataGenerationRunDb], table_names: List[str]) -> None:
         """Reject a run whose objects an active run is already describing.
 
         dbxmetagen's log carries no run id, so the job attributes its rows by
         table and time; two concurrent runs over the same table could pick up
         each other's output.
         """
-        for other in metagen_runs_repo.list_active(db):
+        for other in active:
             for item in other.selection or []:
                 for name in table_names:
                     if selections_overlap(name, item.get("fqn", "")):
@@ -235,9 +246,19 @@ class MetadataGenerationManager:
         the caller instead of running it inline; request handlers use it so a
         slow warehouse read doesn't hold the request.
         """
-        if run.status in TERMINAL_RUN_STATUSES or not run.job_run_id or not self._jobs:
+        if run.status in TERMINAL_RUN_STATUSES:
             return run
-        if run.status == GenerationRunStatus.INGESTING.value and not self._is_stale_claim(run):
+        if not run.job_run_id:
+            # Committed but the job never launched (e.g. the app stopped in between)
+            if run.status == GenerationRunStatus.PENDING.value and self._is_stale(run.created_at):
+                run.status = GenerationRunStatus.FAILED.value
+                run.error = "The background job was never started"
+                run.completed_at = _now()
+                db.commit()
+            return run
+        if not self._jobs:
+            return run
+        if run.status == GenerationRunStatus.INGESTING.value and not self._is_stale(run.updated_at):
             return run  # the job is done; someone is loading its results
         status = self._jobs.get_job_status(int(run.job_run_id))
         if status and status.get("life_cycle_state") in _TERMINAL_LIFE_CYCLE_STATES:
@@ -250,13 +271,12 @@ class MetadataGenerationManager:
         return run
 
     @staticmethod
-    def _is_stale_claim(run: MetadataGenerationRunDb) -> bool:
-        updated_at = run.updated_at
-        if updated_at is None:
+    def _is_stale(timestamp: Optional[datetime]) -> bool:
+        if timestamp is None:
             return True
-        if updated_at.tzinfo is None:  # SQLite returns naive UTC
-            updated_at = updated_at.replace(tzinfo=timezone.utc)
-        return updated_at < _now() - STALE_INGEST_CLAIM
+        if timestamp.tzinfo is None:  # SQLite returns naive UTC
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        return timestamp < _now() - STALE_INGEST_CLAIM
 
     def ingest_run_by_id(self, run_id: str) -> None:
         """Ingest a finished run in its own session (for background tasks)."""
@@ -272,18 +292,29 @@ class MetadataGenerationManager:
         finally:
             db.close()
 
-    def _refresh_active_runs(self, db: Session) -> None:
-        """Finish active runs whose job ended, before they count against limits.
+    def _refresh_active_runs(
+        self, db: Session, *, defer_ingest: Optional[Callable[[str], None]] = None
+    ) -> List[MetadataGenerationRunDb]:
+        """Finish active runs whose job ended; return the runs still in flight.
 
         Covers runs nobody has open and whose poller notification was already
         used up, e.g. an ingest claim abandoned by an app restart (taken over
-        once stale).
+        once stale) or a run whose job never launched. A run whose job
+        succeeded and whose ingest was deferred no longer counts as in flight.
         """
+        deferred: set = set()
+
+        def defer(run_id: str) -> None:
+            deferred.add(run_id)
+            defer_ingest(run_id)
+
         for run in metagen_runs_repo.list_active(db):
             try:
-                self.refresh_run(db, run)
+                self.refresh_run(db, run, defer_ingest=defer if defer_ingest else None)
             except Exception:
                 logger.warning("Failed to refresh metadata generation run %s", run.id, exc_info=True)
+                db.rollback()
+        return [r for r in metagen_runs_repo.list_active(db) if r.id not in deferred]
 
     def handle_job_terminated(self, db: Session, job_run_id: int, result_state: Optional[str]) -> None:
         """JobsManager poller callback for terminated ``metagen_generate`` runs."""

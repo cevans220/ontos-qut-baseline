@@ -86,6 +86,7 @@ async def _get_visible_run(request: Request, db, current_user, manager: Metadata
 def start_run(
     request: Request,
     body: StartRunRequest,
+    background_tasks: BackgroundTasks,
     db: DBSessionDep = None,
     audit_manager: AuditManagerDep = None,
     current_user: AuditCurrentUserDep = None,
@@ -94,7 +95,13 @@ def start_run(
     success = False
     details = {"selection_count": len(body.selection), "regenerate_existing": body.regenerate_existing}
     try:
-        run = manager.start_run(db, user_id=_user_id(current_user), request=body)
+        run = manager.start_run(
+            db,
+            user_id=_user_id(current_user),
+            request=body,
+            # Finished runs found on the way are ingested after the response
+            defer_ingest=lambda rid: background_tasks.add_task(manager.ingest_run_by_id, rid),
+        )
         success = True
         details["run_id"] = run.id
         return StartRunResponse(run_id=run.id, status=GenerationRunStatus(run.status))

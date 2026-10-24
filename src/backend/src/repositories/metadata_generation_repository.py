@@ -46,16 +46,6 @@ class MetadataGenerationRunsRepository:
             .all()
         )
 
-    def count_active_for_user(self, db: Session, user_id: str) -> int:
-        return (
-            db.query(MetadataGenerationRunDb)
-            .filter(
-                MetadataGenerationRunDb.user_id == user_id,
-                MetadataGenerationRunDb.status.in_(ACTIVE_RUN_STATUSES),
-            )
-            .count()
-        )
-
     def list_active(self, db: Session) -> List[MetadataGenerationRunDb]:
         return (
             db.query(MetadataGenerationRunDb)

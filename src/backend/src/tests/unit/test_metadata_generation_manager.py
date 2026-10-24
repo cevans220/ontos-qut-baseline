@@ -578,3 +578,59 @@ def test_ingest_run_by_id_always_closes_its_session(db_session, installation, mo
     manager.ingest_run_by_id(run.id if case == "ingest_raises" else "missing")  # never raises
     session.close.assert_called_once()
     assert ingest.called is (case == "ingest_raises")
+
+
+def test_start_run_defers_finished_runs_and_does_not_count_them(db_session, installation):
+    ws = _ws_returning([["table", "main.sales.orders", None, None, "Orders."]])
+    jobs = _jobs()
+    manager = _manager(jobs=jobs, ws=ws)
+    finished = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    jobs.get_job_status.return_value = {"life_cycle_state": "TERMINATED", "result_state": "SUCCESS"}
+    deferred = []
+
+    # Same user, same objects: the finished run doesn't block, and isn't ingested inline
+    manager.start_run(db_session, user_id="a@x.com", request=_request(), defer_ingest=deferred.append)
+    assert deferred == [finished.id]
+    ws.statement_execution.execute_statement.assert_not_called()
+
+
+def test_orphaned_pending_run_is_failed_after_timeout(db_session, installation):
+    from datetime import datetime, timedelta, timezone
+
+    jobs = _jobs()
+    jobs.run_job.side_effect = SystemExit  # process died between commit and launch
+    manager = _manager(jobs=jobs)
+    with pytest.raises(SystemExit):
+        manager.start_run(db_session, user_id="a@x.com", request=_request())
+    orphan = manager.list_runs(db_session, "a@x.com")[0]
+    assert (orphan.status, orphan.job_run_id) == ("pending", None)
+
+    # Fresh: still pending (the launch may be in progress)
+    manager.refresh_run(db_session, orphan)
+    assert orphan.status == "pending"
+
+    db_session.query(type(orphan)).filter_by(id=orphan.id).update(
+        {"created_at": datetime.now(timezone.utc) - timedelta(hours=1)}, synchronize_session=False
+    )
+    db_session.commit()
+    db_session.refresh(orphan)
+    jobs.run_job.side_effect = None
+    jobs.run_job.return_value = 5
+    # The next start finds and fails the orphan instead of being blocked by it
+    manager.start_run(db_session, user_id="a@x.com", request=_request())
+    db_session.refresh(orphan)
+    assert orphan.status == "failed"
+    assert orphan.error == "The background job was never started"
+
+
+def test_failed_refresh_rolls_back_before_start_continues(db_session, installation, monkeypatch):
+    manager = _manager()
+    manager.start_run(db_session, user_id="a@x.com", request=_request())
+    # Not wrapping the real rollback: under the test harness it would undo the fixture's data
+    rollback = MagicMock()
+    monkeypatch.setattr(db_session, "rollback", rollback)
+    monkeypatch.setattr(manager, "refresh_run", MagicMock(side_effect=RuntimeError("jobs api down")))
+
+    other = StartRunRequest(selection=[SelectionItem(type="schema", fqn="main.hr")])
+    manager.start_run(db_session, user_id="b@x.com", request=other)
+    rollback.assert_called_once()
