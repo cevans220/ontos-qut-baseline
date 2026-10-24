@@ -202,6 +202,9 @@ class Settings(BaseSettings):
     DELIVERY_MODE_INDIRECT: bool = Field(False, env='DELIVERY_MODE_INDIRECT')  # Persist changes as YAML in Git repo
     DELIVERY_MODE_MANUAL: bool = Field(True, env='DELIVERY_MODE_MANUAL')  # Generate notifications for manual action
     DELIVERY_DIRECT_DRY_RUN: bool = Field(False, env='DELIVERY_DIRECT_DRY_RUN')  # Dry-run mode for direct delivery
+    # Approved Access Grants become ODRL Agreements; when on, each Agreement (and its revocation)
+    # is shipped right away as an agreement-scoped release through the active Delivery Modes.
+    ACCESS_AGREEMENTS_AUTO_DELIVER: bool = Field(False, env='ACCESS_AGREEMENTS_AUTO_DELIVER')
 
     # UI Customization settings
     UI_I18N_ENABLED: bool = Field(True, env='UI_I18N_ENABLED')  # Enable/disable internationalization (disable forces English)

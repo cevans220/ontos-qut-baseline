@@ -700,6 +700,7 @@ class AccessPoliciesManager:
             body = row.body or {}
             out.update({
                 "policy_type": row.policy_type, "conflict": row.conflict,
+                "access_grant_id": row.access_grant_id,
                 "inherit_from": row.inherit_from or [], "rules": body,
                 "rule_counts": {k: len(body.get(k) or []) for k in odrl.RULE_KINDS},
             })
