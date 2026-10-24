@@ -65,6 +65,8 @@ class TargetAdapter:
     capabilities: FrozenSet[str] = frozenset()
     # Max segments of a securable name (catalog.schema.object = 3).
     name_depth: int = 3
+    # Parent privileges that only exist to reach a child securable.
+    implied_privileges: tuple = IMPLIED_PRIVILEGES
 
     def owns(self, ref: str) -> bool:
         return isinstance(ref, str) and ref.startswith(self.asset_prefix)
@@ -76,17 +78,28 @@ class TargetAdapter:
         bad = [s for s in scope if not 1 <= len(s.split(".")) <= self.name_depth or "" in s.split(".")]
         return [f"Scope entry '{s}' is not a {self.label} securable name" for s in bad]
 
+    def own_plan(self, plan: EntitlementPlan) -> None:
+        """Keep only this platform's IR (in place): the compile covers every platform's refs."""
+        plan.entitlements = [e for e in plan.entitlements if self.owns(e.securable)]
+        kept = []
+        for rule in plan.abac:
+            rule.securables = [s for s in rule.securables if self.owns(s)]
+            if rule.securables:
+                kept.append(rule)
+        plan.abac = kept
+
     def restrict_plan(self, plan: EntitlementPlan, scope: Sequence[str]) -> int:
         """Drop IR outside ``scope`` (in place); returns how many entitlements were dropped.
 
         A restriction (mask / filter) attached above the scope can't be built without managing
         securables this target doesn't own; it blocks the release instead of silently vanishing.
         """
+        self.own_plan(plan)
         if not scope:
             return 0
         before = len(plan.entitlements)
         plan.entitlements = [e for e in plan.entitlements
-                             if self.owns(e.securable) and any(inside(self.native_name(e.securable), s) for s in scope)]
+                             if any(inside(self.native_name(e.securable), s) for s in scope)]
         kept = []
         for rule in plan.abac:
             names = [self.native_name(s) for s in rule.securables]
@@ -130,7 +143,7 @@ class UnityCatalogAdapter(TargetAdapter):
         if any(inside(name, s) for s in scope):
             return True
         # USE CATALOG / USE SCHEMA on a parent is what reaches an in-scope child.
-        return grant.privilege in IMPLIED_PRIVILEGES and any(inside(s, name) for s in scope)
+        return grant.privilege in self.implied_privileges and any(inside(s, name) for s in scope)
 
     def build(self, plan: EntitlementPlan, abac: Any, resolve_object_kind: Any = None) -> List[uc.UCGrant]:
         return uc.build_grants(plan, resolve_object_kind) + uc.build_abac(plan, abac, resolve_object_kind)
@@ -158,6 +171,11 @@ def adapters() -> List[TargetAdapter]:
 register_adapter(UnityCatalogAdapter())
 
 
+def _register_builtin_adapters() -> None:
+    from src.common.snowflake_policy_adapter import SnowflakeAdapter
+    register_adapter(SnowflakeAdapter())
+
+
 @dataclass
 class ResolvedTarget:
     """A target releases can compile for: an active Access Target, or the built-in default."""
@@ -179,6 +197,8 @@ class ResolvedTarget:
                 "drift_policy": self.drift_policy, "entity_id": self.entity_id, "builtin": self.builtin,
                 "capabilities": sorted(self.adapter.capabilities)}
 
+
+_register_builtin_adapters()
 
 BUILTIN_UC = ResolvedTarget(key=uc.TARGET_UC, label="Unity Catalog", adapter=_ADAPTERS[uc.TARGET_UC], builtin=True)
 

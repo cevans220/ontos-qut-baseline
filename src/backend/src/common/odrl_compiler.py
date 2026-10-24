@@ -319,28 +319,32 @@ class _Parties:
 @dataclass
 class AssetSet:
     securables: Set[str] = field(default_factory=set)
-    # Refs the UC compile can't target (non-UC IRIs).
+    # Refs no target can compile (not a hierarchical securable IRI).
     foreign: Set[str] = field(default_factory=set)
     inexact: Optional[str] = None
 
 
 def canonical_securable(ref: str) -> Optional[str]:
-    """``uc:Main.Sales.*`` → ``uc:main.sales``; non-UC refs → None."""
-    if not isinstance(ref, str) or not ref.startswith(odrl.UC_PREFIX):
+    """``uc:Main.Sales.*`` → ``uc:main.sales`` (same for ``snowflake:``); other refs → None."""
+    prefix = odrl.securable_prefix(ref)
+    if prefix is None:
         return None
-    name = ref[len(odrl.UC_PREFIX):].strip()
+    name = ref[len(prefix):].strip()
     if name.endswith(".*"):
         name = name[:-2]
     parts = [p for p in name.split(".") if p]
     if not parts or len(parts) > 3:
         return None
-    return odrl.UC_PREFIX + ".".join(p.lower() for p in parts)
+    return prefix + ".".join(p.lower() for p in parts)
 
 
 def securable_covers(outer: str, inner: str) -> bool:
-    """UC privilege inheritance: a grant on ``outer`` reaches ``inner``."""
-    o = outer[len(odrl.UC_PREFIX):].split(".")
-    i = inner[len(odrl.UC_PREFIX):].split(".")
+    """Container semantics: a grant on ``outer`` reaches ``inner`` (same platform only)."""
+    prefix = odrl.securable_prefix(outer)
+    if prefix is None or not inner.startswith(prefix):
+        return False
+    o = outer[len(prefix):].split(".")
+    i = inner[len(prefix):].split(".")
     return len(o) <= len(i) and i[: len(o)] == o
 
 
@@ -638,7 +642,7 @@ def _compile_permission(rule: Dict[str, Any], src: RuleRef, parties: _Parties, a
         plan.gated.append(GatedRule(src, GATE_ABAC, asset.inexact))
         return []
     for f in sorted(asset.foreign):
-        plan.issue(SEVERITY_WARNING, "foreign_target", f"{src.label()}: {f} is not a Unity Catalog securable — skipped", src)
+        plan.issue(SEVERITY_WARNING, "foreign_target", f"{src.label()}: {f} is not a Unity Catalog or Snowflake securable — skipped", src)
 
     principals = [EVERYONE] if party.everyone else sorted(party.principals)
     if not principals and not party.inexact:
@@ -655,6 +659,8 @@ def _row_filter_problem(asset: "AssetSet", abac: AbacConfig) -> Optional[str]:
     """Why a spatial permission can't become grant + row filter (None if it can)."""
     if asset.inexact or asset.foreign or not asset.securables:
         return "a row filter needs concrete Unity Catalog tables"
+    if any(not s.startswith(odrl.UC_PREFIX) for s in asset.securables):
+        return "row filters are only supported on Unity Catalog tables"
     for s in asset.securables:
         name = s[len(odrl.UC_PREFIX):]
         if len(name.split(".")) != 3:
