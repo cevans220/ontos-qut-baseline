@@ -7,7 +7,7 @@ flight, so the UI's polling drives completion and ingest.
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
 
 from src.common.authorization import PermissionChecker, is_user_feature_admin
@@ -148,14 +148,21 @@ async def list_runs(
 async def get_run(
     run_id: str,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: DBSessionDep = None,
     current_user: AuditCurrentUserDep = None,
 ):
     manager = _get_manager(request)
     run = await _get_visible_run(request, db, current_user, manager, run_id)
     try:
-        # Jobs API call and, on completion, a SQL warehouse read: keep them off the event loop
-        run = await run_in_threadpool(manager.refresh_run, db, run)
+        # The Jobs API call stays off the event loop; a finished run's
+        # warehouse ingest runs after the response, not during the poll
+        run = await run_in_threadpool(
+            manager.refresh_run,
+            db,
+            run,
+            defer_ingest=lambda rid: background_tasks.add_task(manager.ingest_run_by_id, rid),
+        )
     except Exception:
         logger.warning("Failed to refresh metadata generation run %s", run_id, exc_info=True)
         db.rollback()

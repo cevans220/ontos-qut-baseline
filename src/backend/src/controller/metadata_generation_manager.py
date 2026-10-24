@@ -222,15 +222,55 @@ class MetadataGenerationManager:
     # ------------------------------------------------------------------
     # Status refresh
     # ------------------------------------------------------------------
-    def refresh_run(self, db: Session, run: MetadataGenerationRunDb) -> MetadataGenerationRunDb:
-        """Pull the job state from the Jobs API and finish the run if it terminated."""
+    def refresh_run(
+        self,
+        db: Session,
+        run: MetadataGenerationRunDb,
+        *,
+        defer_ingest: Optional[Callable[[str], None]] = None,
+    ) -> MetadataGenerationRunDb:
+        """Pull the job state from the Jobs API and finish the run if it terminated.
+
+        ``defer_ingest`` (run id -> None) hands a successful run's ingest to
+        the caller instead of running it inline; request handlers use it so a
+        slow warehouse read doesn't hold the request.
+        """
         if run.status in TERMINAL_RUN_STATUSES or not run.job_run_id or not self._jobs:
             return run
+        if run.status == GenerationRunStatus.INGESTING.value and not self._is_stale_claim(run):
+            return run  # the job is done; someone is loading its results
         status = self._jobs.get_job_status(int(run.job_run_id))
         if status and status.get("life_cycle_state") in _TERMINAL_LIFE_CYCLE_STATES:
             # SKIPPED / INTERNAL_ERROR runs have no result state
-            self._finish(db, run, status.get("result_state") or status.get("life_cycle_state"))
+            result_state = status.get("result_state") or status.get("life_cycle_state")
+            if result_state == "SUCCESS" and defer_ingest is not None:
+                defer_ingest(run.id)
+            else:
+                self._finish(db, run, result_state)
         return run
+
+    @staticmethod
+    def _is_stale_claim(run: MetadataGenerationRunDb) -> bool:
+        updated_at = run.updated_at
+        if updated_at is None:
+            return True
+        if updated_at.tzinfo is None:  # SQLite returns naive UTC
+            updated_at = updated_at.replace(tzinfo=timezone.utc)
+        return updated_at < _now() - STALE_INGEST_CLAIM
+
+    def ingest_run_by_id(self, run_id: str) -> None:
+        """Ingest a finished run in its own session (for background tasks)."""
+        from src.common.database import get_session_factory
+
+        db = get_session_factory()()
+        try:
+            run = metagen_runs_repo.get(db, run_id)
+            if run is not None:
+                self.ingest_results(db, run)
+        except Exception:
+            logger.error("Background ingest of metadata generation run %s failed", run_id, exc_info=True)
+        finally:
+            db.close()
 
     def _refresh_active_runs(self, db: Session) -> None:
         """Finish active runs whose job ended, before they count against limits.

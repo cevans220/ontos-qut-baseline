@@ -85,11 +85,21 @@ export default function MetadataGenerationRunDetails() {
     void fetchRun();
   }, [fetchRun]);
 
-  // GET /runs/{id} refreshes from the Jobs API, so polling drives completion
+  // GET /runs/{id} refreshes from the Jobs API, so polling drives completion.
+  // Chained timeouts: the next poll starts only after the previous one returned.
   useEffect(() => {
     if (!isActive) return;
-    const timer = setInterval(() => void fetchRun(), POLL_INTERVAL_MS);
-    return () => clearInterval(timer);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      await fetchRun();
+      if (!cancelled) timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
+    };
+    timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [isActive, fetchRun]);
 
   useEffect(() => {

@@ -474,3 +474,107 @@ def test_ingest_reads_results_from_app_volume_schema(db_session, installation):
 
     statement = ws.statement_execution.execute_statement.call_args.kwargs["statement"]
     assert "`prod_cat`.`prod_schema`.`metagen_results`" in statement
+
+
+def test_refresh_can_defer_ingest(db_session, installation):
+    ws = _ws_returning([["table", "main.sales.orders", None, None, "Orders."]])
+    jobs = _jobs()
+    manager = _manager(jobs=jobs, ws=ws)
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    jobs.get_job_status.return_value = {"life_cycle_state": "TERMINATED", "result_state": "SUCCESS"}
+    deferred = []
+
+    manager.refresh_run(db_session, run, defer_ingest=deferred.append)
+    assert deferred == [run.id]
+    assert run.status == "running"
+    ws.statement_execution.execute_statement.assert_not_called()
+
+    # Failures are still finished inline
+    jobs.get_job_status.return_value = {"life_cycle_state": "TERMINATED", "result_state": "FAILED"}
+    manager.refresh_run(db_session, run, defer_ingest=deferred.append)
+    assert run.status == "failed" and deferred == [run.id]
+
+
+def test_refresh_skips_jobs_api_while_ingest_claim_is_fresh(db_session, installation):
+    jobs = _jobs()
+    manager = _manager(jobs=jobs)
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    run.status = "ingesting"
+    db_session.commit()
+
+    manager.refresh_run(db_session, run)
+    jobs.get_job_status.assert_not_called()
+
+
+def test_ingest_run_by_id_uses_its_own_session(db_session, installation, monkeypatch):
+    ws = _ws_returning([["table", "main.sales.orders", None, None, "Orders."]])
+    manager = _manager(ws=ws)
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    session = MagicMock(wraps=db_session)
+    session.close = MagicMock()
+    monkeypatch.setattr("src.common.database.get_session_factory", lambda: (lambda: session))
+
+    manager.ingest_run_by_id(run.id)
+    assert run.status == "completed"
+    session.close.assert_called_once()
+
+
+def test_suggestions_in_review_are_not_superseded(db_session, installation):
+    rows = [["table", "main.sales.orders", None, None, "Orders."]]
+    manager = _manager(ws=_ws_returning(rows))
+    first = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    manager.ingest_results(db_session, first)
+    db_session.query(DescriptionSuggestionDb).filter_by(run_id=first.id).update({"review_request_id": "r1"})
+    db_session.commit()
+
+    second = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    manager.ingest_results(db_session, second)
+    assert manager.counts(db_session, first.id) == {"pending": 1}
+
+
+def test_supersede_matches_columns_exactly(db_session, installation):
+    first_rows = [["column", "main.sales.orders", "id", None, "Order id."]]
+    manager = _manager(ws=_ws_returning(first_rows))
+    first = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    manager.ingest_results(db_session, first)
+
+    manager._ws_factory = lambda: _ws_returning([["column", "main.sales.orders", "amount", None, "Amount."]])
+    second = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    manager.ingest_results(db_session, second)
+    assert manager.counts(db_session, first.id) == {"pending": 1}
+
+
+def test_refresh_polls_jobs_api_when_ingest_claim_is_stale(db_session, installation):
+    from datetime import datetime, timedelta, timezone
+
+    ws = _ws_returning([["table", "main.sales.orders", None, None, "Orders."]])
+    jobs = _jobs()
+    manager = _manager(jobs=jobs, ws=ws)
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    run.status = "ingesting"
+    db_session.commit()
+    db_session.query(type(run)).filter_by(id=run.id).update(
+        {"updated_at": datetime.now(timezone.utc) - timedelta(hours=1)}, synchronize_session=False
+    )
+    db_session.commit()
+    db_session.refresh(run)
+    jobs.get_job_status.return_value = {"life_cycle_state": "TERMINATED", "result_state": "SUCCESS"}
+
+    manager.refresh_run(db_session, run)
+    jobs.get_job_status.assert_called_once()
+    assert run.status == "completed"
+
+
+@pytest.mark.parametrize("case", ["ingest_raises", "run_missing"])
+def test_ingest_run_by_id_always_closes_its_session(db_session, installation, monkeypatch, case):
+    manager = _manager()
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    session = MagicMock(wraps=db_session)
+    session.close = MagicMock()
+    monkeypatch.setattr("src.common.database.get_session_factory", lambda: (lambda: session))
+    ingest = MagicMock(side_effect=RuntimeError("boom"))
+    monkeypatch.setattr(manager, "ingest_results", ingest)
+
+    manager.ingest_run_by_id(run.id if case == "ingest_raises" else "missing")  # never raises
+    session.close.assert_called_once()
+    assert ingest.called is (case == "ingest_raises")

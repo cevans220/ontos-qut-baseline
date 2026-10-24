@@ -42,7 +42,7 @@ def _request(manager):
 def _manager(run=None):
     manager = MagicMock()
     manager.get_run.return_value = run if run is not None else _run()
-    manager.refresh_run.side_effect = lambda db, r: r
+    manager.refresh_run.side_effect = lambda db, r, **kwargs: r
     manager.cancel_run.side_effect = lambda db, r: r
     manager.counts.return_value = {}
     manager.list_suggestions.return_value = []
@@ -58,7 +58,7 @@ def _admin(is_admin: bool):
 async def test_owner_sees_own_run():
     manager = _manager()
     with _admin(False):
-        detail = await routes.get_run("run-1", _request(manager), db=MagicMock(), current_user=OWNER)
+        detail = await routes.get_run("run-1", _request(manager), MagicMock(), db=MagicMock(), current_user=OWNER)
     assert detail.run_id == "run-1"
 
 
@@ -69,7 +69,7 @@ async def test_non_owner_non_admin_gets_404(call):
     request, db = _request(manager), MagicMock()
     with _admin(False), pytest.raises(HTTPException) as exc:
         if call == "get":
-            await routes.get_run("run-1", request, db=db, current_user=OTHER)
+            await routes.get_run("run-1", request, MagicMock(), db=db, current_user=OTHER)
         elif call == "suggestions":
             await routes.list_suggestions("run-1", request, db=db, current_user=OTHER, status_filter=None, limit=10, skip=0)
         elif call == "cancel":
@@ -85,7 +85,7 @@ async def test_non_owner_non_admin_gets_404(call):
 async def test_admin_can_see_and_cancel_others_runs():
     manager = _manager(_run(status="running"))
     with _admin(True):
-        await routes.get_run("run-1", _request(manager), db=MagicMock(), current_user=OTHER)
+        await routes.get_run("run-1", _request(manager), MagicMock(), db=MagicMock(), current_user=OTHER)
         await routes.cancel_run("run-1", _request(manager), db=MagicMock(), audit_manager=MagicMock(), current_user=OTHER)
     manager.cancel_run.assert_called_once()
 
@@ -95,7 +95,7 @@ async def test_unknown_run_is_404():
     manager = _manager()
     manager.get_run.return_value = None
     with _admin(True), pytest.raises(HTTPException) as exc:
-        await routes.get_run("nope", _request(manager), db=MagicMock(), current_user=OWNER)
+        await routes.get_run("nope", _request(manager), MagicMock(), db=MagicMock(), current_user=OWNER)
     assert exc.value.status_code == 404
 
 
@@ -154,3 +154,19 @@ async def test_cancel_and_delete_conflicts_map_to_409(call):
             await routes.delete_run("run-1", _request(manager), db=MagicMock(), audit_manager=audit, current_user=OWNER)
     assert exc.value.status_code == 409
     assert audit.log_action.call_args.kwargs["success"] is False
+
+
+@pytest.mark.asyncio
+async def test_get_run_defers_ingest_to_a_background_task():
+    manager = _manager(_run(status="running"))
+
+    def refresh(db, run, defer_ingest=None):
+        defer_ingest(run.id)
+        return run
+
+    manager.refresh_run.side_effect = refresh
+    background_tasks = MagicMock()
+    with _admin(False):
+        await routes.get_run("run-1", _request(manager), background_tasks, db=MagicMock(), current_user=OWNER)
+    background_tasks.add_task.assert_called_once_with(manager.ingest_run_by_id, "run-1")
+    manager.ingest_results.assert_not_called()
