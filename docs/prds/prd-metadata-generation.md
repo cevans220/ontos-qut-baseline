@@ -40,7 +40,7 @@ Stewards start a **Generation Run** over a selection of UC catalogs, schemas or 
 - Data sampling (`allow_data`) is off by default. A per-run toggle is only offered when an admin setting permits it.
 - Limits (admin-configurable): 500 tables per run, 1 active run per user, job `max_concurrent_runs: 3`.
 
-**Execution** — see the decision record. The background job `workflows/metagen_generate/` runs as the app SP, with dbxmetagen output in the app's `DATABRICKS_CATALOG`.`DATABRICKS_SCHEMA`. A normalized Delta staging table `metagen_results` is ingested by the app through the SQL warehouse. Status comes from the Jobs API, refreshed on demand by the run page and by the `JobsManager` poller as backstop. `ingest_results(run_id)` is idempotent. Cancel cancels the Databricks job run.
+**Execution** — see the decision record. The background job `workflows/metagen_generate/` runs as the app SP, with dbxmetagen output in the app's deploy-time catalog and schema (those of the app volume, else `DATABRICKS_CATALOG`.`DATABRICKS_SCHEMA`). A normalized Delta staging table `metagen_results` is ingested by the app through the SQL warehouse. Status comes from the Jobs API, refreshed on demand by the run page and by the `JobsManager` poller as backstop. `ingest_results(run_id)` is idempotent. Cancel cancels the Databricks job run.
 
 **Review**
 - Manual "Submit for review" from the run page, plus an opt-in auto-submit on completion. One Data Asset Review per run. The reviewer is picked at submit time, or defaults to the `DataSteward` role.

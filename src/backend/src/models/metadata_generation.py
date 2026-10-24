@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field
 class GenerationRunStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
+    # Job finished; its results are being loaded into suggestions
+    INGESTING = "ingesting"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"

@@ -45,6 +45,7 @@
   "runStatus": {
     "pending": "Pendente",
     "running": "Em execução",
+    "ingesting": "Carregando resultados",
     "completed": "Concluída",
     "failed": "Com falha",
     "cancelled": "Cancelada"

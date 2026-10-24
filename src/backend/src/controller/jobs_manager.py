@@ -25,6 +25,14 @@ from src.models.workflow_configurations import WorkflowParameterDefinition, Work
 logger = get_logger(__name__)
 
 
+# Life-cycle states after which a job run will not change any more
+_FINAL_LIFE_CYCLE_STATES = {
+    RunLifeCycleState.TERMINATED,
+    RunLifeCycleState.SKIPPED,
+    RunLifeCycleState.INTERNAL_ERROR,
+}
+
+
 class JobsManager:
     def __init__(self, db: Session, ws_client: WorkspaceClient, *, workflows_root: Optional[Path] = None, notifications_manager=None, settings=None, workspace_deployer=None):
         self._db = db
@@ -1176,12 +1184,13 @@ class JobsManager:
                                 run_data=run_data
                             )
 
-                            if (run.state.life_cycle_state == RunLifeCycleState.TERMINATED and
+                            if (run.state.life_cycle_state in _FINAL_LIFE_CYCLE_STATES and
                                     not job_run.notified_at):
                                 self._notify_run_terminated(
                                     installation.workflow_id,
                                     run.run_id,
-                                    run.state.result_state.value if run.state.result_state else None,
+                                    # SKIPPED / INTERNAL_ERROR runs have no result state
+                                    (run.state.result_state or run.state.life_cycle_state).value,
                                     db,
                                 )
 

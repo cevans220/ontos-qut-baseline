@@ -1,6 +1,6 @@
 // Metadata Generation (dbxmetagen) — mirrors src/backend/src/models/metadata_generation.py
 
-export type GenerationRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type GenerationRunStatus = 'pending' | 'running' | 'ingesting' | 'completed' | 'failed' | 'cancelled';
 
 export type SuggestionStatus =
   | 'pending'

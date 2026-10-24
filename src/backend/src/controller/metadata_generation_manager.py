@@ -12,12 +12,13 @@ See docs/decisions/metadata-generation-execution.md.
 """
 
 import time
-from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
-from src.common.config import Settings
+from src.common.config import Settings, resolve_volume
 from src.common.errors import ConflictError
 from src.common.logging import get_logger
 from src.db_models.metadata_generation import DescriptionSuggestionDb, MetadataGenerationRunDb
@@ -38,6 +39,8 @@ WORKFLOW_ID = "metagen_generate"
 RESULTS_TABLE = "metagen_results"
 DEFAULT_MODEL = "databricks-claude-sonnet-4-6"
 MAX_ACTIVE_RUNS_PER_USER = 1
+# An ingest claim older than this is treated as abandoned (e.g. the app restarted)
+STALE_INGEST_CLAIM = timedelta(minutes=15)
 
 # Jobs API life-cycle states after which a run will not change any more
 _TERMINAL_LIFE_CYCLE_STATES = {"TERMINATED", "SKIPPED", "INTERNAL_ERROR"}
@@ -49,6 +52,12 @@ class ActiveRunLimitError(ValueError):
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def selections_overlap(a: str, b: str) -> bool:
+    """Whether two ``cat[.sch[.tbl]]`` names cover a common table."""
+    a, b = a.lower(), b.lower()
+    return a == b or a.startswith(b + ".") or b.startswith(a + ".")
 
 
 def selection_to_table_names(selection: List[Dict[str, str]]) -> List[str]:
@@ -78,17 +87,35 @@ class MetadataGenerationManager:
         if self._jobs is not None and hasattr(self._jobs, "register_run_terminated_handler"):
             self._jobs.register_run_terminated_handler(WORKFLOW_ID, self.handle_job_terminated)
 
+    def _output_schema(self) -> Tuple[str, str]:
+        """The app's deploy-time catalog and schema.
+
+        Databricks Apps deployments inject the volume path (its catalog and
+        schema win); bundle and local deployments set DATABRICKS_CATALOG /
+        DATABRICKS_SCHEMA. A volume that isn't a UC volume (a local path in
+        development) doesn't name a schema.
+        """
+        try:
+            resolved = resolve_volume(self._settings)
+        except ValueError:
+            resolved = None
+        if resolved:
+            return resolved[0], resolved[1]
+        return self._settings.DATABRICKS_CATALOG, self._settings.DATABRICKS_SCHEMA
+
     # ------------------------------------------------------------------
     # Start / cancel / delete
     # ------------------------------------------------------------------
     def start_run(self, db: Session, *, user_id: str, request: StartRunRequest) -> MetadataGenerationRunDb:
         """Create a Generation Run and launch the background job."""
+        self._refresh_active_runs(db)
         if metagen_runs_repo.count_active_for_user(db, user_id) >= MAX_ACTIVE_RUNS_PER_USER:
             raise ActiveRunLimitError("You already have a Generation Run in progress. Wait for it to finish or cancel it.")
         selection = [item.model_dump() for item in request.selection]
         table_names = selection_to_table_names(selection)
         if not self._jobs:
             raise ValueError("Jobs manager not available")
+        self._check_no_overlapping_run(db, table_names)
 
         from src.repositories.workflow_installations_repository import workflow_installation_repo
         installation = workflow_installation_repo.get_by_workflow_id(db=db, workflow_id=WORKFLOW_ID)
@@ -112,11 +139,12 @@ class MetadataGenerationManager:
         run = metagen_runs_repo.create(db, user_id=user_id, selection=selection, options=options)
         db.commit()
 
+        output_catalog, output_schema = self._output_schema()
         job_params = {
             "ontos_run_id": run.id,
             "table_names": ",".join(table_names),
-            "output_catalog": self._settings.DATABRICKS_CATALOG,
-            "output_schema": self._settings.DATABRICKS_SCHEMA,
+            "output_catalog": output_catalog,
+            "output_schema": output_schema,
             "model": model,
             "comment_style": options["comment_style"],
             "allow_data": "false",
@@ -145,6 +173,22 @@ class MetadataGenerationManager:
         db.commit()
         db.refresh(run)
         return run
+
+    def _check_no_overlapping_run(self, db: Session, table_names: List[str]) -> None:
+        """Reject a run whose objects an active run is already describing.
+
+        dbxmetagen's log carries no run id, so the job attributes its rows by
+        table and time; two concurrent runs over the same table could pick up
+        each other's output.
+        """
+        for other in metagen_runs_repo.list_active(db):
+            for item in other.selection or []:
+                for name in table_names:
+                    if selections_overlap(name, item.get("fqn", "")):
+                        raise ConflictError(
+                            f"Another Generation Run is already describing objects in {item['fqn']}. "
+                            "Wait for it to finish or cancel it."
+                        )
 
     def cancel_run(self, db: Session, run: MetadataGenerationRunDb) -> MetadataGenerationRunDb:
         if run.status in TERMINAL_RUN_STATUSES:
@@ -184,8 +228,22 @@ class MetadataGenerationManager:
             return run
         status = self._jobs.get_job_status(int(run.job_run_id))
         if status and status.get("life_cycle_state") in _TERMINAL_LIFE_CYCLE_STATES:
-            self._finish(db, run, status.get("result_state"))
+            # SKIPPED / INTERNAL_ERROR runs have no result state
+            self._finish(db, run, status.get("result_state") or status.get("life_cycle_state"))
         return run
+
+    def _refresh_active_runs(self, db: Session) -> None:
+        """Finish active runs whose job ended, before they count against limits.
+
+        Covers runs nobody has open and whose poller notification was already
+        used up, e.g. an ingest claim abandoned by an app restart (taken over
+        once stale).
+        """
+        for run in metagen_runs_repo.list_active(db):
+            try:
+                self.refresh_run(db, run)
+            except Exception:
+                logger.warning("Failed to refresh metadata generation run %s", run.id, exc_info=True)
 
     def handle_job_terminated(self, db: Session, job_run_id: int, result_state: Optional[str]) -> None:
         """JobsManager poller callback for terminated ``metagen_generate`` runs."""
@@ -210,24 +268,66 @@ class MetadataGenerationManager:
     # ------------------------------------------------------------------
     # Ingest
     # ------------------------------------------------------------------
+    def _claim_for_ingest(self, db: Session, run: MetadataGenerationRunDb) -> bool:
+        """Atomically move the run to ``ingesting``; False if someone else holds it.
+
+        The run page's polling and the JobsManager poller can both finish the
+        same run from different sessions; only the claimant ingests.
+        """
+        cutoff = _now() - STALE_INGEST_CLAIM
+        claimed = (
+            db.query(MetadataGenerationRunDb)
+            .filter(
+                MetadataGenerationRunDb.id == run.id,
+                or_(
+                    MetadataGenerationRunDb.status.in_(
+                        (GenerationRunStatus.PENDING.value, GenerationRunStatus.RUNNING.value)
+                    ),
+                    and_(
+                        MetadataGenerationRunDb.status == GenerationRunStatus.INGESTING.value,
+                        MetadataGenerationRunDb.updated_at < cutoff,
+                    ),
+                ),
+            )
+            .update(
+                {
+                    MetadataGenerationRunDb.status: GenerationRunStatus.INGESTING.value,
+                    MetadataGenerationRunDb.progress_message: "Loading generated descriptions",
+                    MetadataGenerationRunDb.updated_at: _now(),
+                },
+                synchronize_session=False,
+            )
+        )
+        db.commit()
+        db.refresh(run)
+        return claimed == 1
+
     def ingest_results(self, db: Session, run: MetadataGenerationRunDb) -> int:
         """Load the job's rows from Delta into Description Suggestions.
 
-        Idempotent: a run that is already completed is left alone, and rows of
-        an interrupted earlier attempt are replaced.
+        Idempotent: a completed run, or one another worker is ingesting, is
+        left alone; rows of an interrupted earlier attempt are replaced.
         """
-        if run.status == GenerationRunStatus.COMPLETED.value:
+        if run.status == GenerationRunStatus.COMPLETED.value or not self._claim_for_ingest(db, run):
             return run.suggestion_count
         try:
             rows = self._fetch_results(run.id)
+            # A failure while storing rolls back only the half-written suggestions
+            with db.begin_nested():
+                count = self._store_suggestions(db, run, rows)
+            db.commit()
+            logger.info("Ingested %d description suggestions for run %s", count, run.id)
+            return count
         except Exception as e:
-            logger.error("Failed to read metadata generation results for run %s: %s", run.id, e, exc_info=True)
+            logger.error("Failed to ingest metadata generation results for run %s: %s", run.id, e, exc_info=True)
             run.status = GenerationRunStatus.FAILED.value
             run.error = "Failed to read the generated descriptions"
             run.progress_message = None
             run.completed_at = _now()
             db.commit()
             return 0
+
+    def _store_suggestions(self, db: Session, run: MetadataGenerationRunDb, rows: List[Dict[str, Optional[str]]]) -> int:
 
         regenerate_existing = bool((run.options or {}).get("regenerate_existing"))
         db.query(DescriptionSuggestionDb).filter(DescriptionSuggestionDb.run_id == run.id).delete()
@@ -264,8 +364,7 @@ class MetadataGenerationManager:
         run.progress_message = None
         run.error = None
         run.completed_at = _now()
-        db.commit()
-        logger.info("Ingested %d description suggestions for run %s", len(targets), run.id)
+        db.flush()
         return len(targets)
 
     def _fetch_results(self, run_id: str) -> List[Dict[str, Optional[str]]]:
@@ -277,9 +376,7 @@ class MetadataGenerationManager:
             from src.common.workspace_client import get_workspace_client
             ws = get_workspace_client()
 
-        table = ".".join(
-            f"`{part}`" for part in (self._settings.DATABRICKS_CATALOG, self._settings.DATABRICKS_SCHEMA, RESULTS_TABLE)
-        )
+        table = ".".join(f"`{part}`" for part in (*self._output_schema(), RESULTS_TABLE))
         resp = ws.statement_execution.execute_statement(
             statement=(
                 f"SELECT object_type, table_fqn, column_name, base_text, proposed_text "

@@ -8,6 +8,7 @@ flight, so the UI's polling drives completion and ingest.
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.concurrency import run_in_threadpool
 
 from src.common.authorization import PermissionChecker, is_user_feature_admin
 from src.common.dependencies import AuditCurrentUserDep, AuditManagerDep, DBSessionDep
@@ -153,7 +154,8 @@ async def get_run(
     manager = _get_manager(request)
     run = await _get_visible_run(request, db, current_user, manager, run_id)
     try:
-        run = manager.refresh_run(db, run)
+        # Jobs API call and, on completion, a SQL warehouse read: keep them off the event loop
+        run = await run_in_threadpool(manager.refresh_run, db, run)
     except Exception:
         logger.warning("Failed to refresh metadata generation run %s", run_id, exc_info=True)
         db.rollback()
@@ -203,7 +205,7 @@ async def cancel_run(
     run = await _get_visible_run(request, db, current_user, manager, run_id)
     success = False
     try:
-        run = manager.cancel_run(db, run)
+        run = await run_in_threadpool(manager.cancel_run, db, run)
         success = True
         return _to_summary(run)
     except ValueError as e:

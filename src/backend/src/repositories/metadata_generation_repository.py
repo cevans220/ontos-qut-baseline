@@ -12,7 +12,7 @@ from src.db_models.metadata_generation import DescriptionSuggestionDb, MetadataG
 
 logger = get_logger(__name__)
 
-ACTIVE_RUN_STATUSES = ('pending', 'running')
+ACTIVE_RUN_STATUSES = ('pending', 'running', 'ingesting')
 
 
 class MetadataGenerationRunsRepository:
@@ -54,6 +54,13 @@ class MetadataGenerationRunsRepository:
                 MetadataGenerationRunDb.status.in_(ACTIVE_RUN_STATUSES),
             )
             .count()
+        )
+
+    def list_active(self, db: Session) -> List[MetadataGenerationRunDb]:
+        return (
+            db.query(MetadataGenerationRunDb)
+            .filter(MetadataGenerationRunDb.status.in_(ACTIVE_RUN_STATUSES))
+            .all()
         )
 
     def create(self, db: Session, *, user_id: str, **kwargs) -> MetadataGenerationRunDb:

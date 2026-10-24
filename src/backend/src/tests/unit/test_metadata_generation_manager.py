@@ -33,6 +33,7 @@ def _settings():
         DATABRICKS_CATALOG="app_ontos",
         DATABRICKS_SCHEMA="app_ontos",
         DATABRICKS_WAREHOUSE_ID="wh-1",
+        DATABRICKS_VOLUME=None,
     )
 
 
@@ -120,8 +121,9 @@ def test_start_run_limits_active_runs_per_user(db_session, installation):
     manager.start_run(db_session, user_id="a@x.com", request=_request())
     with pytest.raises(ActiveRunLimitError):
         manager.start_run(db_session, user_id="a@x.com", request=_request())
-    # Another user is not blocked
-    manager.start_run(db_session, user_id="b@x.com", request=_request())
+    # Another user is not blocked (on objects no active run covers)
+    other = StartRunRequest(selection=[SelectionItem(type="schema", fqn="main.hr")])
+    manager.start_run(db_session, user_id="b@x.com", request=other)
 
 
 def test_start_run_marks_run_failed_when_job_launch_fails(db_session, installation):
@@ -277,3 +279,198 @@ def test_start_run_rejects_malformed_selection_before_job_check(db_session):
     bad = StartRunRequest(selection=[SelectionItem(type="table", fqn="main.sales")])
     with pytest.raises(ValueError, match="not a valid table"):
         _manager().start_run(db_session, user_id="a@x.com", request=bad)
+
+
+def test_output_schema_follows_app_volume(db_session, installation):
+    jobs = _jobs()
+    manager = _manager(jobs=jobs)
+    manager._settings.DATABRICKS_VOLUME = "/Volumes/prod_cat/prod_schema/app_files"
+    manager.start_run(db_session, user_id="a@x.com", request=_request())
+    params = jobs.run_job.call_args.kwargs["job_parameters"]
+    assert (params["output_catalog"], params["output_schema"]) == ("prod_cat", "prod_schema")
+
+
+def test_output_schema_ignores_local_volume_path(db_session, installation):
+    jobs = _jobs()
+    manager = _manager(jobs=jobs)
+    manager._settings.DATABRICKS_VOLUME = "/tmp/ontos-volume"
+    manager.start_run(db_session, user_id="a@x.com", request=_request())
+    params = jobs.run_job.call_args.kwargs["job_parameters"]
+    assert (params["output_catalog"], params["output_schema"]) == ("app_ontos", "app_ontos")
+
+
+def _statement(state, rows=None, chunks=1, error=None):
+    return SimpleNamespace(
+        statement_id="st-1",
+        status=SimpleNamespace(state=state, error=SimpleNamespace(message=error) if error else None),
+        manifest=SimpleNamespace(
+            schema=SimpleNamespace(columns=[SimpleNamespace(name=c) for c in RESULT_COLUMNS]),
+            total_chunk_count=chunks,
+        ),
+        result=SimpleNamespace(data_array=rows or []),
+    )
+
+
+def test_ingest_skips_when_another_worker_holds_the_claim(db_session, installation):
+    ws = _ws_returning([["table", "main.sales.orders", None, None, "Orders."]])
+    manager = _manager(ws=ws)
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    run.status = "ingesting"  # claimed by the other poller moments ago
+    db_session.commit()
+
+    assert manager.ingest_results(db_session, run) == 0
+    ws.statement_execution.execute_statement.assert_not_called()
+    assert run.status == "ingesting"
+
+
+def test_stale_ingest_claim_is_taken_over(db_session, installation):
+    from datetime import datetime, timedelta, timezone
+
+    ws = _ws_returning([["table", "main.sales.orders", None, None, "Orders."]])
+    manager = _manager(ws=ws)
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    run.status = "ingesting"
+    db_session.commit()
+    db_session.query(type(run)).filter_by(id=run.id).update(
+        {"updated_at": datetime.now(timezone.utc) - timedelta(hours=1)}, synchronize_session=False
+    )
+    db_session.commit()
+
+    assert manager.ingest_results(db_session, run) == 1
+    assert run.status == "completed"
+
+
+def test_start_run_rejects_selection_overlapping_an_active_run(db_session, installation):
+    manager = _manager()
+    manager.start_run(db_session, user_id="a@x.com", request=_request())  # main.sales
+    overlapping = StartRunRequest(selection=[SelectionItem(type="table", fqn="main.sales.orders")])
+    with pytest.raises(ConflictError, match="main.sales"):
+        manager.start_run(db_session, user_id="b@x.com", request=overlapping)
+    # A disjoint selection is fine; a name sharing only a prefix is not an overlap
+    disjoint = StartRunRequest(selection=[SelectionItem(type="schema", fqn="main.sales_eu")])
+    manager.start_run(db_session, user_id="b@x.com", request=disjoint)
+
+
+def test_selections_overlap():
+    from src.controller.metadata_generation_manager import selections_overlap
+
+    assert selections_overlap("main", "main.sales.orders")
+    assert selections_overlap("Main.Sales", "main.sales")
+    assert not selections_overlap("main.sales", "main.sales_eu")
+    assert not selections_overlap("main.sales.orders", "main.sales.order")
+
+
+def test_fetch_results_polls_until_succeeded(db_session, installation, monkeypatch):
+    monkeypatch.setattr("src.controller.metadata_generation_manager.time.sleep", lambda s: None)
+    ws = MagicMock()
+    ws.statement_execution.execute_statement.return_value = _statement(StatementState.PENDING)
+    ws.statement_execution.get_statement.side_effect = [
+        _statement(StatementState.RUNNING),
+        _statement(StatementState.SUCCEEDED, rows=[["table", "main.sales.orders", None, None, "Orders."]]),
+    ]
+    manager = _manager(ws=ws)
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+
+    assert manager.ingest_results(db_session, run) == 1
+    assert ws.statement_execution.get_statement.call_count == 2
+
+
+def test_fetch_results_failed_statement_fails_run(db_session, installation):
+    ws = MagicMock()
+    ws.statement_execution.execute_statement.return_value = _statement(StatementState.FAILED, error="TABLE_OR_VIEW_NOT_FOUND")
+    manager = _manager(ws=ws)
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+
+    manager.ingest_results(db_session, run)
+    assert run.status == "failed"
+    assert manager.count_suggestions(db_session, run.id) == 0
+
+
+def test_fetch_results_reads_all_chunks(db_session, installation):
+    ws = MagicMock()
+    ws.statement_execution.execute_statement.return_value = _statement(
+        StatementState.SUCCEEDED, rows=[["table", "main.sales.orders", None, None, "Orders."]], chunks=3,
+    )
+    ws.statement_execution.get_statement_result_chunk_n.side_effect = [
+        SimpleNamespace(data_array=[["column", "main.sales.orders", "id", None, "Order id."]]),
+        SimpleNamespace(data_array=[["column", "main.sales.orders", "amount", None, "Amount."]]),
+    ]
+    manager = _manager(ws=ws)
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+
+    assert manager.ingest_results(db_session, run) == 3
+    indexes = [c.args[1] for c in ws.statement_execution.get_statement_result_chunk_n.call_args_list]
+    assert indexes == [1, 2]
+
+
+def test_refresh_fails_skipped_run_with_life_cycle_state(db_session, installation):
+    jobs = _jobs()
+    manager = _manager(jobs=jobs)
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    jobs.get_job_status.return_value = {"life_cycle_state": "SKIPPED", "result_state": None}
+
+    manager.refresh_run(db_session, run)
+    assert run.status == "failed"
+    assert "SKIPPED" in run.error
+
+
+def test_store_failure_rolls_back_partial_suggestions(db_session, installation, monkeypatch):
+    ws = _ws_returning([
+        ["table", "main.sales.orders", None, None, "Orders."],
+        ["column", "main.sales.orders", "id", None, "Order id."],
+    ])
+    manager = _manager(ws=ws)
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    # Row left behind by an interrupted earlier attempt
+    db_session.add(DescriptionSuggestionDb(
+        run_id=run.id, object_type="table", table_fqn="main.sales.orders", proposed_text="Earlier.",
+    ))
+    db_session.commit()
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("db hiccup")
+
+    # Fails after the old rows were deleted and the new ones added
+    monkeypatch.setattr(
+        "src.controller.metadata_generation_manager.metagen_suggestions_repo.supersede_pending_for_targets", boom,
+    )
+    assert manager.ingest_results(db_session, run) == 0
+
+    assert run.status == "failed"
+    rows = manager.list_suggestions(db_session, run.id)
+    assert [r.proposed_text for r in rows] == ["Earlier."]  # nothing half-written, nothing lost
+    assert manager.list_runs(db_session, "a@x.com")[0].id == run.id  # session still usable
+
+
+def test_start_run_recovers_abandoned_ingest_before_applying_limits(db_session, installation):
+    from datetime import datetime, timedelta, timezone
+
+    ws = _ws_returning([["table", "main.sales.orders", None, None, "Orders."]])
+    jobs = _jobs()
+    manager = _manager(jobs=jobs, ws=ws)
+    stuck = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    # The worker that claimed the ingest died an hour ago; the poller already notified
+    stuck.status = "ingesting"
+    db_session.commit()
+    db_session.query(type(stuck)).filter_by(id=stuck.id).update(
+        {"updated_at": datetime.now(timezone.utc) - timedelta(hours=1)}, synchronize_session=False
+    )
+    db_session.commit()
+    jobs.get_job_status.return_value = {"life_cycle_state": "TERMINATED", "result_state": "SUCCESS"}
+
+    # Same user, same objects: neither the per-user limit nor the overlap check blocks
+    manager.start_run(db_session, user_id="a@x.com", request=_request())
+    db_session.refresh(stuck)
+    assert stuck.status == "completed"
+    assert stuck.suggestion_count == 1
+
+
+def test_ingest_reads_results_from_app_volume_schema(db_session, installation):
+    ws = _ws_returning([["table", "main.sales.orders", None, None, "Orders."]])
+    manager = _manager(ws=ws)
+    manager._settings.DATABRICKS_VOLUME = "/Volumes/prod_cat/prod_schema/app_files"
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    manager.ingest_results(db_session, run)
+
+    statement = ws.statement_execution.execute_statement.call_args.kwargs["statement"]
+    assert "`prod_cat`.`prod_schema`.`metagen_results`" in statement

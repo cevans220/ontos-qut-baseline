@@ -100,12 +100,13 @@ def is_fully_described(table_comment: Optional[str], columns: Dict[str, Optional
 
 
 def read_generated(
-    spark: SparkSession, log_table: str, started_at, wanted: Dict[str, str]
+    spark: SparkSession, log_table: str, started_us: int, wanted: Dict[str, str]
 ) -> Dict[Tuple[str, Optional[str]], Tuple[str, Optional[str], object]]:
     """Read this run's comment rows from dbxmetagen's log.
 
     dbxmetagen's log has no run id, so rows are matched by table and by having
-    been written after this job started. Latest row per (table, column) wins.
+    been written after this job started (compared as epoch microseconds, so
+    the session time zone doesn't matter). Latest row per (table, column) wins.
     ``wanted`` maps lowercased FQN -> FQN as selected.
     """
     df = spark.sql(
@@ -113,7 +114,7 @@ def read_generated(
         SELECT `table`, catalog, `schema`, table_name, ddl_type, column_name,
                column_content, model, _created_at
         FROM {quote_fqn(log_table)}
-        WHERE metadata_type = 'comment' AND _created_at >= TIMESTAMP '{started_at}'
+        WHERE metadata_type = 'comment' AND unix_micros(_created_at) >= {int(started_us)}
         ORDER BY _created_at
         """
     )
@@ -192,7 +193,7 @@ def main():
             print("Nothing to generate.")
             return
 
-        started_at = spark.sql("SELECT current_timestamp() AS ts").first()["ts"]
+        started_us = spark.sql("SELECT unix_micros(current_timestamp()) AS us").first()["us"]
 
         from dbxmetagen.main import main as dbxmetagen_main
         dbxmetagen_main({
@@ -216,7 +217,7 @@ def main():
         })
 
         wanted = {fqn.lower(): fqn for fqn in targets}
-        generated = read_generated(spark, f"{output_prefix}.{DBXMETAGEN_LOG_TABLE}", started_at, wanted)
+        generated = read_generated(spark, f"{output_prefix}.{DBXMETAGEN_LOG_TABLE}", started_us, wanted)
 
         rows = []
         for (fqn, column), (text, model, created_at) in generated.items():

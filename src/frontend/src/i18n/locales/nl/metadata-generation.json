@@ -45,6 +45,7 @@
   "runStatus": {
     "pending": "In afwachting",
     "running": "Bezig",
+    "ingesting": "Resultaten laden",
     "completed": "Voltooid",
     "failed": "Mislukt",
     "cancelled": "Geannuleerd"

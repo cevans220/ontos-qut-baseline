@@ -5,7 +5,7 @@
 
 ## Decision
 
-Generation Runs execute [dbxmetagen](https://github.com/databricks-industry-solutions/dbxmetagen) as an Ontos background job (`src/backend/src/workflows/metagen_generate/`), not inside the app process. The job pins `dbxmetagen==0.10.x`, runs it with `apply_ddl=false`, lets it write its own Delta output into the app's deploy-time `DATABRICKS_CATALOG`.`DATABRICKS_SCHEMA`, and finally writes normalized rows to a Delta staging table `metagen_results` keyed by the Ontos run id.
+Generation Runs execute [dbxmetagen](https://github.com/databricks-industry-solutions/dbxmetagen) as an Ontos background job (`src/backend/src/workflows/metagen_generate/`), not inside the app process. The job pins dbxmetagen to a reviewed commit (it is not on PyPI), runs it with `apply_ddl=false`, lets it write its own Delta output into the app's deploy-time catalog and schema (those of the app volume, else `DATABRICKS_CATALOG`.`DATABRICKS_SCHEMA`), and finally writes normalized rows to a Delta staging table `metagen_results` keyed by the Ontos run id.
 
 The **app** — not the job — ingests `metagen_results` into its own `metagen_suggestions` table via the SQL warehouse, and derives run status from the Jobs API. The job never connects to the Ontos database.
 

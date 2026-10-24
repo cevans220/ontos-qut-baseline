@@ -22,7 +22,7 @@ class MetadataGenerationRunDb(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid4()))
     user_id = Column(String, nullable=False, index=True)
 
-    # pending | running | completed | failed | cancelled
+    # pending | running | ingesting | completed | failed | cancelled
     status = Column(String, nullable=False, default='pending')
     progress_message = Column(String, nullable=True)
     error = Column(Text, nullable=True)
