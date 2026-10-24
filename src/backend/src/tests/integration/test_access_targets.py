@@ -184,3 +184,88 @@ def test_scope_helpers():
     assert pt.scopes_overlap(["main"], ["main.sales"]) and not pt.scopes_overlap(["main.hr"], ["main.sales"])
     assert pt.scopes_overlap([], ["x"])
     assert not pt.inside("main.salesforce", "main.sales")
+
+
+# ------------------------------------------------------------ /review findings (P4a)
+
+from src.controller.access_agreements import AgreementService  # noqa: E402
+from src.db_models.data_products import OutputPortDb  # noqa: E402
+from src.tests.integration.test_access_agreements import _agreement, _approve, product  # noqa: E402,F401
+
+
+def test_deprecating_the_only_uc_target_does_not_bring_back_the_builtin(policies, rm, db_session: Session):
+    target = _target(policies, db_session, "uc-sales", scope=["main.sales"])
+    policies.change_status(db_session, KIND_TARGET, target.id, "deprecated", ADMIN)
+    assert rm.targets(db_session) == []
+    assert [t.key for t in rm.targets(db_session, include_deprecated=True)] == ["uc-sales"]
+
+
+def test_deprecated_targets_block_overlapping_activation(policies, db_session: Session):
+    old = _target(policies, db_session, "uc-main", scope=["main"])
+    policies.change_status(db_session, KIND_TARGET, old.id, "deprecated", ADMIN)
+    new = _target(policies, db_session, "uc-sales", scope=["main.sales"], activate=False)
+    assert any("overlaps" in p for p in policies.activation_problems(db_session, KIND_TARGET, new))
+
+
+def test_stale_release_on_a_deprecated_target_still_delivers(policies, rm, db_session: Session):
+    _policy(policies, db_session, SALES, "Sales")
+    target = _target(policies, db_session, "uc")
+    r = rm.create_release(db_session, "uc", AUTHOR)
+    rm.change_status(db_session, r.id, "under_review", AUTHOR)
+    rm.change_status(db_session, r.id, "approved", APPROVER)
+    policies.change_status(db_session, KIND_TARGET, target.id, "deprecated", ADMIN)
+    r.ledger_fingerprint = "stale"
+    out = rm.deliver(db_session, r.id, ADMIN, Delivery([DeliveryMode.DIRECT], FakeGrants()))
+    assert out.status == "applied"
+
+
+def test_scope_keeps_a_parent_the_in_scope_grant_needs(policies, rm, db_session: Session):
+    both = {"permission": [{"target": "uc:main.sales.orders", "action": "read", "assignee": "group:analysts"},
+                           {"target": "uc:main.hr.people", "action": "read", "assignee": "group:analysts"}]}
+    _policy(policies, db_session, both, "Both")
+    target = _target(policies, db_session, "uc")
+    _ship(rm, db_session, "uc", Delivery([DeliveryMode.DIRECT], FakeGrants()))
+    v2 = policies.create_new_version(db_session, KIND_TARGET, target.id, "1.1.0", None, AUTHOR)
+    policies.update(db_session, KIND_TARGET, v2.id, TargetUpdate(scope=["main.sales"]), AUTHOR)
+    _activate(policies, db_session, KIND_TARGET, v2)
+    ch = rm.compile(db_session, "uc")["changes"]
+    untracked = {(g["securable_name"], g["privilege"]) for g in ch["untrack"]}
+    assert ("main", "USE_CATALOG") not in untracked and not ch["add"]
+
+
+def test_out_of_scope_time_bound_grants_stay_tracked_until_expiry(policies, rm, db_session: Session):
+    timed = {"permission": [{"target": "uc:main.hr.people", "action": "read", "assignee": "group:hr", "constraint": [
+        {"leftOperand": "dateTime", "operator": "lteq", "rightOperand": "2099-01-01T00:00:00Z"}]}]}
+    _policy(policies, db_session, timed, "HR timed")
+    target = _target(policies, db_session, "uc")
+    _ship(rm, db_session, "uc", Delivery([DeliveryMode.DIRECT], FakeGrants()))
+    v2 = policies.create_new_version(db_session, KIND_TARGET, target.id, "1.1.0", None, AUTHOR)
+    policies.update(db_session, KIND_TARGET, v2.id, TargetUpdate(scope=["main.sales"]), AUTHOR)
+    _activate(policies, db_session, KIND_TARGET, v2)
+    out = rm.compile(db_session, "uc")
+    assert not out["changes"]["untrack"] and not out["changes"]["remove"]
+    assert any(i["code"] == "expiring_outside_scope" for i in out["issues"])
+
+
+def test_agreement_spanning_targets_ships_one_release_per_target(policies, product, db_session: Session):  # noqa: F811
+    db_session.add(OutputPortDb(product_id=product.id, name="hr", version="1.0.0", asset_type="table",
+                                asset_identifier="main.hr.people", status="active"))
+    db_session.flush()
+    _target(policies, db_session, "uc-sales", scope=["main.sales"])
+    _target(policies, db_session, "uc-hr", scope=["main.hr"])
+    _, grant = _approve(db_session, product)
+    rows = AgreementService(policies).prepare_releases(db_session, [_agreement(db_session, grant)], ADMIN)
+    assert sorted(r.target for r in rows) == ["uc-hr", "uc-sales"]
+
+
+def test_agreement_revocation_goes_through_a_deprecated_target(policies, rm, product, db_session: Session):  # noqa: F811
+    target = _target(policies, db_session, "uc")
+    _, grant = _approve(db_session, product)
+    agreement = _agreement(db_session, grant)
+    svc = AgreementService(policies)
+    svc.deliver(db_session, [agreement], ADMIN, Delivery([DeliveryMode.DIRECT], FakeGrants()))
+    policies.change_status(db_session, KIND_TARGET, target.id, "deprecated", ADMIN)
+    svc.retire_for_grant(db_session, grant.id, ADMIN, "revoked")
+    grants = FakeGrants()
+    out = svc.deliver(db_session, [agreement], ADMIN, Delivery([DeliveryMode.DIRECT], grants), revoke=True)
+    assert out is not None and out.status == "applied" and ("revoke", "ana@example.com", "main.sales.orders") in grants.calls

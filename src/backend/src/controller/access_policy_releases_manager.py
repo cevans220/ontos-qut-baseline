@@ -169,9 +169,10 @@ class PolicyReleaseManager:
         compiles but must still deliver pending releases and revoke what they track.
         """
         live = (STATUS_ACTIVE, STATUS_NEEDS_REVIEW)
+        rows = [t for t in repo_for(KIND_TARGET).list_all(db) if t.status in live + (STATUS_DEPRECATED,)]
         by_key: Dict[str, Any] = {}
-        for t in repo_for(KIND_TARGET).list_all(db):
-            if t.status in live or (include_deprecated and t.status == STATUS_DEPRECATED):
+        for t in rows:
+            if t.status in live or include_deprecated:
                 cur = by_key.get(t.key)
                 if cur is None or (cur.status not in live and t.status in live):
                     by_key[t.key] = t
@@ -186,8 +187,9 @@ class PolicyReleaseManager:
                 key=key, label=t.name, adapter=adapter, scope=list(t.scope or []),
                 delivery_modes=list(t.delivery_modes or []), reconcile_schedule=t.reconcile_schedule,
                 drift_policy=t.drift_policy or pt.DRIFT_REPORT, entity_id=t.id))
-        active_uc = any(t.adapter.system == pt.BUILTIN_UC.adapter.system and by_key[t.key].status in live for t in out)
-        if not active_uc and pt.BUILTIN_UC.key not in by_key:
+        # The unscoped built-in only stands in while no UC target exists at all: a deprecated one
+        # still owns its securables, and bringing back "everything, any mode" would bypass it.
+        if not any(t.system == pt.BUILTIN_UC.adapter.system for t in rows):
             out.insert(0, pt.BUILTIN_UC)
         return out
 
@@ -198,10 +200,11 @@ class PolicyReleaseManager:
             raise AccessPolicyError(f"Unknown target '{key}'. Available: {', '.join(t.key for t in options)}", 400)
         return found
 
-    def target_for(self, db: Session, system: str, names: List[str]) -> Optional[pt.ResolvedTarget]:
-        """The active target of ``system`` whose scope covers the first of ``names`` (native names)."""
-        for t in self.targets(db):
-            if t.adapter.system == system and (not t.scope or any(pt.inside(names[0], s) for s in t.scope)):
+    def target_for(self, db: Session, system: str, name: str, *,
+                   include_deprecated: bool = False) -> Optional[pt.ResolvedTarget]:
+        """The target of ``system`` whose scope covers ``name`` (a native securable name)."""
+        for t in self.targets(db, include_deprecated=include_deprecated):
+            if t.adapter.system == system and (not t.scope or any(pt.inside(name, s) for s in t.scope)):
                 return t
         return None
 
@@ -245,13 +248,15 @@ class PolicyReleaseManager:
 
     def compile(self, db: Session, target: str, *,
                 resolve_object_kind: Optional[uc.ObjectKindResolver] = None,
-                now: Optional[datetime] = None) -> Dict[str, Any]:
+                now: Optional[datetime] = None, include_deprecated: bool = False) -> Dict[str, Any]:
         """Compile active policies for ``target`` and diff against the ledger (no writes).
 
         Only the target's scope is compiled; tracked grants that fell out of scope (the scope
-        was narrowed) are released from tracking, never revoked — another target or nobody owns them now.
+        was narrowed) are released from tracking, never revoked — another target or nobody owns
+        them now. Time-bound ones stay tracked until they expire, so the expiry sweep still revokes them.
+        ``include_deprecated``: re-base / revoke on a deprecated target (no new policy releases).
         """
-        resolved = self.resolve(db, target)
+        resolved = self.resolve(db, target, include_deprecated=include_deprecated)
         adapter = resolved.adapter
         abac = abac_config()
         inputs, sources, warnings = self._active_policy_inputs(db)
@@ -268,20 +273,27 @@ class PolicyReleaseManager:
         pt.restrict(plan, resolved)
         grants = adapter.build(plan, abac, resolve_object_kind)
         tracked = [_ledger_grant(r) for r in self.active_ledger(db, target)]
-        out_of_scope = [g for g in tracked if not adapter.grant_in_scope(g, resolved.scope)]
-        # A parent USE grant that an out-of-scope grant of the same principal still needs stays too.
-        below = {(g.principal, g.securable_name) for g in out_of_scope}
-        out_of_scope += [g for g in tracked if g.privilege in pt.IMPLIED_PRIVILEGES
-                         and adapter.grant_in_scope(g, resolved.scope)
-                         and any(p == g.principal and pt.inside(n, g.securable_name) for p, n in below)]
-        gone = {g.key for g in out_of_scope}
-        in_scope = [g for g in tracked if g.key not in gone]
-        diff = uc.diff_grants(grants, in_scope)
-        if out_of_scope:
-            diff.untrack = sorted(diff.untrack + out_of_scope, key=lambda g: g.key)
+        desired = {g.key for g in grants}
+        outside = [g for g in tracked if not adapter.grant_in_scope(g, resolved.scope)]
+        # A parent USE grant that an out-of-scope grant of the same principal still needs isn't
+        # revoked either — unless the in-scope compile wants it anyway (then it stays tracked).
+        below = {(g.principal, g.securable_name) for g in outside}
+        outside += [g for g in tracked if g.privilege in pt.IMPLIED_PRIVILEGES and g.key not in desired
+                    and adapter.grant_in_scope(g, resolved.scope)
+                    and any(p == g.principal and pt.inside(n, g.securable_name) for p, n in below)]
+        expiring = [g for g in outside if g.expires_at]
+        untrack = [g for g in outside if not g.expires_at]
+        skip = {g.key for g in outside}
+        diff = uc.diff_grants(grants, [g for g in tracked if g.key not in skip])
+        if untrack:
+            diff.untrack = sorted(diff.untrack + untrack, key=lambda g: g.key)
             plan.issue("warning", "untracked_outside_scope",
-                       f"{len(out_of_scope)} tracked grant(s) are outside the target's scope and will no longer be "
+                       f"{len(untrack)} tracked grant(s) are outside the target's scope and will no longer be "
                        "tracked (they stay on the platform)")
+        if expiring:
+            plan.issue("warning", "expiring_outside_scope",
+                       f"{len(expiring)} time-bound grant(s) are outside the target's scope; they stay tracked "
+                       "here until they expire and are revoked")
         changes = diff.to_dict()
         changes["sql"] = adapter.render_sql(diff)
         ir = plan.to_dict()
@@ -559,7 +571,7 @@ class PolicyReleaseManager:
         """
         if row.release_kind != KIND_POLICY_RELEASE or row.ledger_fingerprint == self._fingerprint(db, row.target):
             return
-        compiled = self.compile(db, row.target)
+        compiled = self.compile(db, row.target, include_deprecated=True)
         old, new = row.changes or {}, compiled["changes"]
 
         def keys(ch: Dict[str, Any], cat: str) -> set:

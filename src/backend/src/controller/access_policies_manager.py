@@ -17,6 +17,7 @@ Design notes:
   policy keeps pointing at "the Analysts audience" across audience versions;
   evaluation resolves each IRI to the family's active version.
 """
+import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
@@ -97,7 +98,7 @@ _KIND_COPY = {
     KIND_TARGET: ("key", "system", "connection", "scope", "delivery_modes", "reconcile_schedule", "drift_policy"),
 }
 TARGET_FIELDS = _KIND_COPY[KIND_TARGET]
-_TARGET_KEY_RE = __import__("re").compile(r"^[a-z][a-z0-9_-]{1,39}$")
+_TARGET_KEY_RE = re.compile(r"^[a-z][a-z0-9_-]{1,39}$")
 
 
 class AccessPolicyError(ValueError):
@@ -566,6 +567,13 @@ class AccessPoliciesManager:
                    for v in repo_for(kind).get_family_versions(db, family_id=row.version_family_id))
 
     @staticmethod
+    def tracked_counts(db: Session) -> Dict[str, int]:
+        from sqlalchemy import func
+        rows = (db.query(AccessGrantLedgerDb.target, func.count(AccessGrantLedgerDb.id))
+                .filter(AccessGrantLedgerDb.status == "active").group_by(AccessGrantLedgerDb.target).all())
+        return {k: n for k, n in rows}
+
+    @staticmethod
     def tracked_grants(db: Session, target_key: str) -> int:
         return (db.query(AccessGrantLedgerDb)
                 .filter(AccessGrantLedgerDb.target == target_key, AccessGrantLedgerDb.status == "active").count())
@@ -586,15 +594,17 @@ class AccessPoliciesManager:
             problems.append(f"Drift policy '{row.drift_policy}' is not supported (report only)")
         if (cron := targets_mod.cron_problem(row.reconcile_schedule)):
             problems.append(cron)
-        others = [t for t in repo_for(KIND_TARGET).list_all(db)
-                  if t.version_family_id != row.version_family_id and t.status in (STATUS_ACTIVE, STATUS_NEEDS_REVIEW)]
+        # Deprecated targets still deliver pending releases and revoke what they track: they count.
+        others = [t for t in repo_for(KIND_TARGET).list_all(db) if t.version_family_id != row.version_family_id
+                  and t.status in (STATUS_ACTIVE, STATUS_NEEDS_REVIEW, STATUS_DEPRECATED)]
         if any(t.key == row.key for t in others):
-            problems.append(f"Another active target already uses the key '{row.key}'")
+            problems.append(f"Another target (active or deprecated) already uses the key '{row.key}'")
         clash = [t.name for t in others if t.system == row.system
                  and targets_mod.scopes_overlap(row.scope or [], t.scope or [])]
         if clash:
             # One securable, one tracking target: otherwise two ledgers would grant and revoke the same thing.
-            problems.append(f"Scope overlaps active {adapter.label} target(s): {', '.join(clash)}")
+            problems.append(f"Scope overlaps active or deprecated {adapter.label} target(s): {', '.join(clash)} "
+                            "— retire them first")
         builtin = targets_mod.BUILTIN_UC.key
         if (row.system == builtin and row.key != builtin and not any(t.system == builtin for t in others)
                 and self.tracked_grants(db, builtin)):
@@ -841,7 +851,8 @@ class AccessPoliciesManager:
             out.update({f: getattr(row, f) for f in TARGET_FIELDS})
             adapter = targets_mod.get_adapter(row.system or "")
             out["system_label"] = adapter.label if adapter else row.system
-            out["tracked_grants"] = self.tracked_grants(db, row.key)
+            cached = getattr(row, "_tracked_grants", None)  # set in bulk by list views
+            out["tracked_grants"] = cached if cached is not None else self.tracked_grants(db, row.key)
         else:
             out.update({"members": row.members or [], "refinement": row.refinement or []})
             out["used_by"] = [{"id": p.id, "name": p.name, "version": p.version, "status": p.status}

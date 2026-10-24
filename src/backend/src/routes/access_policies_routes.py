@@ -415,6 +415,10 @@ def _register_kind(segment: str, kind: str, create_model: Any, update_model: Any
                             viewer=_email(current_user), is_admin=is_admin)
         if kind == KIND_POLICY:
             manager.prefetch_subject_names(db, rows)
+        elif kind == KIND_TARGET:
+            counts = manager.tracked_counts(db)
+            for r in rows:
+                r._tracked_grants = counts.get(r.key, 0)
         return [manager.to_read_dict(db, kind, r) for r in rows]
 
     async def get_entity(entity_id: str, request: Request, db: DBSessionDep, current_user: AuditCurrentUserDep,

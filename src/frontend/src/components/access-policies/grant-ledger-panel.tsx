@@ -25,9 +25,10 @@ export default function GrantLedgerPanel({ canAdmin }: { canAdmin: boolean }) {
   const compileTargets = useCompileTargets();
   const targets = compileTargets?.targets || [];
   const [target, setTarget] = useState('');
-  const chosen = target || targets[0]?.key || 'uc';
+  const chosen = target || targets[0]?.key || '';
 
   const load = useCallback(async () => {
+    if (!chosen) return; // wait for the targets: the ledger is per target
     setLoading(true);
     const res = await get<LedgerEntry[]>(
       `/api/access-policies/ledger?status=${status}&target=${encodeURIComponent(chosen)}`,
@@ -157,7 +158,7 @@ export default function GrantLedgerPanel({ canAdmin }: { canAdmin: boolean }) {
               </SelectContent>
             </Select>
             {canAdmin && status === 'active' && (
-              <Button size="sm" variant={expiredCount ? 'destructive' : 'outline'} onClick={revokeExpired} disabled={revoking}>
+              <Button size="sm" variant={expiredCount ? 'destructive' : 'outline'} onClick={revokeExpired} disabled={revoking || !chosen}>
                 <TimerOff className="mr-1 h-4 w-4" /> {t('access-policies:ledger.revokeExpired', { count: expiredCount })}
               </Button>
             )}

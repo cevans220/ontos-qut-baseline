@@ -25,7 +25,8 @@ export default function ReleasesPanel({ canWrite }: { canWrite: boolean }) {
   const compileTargets = useCompileTargets();
   const targets = compileTargets?.targets || [];
   const [target, setTarget] = useState('');
-  const chosen = target || targets[0]?.key || 'uc';
+  // No fallback key: until the targets load there is nothing valid to compile for.
+  const chosen = target || targets[0]?.key || '';
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -131,7 +132,7 @@ export default function ReleasesPanel({ canWrite }: { canWrite: boolean }) {
           canWrite ? (
             <div className="flex items-center gap-2">
               <TargetSelect targets={targets} value={chosen} onChange={setTarget} />
-              <Button size="sm" onClick={create} disabled={creating}>
+              <Button size="sm" onClick={create} disabled={creating || !chosen}>
                 <PackagePlus className="mr-1 h-4 w-4" /> {t('access-policies:releases.compile')}
               </Button>
             </div>
