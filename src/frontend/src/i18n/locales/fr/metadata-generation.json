@@ -1,89 +1,89 @@
 {
-  "title": "__TODO__ Metadata Generation",
-  "subtitle": "__TODO__ Generate table and column descriptions for Unity Catalog with dbxmetagen, review them, and apply them.",
+  "title": "Génération de métadonnées",
+  "subtitle": "Générez des descriptions de tables et de colonnes pour Unity Catalog avec dbxmetagen, révisez-les et appliquez-les.",
   "actions": {
-    "newRun": "__TODO__ New run",
-    "cancelRun": "__TODO__ Cancel run",
-    "deleteRun": "__TODO__ Delete run"
+    "newRun": "Nouvelle exécution",
+    "cancelRun": "Annuler l'exécution",
+    "deleteRun": "Supprimer l'exécution"
   },
   "list": {
-    "empty": "__TODO__ No Generation Runs yet. Start one to generate descriptions.",
-    "selectionMore": "__TODO__ {{first}} and {{count}} more",
+    "empty": "Aucune exécution de génération pour l'instant. Lancez-en une pour générer des descriptions.",
+    "selectionMore": "{{first}} et {{count}} de plus",
     "columns": {
-      "selection": "__TODO__ Selection",
-      "status": "__TODO__ Status",
-      "suggestions": "__TODO__ Suggestions",
-      "startedBy": "__TODO__ Started by",
-      "created": "__TODO__ Created"
+      "selection": "Sélection",
+      "status": "Statut",
+      "suggestions": "Suggestions",
+      "startedBy": "Lancée par",
+      "created": "Créée"
     }
   },
   "newRun": {
-    "title": "__TODO__ New Generation Run",
-    "description": "__TODO__ Pick catalogs, schemas, tables or views. A catalog or schema includes all of its tables.",
-    "selectObjects": "__TODO__ Objects to describe",
-    "catalogLoadFailed": "__TODO__ Failed to load catalogs",
-    "removeSelection": "__TODO__ Remove {{fqn}}",
-    "commentStyle": "__TODO__ Description style",
-    "model": "__TODO__ Serving endpoint",
-    "modelPlaceholder": "__TODO__ Default endpoint",
-    "regenerateExisting": "__TODO__ Regenerate existing descriptions",
-    "regenerateExistingHint": "__TODO__ By default only objects without a description get suggestions.",
-    "selectionRequired": "__TODO__ Select at least one object.",
-    "startFailed": "__TODO__ Failed to start the Generation Run",
-    "start": "__TODO__ Start run"
+    "title": "Nouvelle exécution de génération",
+    "description": "Choisissez des catalogues, schémas, tables ou vues. Un catalogue ou un schéma inclut toutes ses tables.",
+    "selectObjects": "Objets à décrire",
+    "catalogLoadFailed": "Échec du chargement des catalogues",
+    "removeSelection": "Retirer {{fqn}}",
+    "commentStyle": "Style de description",
+    "model": "Endpoint de serving",
+    "modelPlaceholder": "Endpoint par défaut",
+    "regenerateExisting": "Régénérer les descriptions existantes",
+    "regenerateExistingHint": "Par défaut, seuls les objets sans description reçoivent des suggestions.",
+    "selectionRequired": "Sélectionnez au moins un objet.",
+    "startFailed": "Échec du lancement de l'exécution de génération",
+    "start": "Lancer l'exécution"
   },
   "selectionType": {
-    "catalog": "__TODO__ Catalog",
-    "schema": "__TODO__ Schema",
-    "table": "__TODO__ Table"
+    "catalog": "Catalogue",
+    "schema": "Schéma",
+    "table": "Table"
   },
   "commentStyle": {
-    "concise": "__TODO__ Concise",
-    "standard": "__TODO__ Standard",
-    "detailed": "__TODO__ Detailed"
+    "concise": "Concis",
+    "standard": "Standard",
+    "detailed": "Détaillé"
   },
   "runStatus": {
-    "pending": "__TODO__ Pending",
-    "running": "__TODO__ Running",
-    "completed": "__TODO__ Completed",
-    "failed": "__TODO__ Failed",
-    "cancelled": "__TODO__ Cancelled"
+    "pending": "En attente",
+    "running": "En cours",
+    "completed": "Terminée",
+    "failed": "Échouée",
+    "cancelled": "Annulée"
   },
   "suggestionStatus": {
-    "pending": "__TODO__ Pending",
-    "accepted": "__TODO__ Accepted",
-    "rejected": "__TODO__ Rejected",
-    "applied": "__TODO__ Applied",
-    "conflict": "__TODO__ Conflict",
-    "not_applicable": "__TODO__ Not applicable",
-    "superseded": "__TODO__ Superseded"
+    "pending": "En attente",
+    "accepted": "Acceptée",
+    "rejected": "Rejetée",
+    "applied": "Appliquée",
+    "conflict": "Conflit",
+    "not_applicable": "Non applicable",
+    "superseded": "Remplacée"
   },
   "objectType": {
-    "table": "__TODO__ Table description",
-    "view": "__TODO__ View description",
-    "column": "__TODO__ Column description"
+    "table": "Description de la table",
+    "view": "Description de la vue",
+    "column": "Description de la colonne"
   },
   "detail": {
-    "runTitle": "__TODO__ Run {{id}}",
-    "startedBy": "__TODO__ Started by {{user}}",
-    "selection": "__TODO__ Selection",
-    "options": "__TODO__ Options",
-    "regenerateExisting": "__TODO__ regenerating existing",
-    "suggestionsTitle": "__TODO__ Description Suggestions",
-    "statusFilter": "__TODO__ Filter by status",
-    "allStatuses": "__TODO__ All statuses",
-    "noSuggestions": "__TODO__ No suggestions.",
-    "current": "__TODO__ Current",
-    "proposed": "__TODO__ Proposed",
-    "noDescription": "__TODO__ No description"
+    "runTitle": "Exécution {{id}}",
+    "startedBy": "Lancée par {{user}}",
+    "selection": "Sélection",
+    "options": "Options",
+    "regenerateExisting": "régénération des existantes",
+    "suggestionsTitle": "Suggestions de description",
+    "statusFilter": "Filtrer par statut",
+    "allStatuses": "Tous les statuts",
+    "noSuggestions": "Aucune suggestion.",
+    "current": "Actuelle",
+    "proposed": "Proposée",
+    "noDescription": "Aucune description"
   },
   "confirm": {
-    "cancel": "__TODO__ Cancel this Generation Run?",
-    "delete": "__TODO__ Delete this Generation Run and its suggestions?"
+    "cancel": "Annuler cette exécution de génération ?",
+    "delete": "Supprimer cette exécution de génération et ses suggestions ?"
   },
   "toast": {
-    "cancelFailed": "__TODO__ Failed to cancel the run",
-    "deleteFailed": "__TODO__ Failed to delete the run",
-    "deleted": "__TODO__ Generation Run deleted"
+    "cancelFailed": "Échec de l'annulation de l'exécution",
+    "deleteFailed": "Échec de la suppression de l'exécution",
+    "deleted": "Exécution de génération supprimée"
   }
 }

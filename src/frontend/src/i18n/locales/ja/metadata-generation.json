@@ -1,89 +1,89 @@
 {
-  "title": "__TODO__ Metadata Generation",
-  "subtitle": "__TODO__ Generate table and column descriptions for Unity Catalog with dbxmetagen, review them, and apply them.",
+  "title": "メタデータ生成",
+  "subtitle": "dbxmetagen で Unity Catalog のテーブルと列の説明を生成し、レビューして適用します。",
   "actions": {
-    "newRun": "__TODO__ New run",
-    "cancelRun": "__TODO__ Cancel run",
-    "deleteRun": "__TODO__ Delete run"
+    "newRun": "新規実行",
+    "cancelRun": "実行をキャンセル",
+    "deleteRun": "実行を削除"
   },
   "list": {
-    "empty": "__TODO__ No Generation Runs yet. Start one to generate descriptions.",
-    "selectionMore": "__TODO__ {{first}} and {{count}} more",
+    "empty": "生成実行はまだありません。説明を生成するには実行を開始してください。",
+    "selectionMore": "{{first}} ほか {{count}} 件",
     "columns": {
-      "selection": "__TODO__ Selection",
-      "status": "__TODO__ Status",
-      "suggestions": "__TODO__ Suggestions",
-      "startedBy": "__TODO__ Started by",
-      "created": "__TODO__ Created"
+      "selection": "選択",
+      "status": "ステータス",
+      "suggestions": "提案",
+      "startedBy": "開始者",
+      "created": "作成日時"
     }
   },
   "newRun": {
-    "title": "__TODO__ New Generation Run",
-    "description": "__TODO__ Pick catalogs, schemas, tables or views. A catalog or schema includes all of its tables.",
-    "selectObjects": "__TODO__ Objects to describe",
-    "catalogLoadFailed": "__TODO__ Failed to load catalogs",
-    "removeSelection": "__TODO__ Remove {{fqn}}",
-    "commentStyle": "__TODO__ Description style",
-    "model": "__TODO__ Serving endpoint",
-    "modelPlaceholder": "__TODO__ Default endpoint",
-    "regenerateExisting": "__TODO__ Regenerate existing descriptions",
-    "regenerateExistingHint": "__TODO__ By default only objects without a description get suggestions.",
-    "selectionRequired": "__TODO__ Select at least one object.",
-    "startFailed": "__TODO__ Failed to start the Generation Run",
-    "start": "__TODO__ Start run"
+    "title": "新しい生成実行",
+    "description": "カタログ、スキーマ、テーブル、またはビューを選択してください。カタログまたはスキーマには、そのすべてのテーブルが含まれます。",
+    "selectObjects": "説明を生成するオブジェクト",
+    "catalogLoadFailed": "カタログを読み込めませんでした",
+    "removeSelection": "{{fqn}} を削除",
+    "commentStyle": "説明のスタイル",
+    "model": "サービングエンドポイント",
+    "modelPlaceholder": "デフォルトのエンドポイント",
+    "regenerateExisting": "既存の説明を再生成する",
+    "regenerateExistingHint": "デフォルトでは、説明のないオブジェクトにのみ提案が作成されます。",
+    "selectionRequired": "少なくとも 1 つのオブジェクトを選択してください。",
+    "startFailed": "生成実行を開始できませんでした",
+    "start": "実行を開始"
   },
   "selectionType": {
-    "catalog": "__TODO__ Catalog",
-    "schema": "__TODO__ Schema",
-    "table": "__TODO__ Table"
+    "catalog": "カタログ",
+    "schema": "スキーマ",
+    "table": "テーブル"
   },
   "commentStyle": {
-    "concise": "__TODO__ Concise",
-    "standard": "__TODO__ Standard",
-    "detailed": "__TODO__ Detailed"
+    "concise": "簡潔",
+    "standard": "標準",
+    "detailed": "詳細"
   },
   "runStatus": {
-    "pending": "__TODO__ Pending",
-    "running": "__TODO__ Running",
-    "completed": "__TODO__ Completed",
-    "failed": "__TODO__ Failed",
-    "cancelled": "__TODO__ Cancelled"
+    "pending": "保留中",
+    "running": "実行中",
+    "completed": "完了",
+    "failed": "失敗",
+    "cancelled": "キャンセル済み"
   },
   "suggestionStatus": {
-    "pending": "__TODO__ Pending",
-    "accepted": "__TODO__ Accepted",
-    "rejected": "__TODO__ Rejected",
-    "applied": "__TODO__ Applied",
-    "conflict": "__TODO__ Conflict",
-    "not_applicable": "__TODO__ Not applicable",
-    "superseded": "__TODO__ Superseded"
+    "pending": "保留中",
+    "accepted": "承認済み",
+    "rejected": "却下",
+    "applied": "適用済み",
+    "conflict": "競合",
+    "not_applicable": "対象外",
+    "superseded": "置き換え済み"
   },
   "objectType": {
-    "table": "__TODO__ Table description",
-    "view": "__TODO__ View description",
-    "column": "__TODO__ Column description"
+    "table": "テーブルの説明",
+    "view": "ビューの説明",
+    "column": "列の説明"
   },
   "detail": {
-    "runTitle": "__TODO__ Run {{id}}",
-    "startedBy": "__TODO__ Started by {{user}}",
-    "selection": "__TODO__ Selection",
-    "options": "__TODO__ Options",
-    "regenerateExisting": "__TODO__ regenerating existing",
-    "suggestionsTitle": "__TODO__ Description Suggestions",
-    "statusFilter": "__TODO__ Filter by status",
-    "allStatuses": "__TODO__ All statuses",
-    "noSuggestions": "__TODO__ No suggestions.",
-    "current": "__TODO__ Current",
-    "proposed": "__TODO__ Proposed",
-    "noDescription": "__TODO__ No description"
+    "runTitle": "実行 {{id}}",
+    "startedBy": "開始者: {{user}}",
+    "selection": "選択",
+    "options": "オプション",
+    "regenerateExisting": "既存の説明を再生成",
+    "suggestionsTitle": "説明の提案",
+    "statusFilter": "ステータスで絞り込み",
+    "allStatuses": "すべてのステータス",
+    "noSuggestions": "提案はありません。",
+    "current": "現在",
+    "proposed": "提案",
+    "noDescription": "説明なし"
   },
   "confirm": {
-    "cancel": "__TODO__ Cancel this Generation Run?",
-    "delete": "__TODO__ Delete this Generation Run and its suggestions?"
+    "cancel": "この生成実行をキャンセルしますか？",
+    "delete": "この生成実行とその提案を削除しますか？"
   },
   "toast": {
-    "cancelFailed": "__TODO__ Failed to cancel the run",
-    "deleteFailed": "__TODO__ Failed to delete the run",
-    "deleted": "__TODO__ Generation Run deleted"
+    "cancelFailed": "実行をキャンセルできませんでした",
+    "deleteFailed": "実行を削除できませんでした",
+    "deleted": "生成実行を削除しました"
   }
 }

@@ -92,7 +92,7 @@
     "description": "Información sobre la aplicación y sus características."
   },
   "metadata-generation": {
-    "name": "__TODO__ Metadata Generation",
-    "description": "__TODO__ Generate, review and apply Unity Catalog descriptions with dbxmetagen."
+    "name": "Generación de metadatos",
+    "description": "Genere, revise y aplique descripciones de Unity Catalog con dbxmetagen."
   }
 }
