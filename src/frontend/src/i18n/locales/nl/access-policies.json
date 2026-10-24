@@ -245,7 +245,8 @@
     "linkedConcepts": "__TODO__ Linked concepts",
     "linkFailed": "__TODO__ Could not update concept link",
     "fromAccessGrant": "__TODO__ Recorded from an approved Access Grant",
-    "offerFor": "__TODO__ Terms of use (Offer) for data product"
+    "offerFor": "__TODO__ Terms of use (Offer) for data product",
+    "subjectMissing": "__TODO__ (product no longer exists)"
   },
   "releases": {
     "hint": "__TODO__ A release compiles all active policies for a target into concrete grants, diffs them against the Grant Ledger and ships the change through the Delivery Modes after review.",

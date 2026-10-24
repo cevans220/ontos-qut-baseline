@@ -245,7 +245,8 @@
     "linkedConcepts": "Linked concepts",
     "linkFailed": "Could not update concept link",
     "fromAccessGrant": "Recorded from an approved Access Grant",
-    "offerFor": "Terms of use (Offer) for data product"
+    "offerFor": "Terms of use (Offer) for data product",
+    "subjectMissing": "(product no longer exists)"
   },
   "releases": {
     "hint": "A release compiles all active policies for a target into concrete grants, diffs them against the Grant Ledger and ships the change through the Delivery Modes after review.",

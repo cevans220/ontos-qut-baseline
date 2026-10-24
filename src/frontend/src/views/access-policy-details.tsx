@@ -390,9 +390,13 @@ export default function AccessPolicyDetails() {
           <AlertCircle className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
           <AlertDescription className="text-indigo-800 dark:text-indigo-200">
             {t('access-policies:details.offerFor')}{' '}
-            <Link className="font-medium underline" to={`/data-products/${(entity as AccessPolicy).subject_entity_id}`}>
-              {(entity as AccessPolicy).subject_name || (entity as AccessPolicy).subject_entity_id}
-            </Link>
+            {(entity as AccessPolicy).subject_name ? (
+              <Link className="font-medium underline" to={`/data-products/${(entity as AccessPolicy).subject_entity_id}`}>
+                {(entity as AccessPolicy).subject_name}
+              </Link>
+            ) : (
+              <span className="font-medium">{t('access-policies:details.subjectMissing')}</span>
+            )}
           </AlertDescription>
         </Alert>
       )}
