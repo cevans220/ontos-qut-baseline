@@ -352,6 +352,32 @@ def normalize_policy(doc: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _inherited_rules(parent: Dict[str, Any], child: Dict[str, Any], kind: str) -> List[Dict[str, Any]]:
+    """Rules a child takes over from ``parent``.
+
+    An Offer proposes terms: a non-Offer child (Set / Agreement) inherits its prohibitions and
+    obligations — bound to the child's own assignees when the term names none — but never its
+    permissions, which would otherwise entitle everyone. The child states what it grants.
+    """
+    rules = [dict(r) for r in parent.get(kind) or []]
+    child_type = term_key(child.get("type") or child.get("@type")) or "Set"
+    if term_key(parent.get("type") or parent.get("@type")) != "Offer" or child_type == "Offer":
+        return rules
+    if kind == "permission":
+        return []
+    assignees: List[Any] = []
+    for r in child.get("permission") or []:
+        if r.get("assignee") is not None and r["assignee"] not in assignees:
+            assignees.append(r["assignee"])
+    out: List[Dict[str, Any]] = []
+    for r in rules:
+        if r.get("assignee") is not None or not assignees:
+            out.append(r)  # Unbound term with nobody to bind it to: applies to everyone (fail-safe).
+        else:
+            out.extend({**r, "assignee": a} for a in assignees)
+    return out
+
+
 def resolve_inheritance(
     doc: Dict[str, Any], lookup: Callable[[str], Optional[Dict[str, Any]]]
 ) -> Tuple[Dict[str, Any], List[str]]:
@@ -371,7 +397,7 @@ def resolve_inheritance(
                 continue
             parent = normalize_policy(parent) if "permission" not in parent or "type" not in parent else parent
             for kind in RULE_KINDS:
-                merged[kind] = list(merged.get(kind) or []) + [dict(r) for r in parent.get(kind) or []]
+                merged[kind] = list(merged.get(kind) or []) + _inherited_rules(parent, merged, kind)
             for p in parent.get("profile") or []:
                 if p not in merged["profile"]:
                     merged["profile"].append(p)

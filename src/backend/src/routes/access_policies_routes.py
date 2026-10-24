@@ -124,6 +124,18 @@ async def policy_validation(entity_id: str, request: Request, db: DBSessionDep, 
     }
 
 
+@router.get("/offers")
+async def offers_for_entity(request: Request, db: DBSessionDep, current_user: AuditCurrentUserDep,
+                            entity_type: str = Query(..., description="data_product"),
+                            entity_id: str = Query(...),
+                            include_inactive: bool = Query(False), _: bool = _READ):
+    """Offers (terms of use) stated for an entity, e.g. a Data Product's access terms."""
+    is_admin = await _is_admin(request, current_user)
+    rows = [r for r in manager.offers_for(db, entity_type, entity_id, active_only=not include_inactive)
+            if manager._visible(r, _email(current_user), is_admin)]
+    return [manager.to_read_dict(db, KIND_POLICY, r) for r in rows]
+
+
 # ------------------------------------------------- releases & ledger (Phase 2)
 
 def _grant_manager(delivery_service: Any) -> Any:

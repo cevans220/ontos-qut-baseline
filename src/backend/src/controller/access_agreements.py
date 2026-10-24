@@ -110,12 +110,26 @@ class AgreementService:
             for t in targets for a in actions
         ]}
         label = grant.entity_name or grant.entity_id
+        # The product's terms (its active Offers) bind this consumer. An Agreement records the deal as
+        # concluded, so the terms are snapshotted (ODRL inheritance resolved once, Offer-aware: the
+        # Offers' prohibitions / obligations bound to the grantee, never their permissions) — a later
+        # Offer change or retirement doesn't silently rewrite existing Agreements.
+        offers = self.policies.offers_for(db, grant.entity_type, grant.entity_id)
+        body = self.policies._normalize_rules("Agreement", odrl.DEFAULT_AUTHORED_CONFLICT, [], rules)
+        if offers:
+            by_uid = {o.uid: {"uid": o.uid, "type": "Offer", "conflict": o.conflict, "profile": [odrl.ONTOS_PROFILE],
+                              "inheritFrom": [], **(o.body or {})} for o in offers}
+            merged, _errors = odrl.resolve_inheritance(
+                {"uid": "urn:ontos:policy:new", "type": "Agreement", "conflict": odrl.DEFAULT_AUTHORED_CONFLICT,
+                 "profile": [odrl.ONTOS_PROFILE], "inheritFrom": list(by_uid), **body}, by_uid.get)
+            body = {k: merged.get(k) or [] for k in odrl.RULE_KINDS}
+        terms = "; terms from " + ", ".join(f"{o.name} v{o.version}" for o in offers) if offers else ""
         row = AccessPolicyDb(
             name=f"Agreement: {grant.grantee_email} → {label}",
             description=f"Access Grant {grant.id}: {grant.permission_level} on {grant.entity_type} '{label}'"
-                        + (f" until {expires}" if expires else ""),
+                        + (f" until {expires}" if expires else "") + terms,
             status=STATUS_ACTIVE, policy_type="Agreement", conflict=odrl.DEFAULT_AUTHORED_CONFLICT,
-            inherit_from=[], body=self.policies._normalize_rules("Agreement", odrl.DEFAULT_AUTHORED_CONFLICT, [], rules),
+            inherit_from=[], body=body,
             access_grant_id=str(grant.id),
             created_by=approved_by, submitted_by=requested_by, approved_by=approved_by,
         )
