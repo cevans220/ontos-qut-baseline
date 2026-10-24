@@ -297,3 +297,12 @@ def test_snowflake_target_compiles_its_refs_and_never_ships_directly(policies, r
     assert out.delivery_modes == ["manual"] and grants.calls == []
     with pytest.raises(AccessPolicyError):
         rm.live_diff(db_session, r.id, lambda *a: {"success": True, "grants": []})
+
+
+def test_snowflake_target_rejects_direct_and_untargeted_platforms_are_reported(policies, rm, db_session: Session):
+    bad = _target(policies, db_session, "sf", system="snowflake", modes=["direct"], activate=False)
+    assert any("directly" in p for p in policies.activation_problems(db_session, KIND_TARGET, bad))
+    _policy(policies, db_session, {"permission": [
+        {"target": "snowflake:db.s.t", "action": "read", "assignee": "group:g"}]}, "SF only")
+    issues = rm.compile(db_session, "uc")["issues"]
+    assert any(i["code"] == "no_target" for i in issues)

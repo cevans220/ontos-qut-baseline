@@ -114,11 +114,26 @@ class TargetAdapter:
         plan.abac = kept
         return before - len(plan.entitlements)
 
+    def scope_name(self, grant: uc.UCGrant) -> Optional[str]:
+        """The securable a ledger row is about, for scope checks (None = always in scope)."""
+        return grant.securable_name
+
     def grant_in_scope(self, grant: uc.UCGrant, scope: Sequence[str]) -> bool:
-        return not scope or any(inside(grant.securable_name, s) for s in scope)
+        name = self.scope_name(grant)
+        if not scope or name is None:
+            return True
+        if any(inside(name, s) for s in scope):
+            return True
+        # A parent privilege that only reaches an in-scope child (USE CATALOG / USAGE).
+        return grant.privilege in self.implied_privileges and any(inside(s, name) for s in scope)
+
+    def assume_preexisting(self, grant: uc.UCGrant) -> bool:
+        """Without a live read: does a grant to add probably exist already (→ never revoked later)?"""
+        return grant.implied
 
     # ---- hooks
-    def build(self, plan: EntitlementPlan, abac: Any, resolve_object_kind: Any = None) -> List[uc.UCGrant]:
+    def build(self, plan: EntitlementPlan, abac: Any, resolve_object_kind: Any = None,
+              target: Optional["ResolvedTarget"] = None) -> List[uc.UCGrant]:
         raise NotImplementedError
 
     def render_sql(self, diff: uc.GrantDiff) -> List[str]:
@@ -135,17 +150,13 @@ class UnityCatalogAdapter(TargetAdapter):
     asset_prefix = odrl.UC_PREFIX
     capabilities = frozenset({CAP_APPLY_GRANTS, CAP_READ_GRANTS, CAP_ABAC})
 
-    def grant_in_scope(self, grant: uc.UCGrant, scope: Sequence[str]) -> bool:
-        if not scope:
-            return True
-        name = uc.abac_ref(grant)["on_securable_fullname"] if grant.securable_type == uc.ABAC_POLICY \
-            else grant.securable_name
-        if any(inside(name, s) for s in scope):
-            return True
-        # USE CATALOG / USE SCHEMA on a parent is what reaches an in-scope child.
-        return grant.privilege in self.implied_privileges and any(inside(s, name) for s in scope)
+    def scope_name(self, grant: uc.UCGrant) -> Optional[str]:
+        if grant.securable_type == uc.ABAC_POLICY:
+            return uc.abac_ref(grant)["on_securable_fullname"]
+        return grant.securable_name
 
-    def build(self, plan: EntitlementPlan, abac: Any, resolve_object_kind: Any = None) -> List[uc.UCGrant]:
+    def build(self, plan: EntitlementPlan, abac: Any, resolve_object_kind: Any = None,
+              target: Optional["ResolvedTarget"] = None) -> List[uc.UCGrant]:
         return uc.build_grants(plan, resolve_object_kind) + uc.build_abac(plan, abac, resolve_object_kind)
 
     def render_sql(self, diff: uc.GrantDiff) -> List[str]:
@@ -161,19 +172,32 @@ def register_adapter(adapter: TargetAdapter) -> TargetAdapter:
 
 
 def get_adapter(system: str) -> Optional[TargetAdapter]:
+    _ensure_builtin_adapters()
     return _ADAPTERS.get(system)
 
 
 def adapters() -> List[TargetAdapter]:
+    _ensure_builtin_adapters()
     return [_ADAPTERS[k] for k in sorted(_ADAPTERS)]
 
 
+def adapter_for_ref(ref: str) -> Optional[TargetAdapter]:
+    return next((a for a in adapters() if a.owns(ref)), None)
+
+
 register_adapter(UnityCatalogAdapter())
+_builtins_loaded = False
 
 
-def _register_builtin_adapters() -> None:
+def _ensure_builtin_adapters() -> None:
+    """Register the adapters living in their own modules — lazily, so they can import this one."""
+    global _builtins_loaded
+    if _builtins_loaded:
+        return
+    _builtins_loaded = True
     from src.common.snowflake_policy_adapter import SnowflakeAdapter
-    register_adapter(SnowflakeAdapter())
+    if SnowflakeAdapter.system not in _ADAPTERS:
+        register_adapter(SnowflakeAdapter())
 
 
 @dataclass
@@ -189,6 +213,8 @@ class ResolvedTarget:
     drift_policy: str = DRIFT_REPORT
     entity_id: Optional[str] = None
     builtin: bool = False
+    # Non-secret adapter settings (e.g. Snowflake ``views``: object names to grant as views).
+    connection: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"key": self.key, "label": self.label, "system": self.adapter.system,
@@ -197,8 +223,6 @@ class ResolvedTarget:
                 "drift_policy": self.drift_policy, "entity_id": self.entity_id, "builtin": self.builtin,
                 "capabilities": sorted(self.adapter.capabilities)}
 
-
-_register_builtin_adapters()
 
 BUILTIN_UC = ResolvedTarget(key=uc.TARGET_UC, label="Unity Catalog", adapter=_ADAPTERS[uc.TARGET_UC], builtin=True)
 

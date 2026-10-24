@@ -186,7 +186,7 @@ class PolicyReleaseManager:
             out.append(pt.ResolvedTarget(
                 key=key, label=t.name, adapter=adapter, scope=list(t.scope or []),
                 delivery_modes=list(t.delivery_modes or []), reconcile_schedule=t.reconcile_schedule,
-                drift_policy=t.drift_policy or pt.DRIFT_REPORT, entity_id=t.id))
+                drift_policy=t.drift_policy or pt.DRIFT_REPORT, entity_id=t.id, connection=dict(t.connection or {})))
         # The unscoped built-in only stands in while no UC target exists at all: a deprecated one
         # still owns its securables, and bringing back "everything, any mode" would bypass it.
         if not any(t.system == pt.BUILTIN_UC.adapter.system for t in rows):
@@ -267,11 +267,15 @@ class PolicyReleaseManager:
             directory=lambda: self.policies.known_principals(db),
             now=now,
             abac=abac,
+            owns=adapter.owns,
         )
         for w in warnings:
             plan.issue("error", "inheritance", w)
+        self._note_untargeted(db, plan)
         pt.restrict(plan, resolved)
-        grants = adapter.build(plan, abac, resolve_object_kind)
+        # The object-kind resolver reads Unity Catalog: only meaningful for UC names.
+        grants = adapter.build(plan, abac, resolve_object_kind if adapter.system == pt.BUILTIN_UC.adapter.system
+                               else None, target=resolved)
         tracked = [_ledger_grant(r) for r in self.active_ledger(db, target)]
         desired = {g.key for g in grants}
         outside = [g for g in tracked if not adapter.grant_in_scope(g, resolved.scope)]
@@ -307,6 +311,16 @@ class PolicyReleaseManager:
             "source_policies": sources,
             "ledger_fingerprint": self._fingerprint(db, target),
         }
+
+    def _note_untargeted(self, db: Session, plan: Any) -> None:
+        """Warn when policies target a platform no active target compiles for (nothing would ship them)."""
+        covered = {t.adapter.system for t in self.targets(db)}
+        lost = sorted(ref for ref in plan.elsewhere
+                      if (a := pt.adapter_for_ref(ref)) is None or a.system not in covered)
+        if lost:
+            plan.issue("warning", "no_target",
+                       f"No active target compiles {', '.join(lost[:5])}{' …' if len(lost) > 5 else ''} — "
+                       "configure an Access Target for that platform")
 
     @staticmethod
     def _insert(db: Session, row: AccessPolicyReleaseDb, attempts: int = 5) -> AccessPolicyReleaseDb:
@@ -403,7 +417,8 @@ class PolicyReleaseManager:
         return adds, removes, untracks
 
     @staticmethod
-    def _preexisting(adds: List[uc.UCGrant], get_grants: Optional[Callable[[str, str], Dict[str, Any]]]) -> Tuple[List[str], bool]:
+    def _preexisting(adds: List[uc.UCGrant], get_grants: Optional[Callable[[str, str], Dict[str, Any]]],
+                     adapter: Optional[pt.TargetAdapter] = None) -> Tuple[List[str], bool]:
         """Which grants to add already exist on the platform (→ never revoked by Ontos later).
 
         Securables whose live grants can't be read fall back to the conservative rule: implied
@@ -421,7 +436,8 @@ class PolicyReleaseManager:
         for g in adds:
             granted = live.get((g.securable_type, g.securable_name))
             known = granted is not None
-            if (known and f"{g.principal.lower()}|{g.privilege}" in granted) or (not known and g.implied):
+            assumed = adapter.assume_preexisting(g) if adapter is not None else g.implied
+            if (known and f"{g.principal.lower()}|{g.privilege}" in granted) or (not known and assumed):
                 out.append("|".join(g.key))
         return out, bool(live) and len(live) == len(securables)
 
@@ -481,7 +497,7 @@ class PolicyReleaseManager:
             get_grants = getattr(getattr(delivery_service, "grant_manager", None), "get_grants", None)
 
         adds, removes, untracks = self._remaining(db, row)
-        preexisting, live_checked = self._preexisting(adds, get_grants)
+        preexisting, live_checked = self._preexisting(adds, get_grants, resolved.adapter)
         diff = uc.GrantDiff(add=adds, remove=removes, untrack=untracks)
         changes = diff.to_dict()
         changes["sql"] = resolved.adapter.render_sql(diff)

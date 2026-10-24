@@ -154,6 +154,8 @@ class EntitlementPlan:
     gated: List[GatedRule] = field(default_factory=list)
     obligations: List[Dict[str, Any]] = field(default_factory=list)
     issues: List[CompileIssue] = field(default_factory=list)
+    # Securables of other platforms this compile skipped (see ``compile_policies(owns=...)``).
+    elsewhere: Set[str] = field(default_factory=set)
     compiled_at: str = ""
 
     @property
@@ -321,6 +323,8 @@ class AssetSet:
     securables: Set[str] = field(default_factory=set)
     # Refs no target can compile (not a hierarchical securable IRI).
     foreign: Set[str] = field(default_factory=set)
+    # Securables of another platform than the one being compiled.
+    elsewhere: Set[str] = field(default_factory=set)
     inexact: Optional[str] = None
 
 
@@ -349,8 +353,15 @@ def securable_covers(outer: str, inner: str) -> bool:
 
 
 class _Assets:
-    def __init__(self, collections: Dict[str, odrl.CollectionDef]):
+    def __init__(self, collections: Dict[str, odrl.CollectionDef], owns: Optional[Callable[[str], bool]] = None):
         self.collections = collections
+        self.owns = owns
+
+    def only_elsewhere(self, ref: Any, plan: "EntitlementPlan") -> bool:
+        """The rule targets only another platform's securables: not this compile's business."""
+        a = self.resolve(ref)
+        plan.elsewhere |= a.elsewhere
+        return bool(a.elsewhere) and not (a.securables or a.foreign or a.inexact)
 
     def resolve(self, ref: Any, depth: int = 0) -> AssetSet:
         if ref is None:
@@ -378,12 +389,13 @@ class _Assets:
             return AssetSet(inexact=f"asset collection {ref} has no active version")
         return self._members([ref])
 
-    @staticmethod
-    def _members(members: List[str]) -> AssetSet:
+    def _members(self, members: List[str]) -> AssetSet:
         out = AssetSet()
         for m in members:
             c = canonical_securable(m)
-            if c:
+            if c and self.owns is not None and not self.owns(c):
+                out.elsewhere.add(c)
+            elif c:
                 out.securables.add(c)
             else:
                 out.foreign.add(m)
@@ -454,12 +466,17 @@ def compile_policies(
     directory: Optional[PrincipalDirectory] = None,
     now: Optional[datetime] = None,
     abac: Optional[AbacConfig] = None,
+    owns: Optional[Callable[[str], bool]] = None,
 ) -> EntitlementPlan:
-    """Active policies → :class:`EntitlementPlan` (see the module docstring for the semantics)."""
+    """Active policies → :class:`EntitlementPlan` (see the module docstring for the semantics).
+
+    ``owns`` limits the compile to one platform's securables: rules that only target another
+    platform are skipped entirely, so their issues never block this platform's release.
+    """
     now = now or datetime.now(timezone.utc)
     plan = EntitlementPlan(compiled_at=_iso(now) or "")
     parties = _Parties(audiences or {}, directory)
-    assets = _Assets(asset_collections or {})
+    assets = _Assets(asset_collections or {}, owns)
 
     candidates: List[Entitlement] = []
     prohibitions: List[_Prohibition] = []
@@ -473,6 +490,8 @@ def compile_policies(
         is_offer = norm.get("type") == "Offer"
         for i, rule in enumerate(norm.get("permission") or []):
             src = _rule_ref(p, uid, "permission", i, rule)
+            if owns is not None and assets.only_elsewhere(rule.get("target"), plan):
+                continue
             if is_offer:
                 # Offered terms entitle nobody; access comes from the Agreement concluded on them.
                 plan.gated.append(GatedRule(src, GATE_WORKFLOW, "offered — granted through an Agreement"))
@@ -480,6 +499,8 @@ def compile_policies(
             candidates.extend(_compile_permission(rule, src, parties, assets, now, plan, p.fulfilled_duties, abac))
         for i, rule in enumerate(norm.get("prohibition") or []):
             src = _rule_ref(p, uid, "prohibition", i, rule)
+            if owns is not None and assets.only_elsewhere(rule.get("target"), plan):
+                continue
             if is_offer and rule.get("assignee") is None:
                 # A product's terms bind its consumers through their Agreements (snapshotted there).
                 plan.issue(SEVERITY_INFO, "offer_term", f"{src.label()} binds consumers via their Agreements", src)

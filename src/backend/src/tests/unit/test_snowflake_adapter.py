@@ -75,3 +75,57 @@ def test_prohibitions_do_not_cross_platforms():
                   "prohibition": [{"target": "uc:db.s.t", "action": "read", "assignee": "group:g"}]})
     SF.own_plan(plan)
     assert [e.securable for e in plan.entitlements] == ["snowflake:db.s.t"]
+
+
+# ------------------------------------------------------------ /review findings (P4b)
+
+def test_adapter_module_imports_first_in_a_fresh_interpreter():
+    import subprocess
+    import sys
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[3]
+    out = subprocess.run([sys.executable, "-c", "import src.common.snowflake_policy_adapter as m; "
+                          "from src.common import policy_targets as pt; assert pt.get_adapter('snowflake')"],
+                         cwd=root, capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+
+
+def test_derived_roles_are_per_target():
+    assert sf.derived_role("user:a@x.com", "sf-a") != sf.derived_role("user:a@x.com", "sf-b")
+
+
+def test_database_future_grants_are_repeated_on_schemas_with_their_own():
+    plan = _plan({"permission": [{"target": "snowflake:db", "action": "read", "assignee": "group:a"},
+                                 {"target": "snowflake:db.s", "action": "read", "assignee": "group:b"}]})
+    SF.own_plan(plan)
+    keys = _keys(SF.build(plan, None))
+    assert ("A", "schema:tables:future", "db.s", "SELECT") in keys
+    assert any(i.code == "snowflake_future_precedence" for i in plan.issues)
+
+
+def test_listed_views_are_granted_on_view():
+    plan = _plan({"permission": [{"target": "snowflake:db.s.v", "action": "read", "assignee": "group:a"}]})
+    SF.own_plan(plan)
+    target = pt.ResolvedTarget(key="sf", label="SF", adapter=SF, connection={"views": ["DB.S.V"]})
+    grants = SF.build(plan, None, target=target)
+    assert ("A", "view", "db.s.v", "SELECT") in _keys(grants)
+    assert 'GRANT SELECT ON VIEW "DB"."S"."V" TO ROLE "A";' in SF.render_sql(uc.diff_grants(grants, []))
+
+
+def test_only_plain_usage_for_shared_roles_is_assumed_preexisting():
+    plan = _plan({"permission": [{"target": "snowflake:db", "action": "read", "assignee": "group:a"},
+                                 {"target": "snowflake:db.s.t", "action": "read", "assignee": "user:u@x.com"}]})
+    SF.own_plan(plan)
+    assumed = {(g.principal, g.securable_type) for g in SF.build(plan, None) if SF.assume_preexisting(g)}
+    assert assumed == {("A", "database")}
+
+
+def test_platform_scoped_compile_skips_other_platforms_issues():
+    doc = {"uid": "urn:ontos:policy:p1", "@type": "Set", "conflict": "prohibit",
+           "permission": [{"target": "uc:main.s.t", "action": "read", "assignee": "group:g"},
+                          {"target": "snowflake:db.s.t", "action": "read", "assignee": "group:g"}],
+           "prohibition": [{"target": "uc:main.s", "action": "read", "assignee": "group:g"}]}
+    plan = compile_policies([PolicyInput(doc=doc, id="p1", name="P", version="1.0.0")], audiences={},
+                            asset_collections={}, directory=lambda: [], owns=SF.owns)
+    assert not plan.has_errors and [e.securable for e in plan.entitlements] == ["snowflake:db.s.t"]
+    assert plan.elsewhere == {"uc:main.s.t", "uc:main.s"}

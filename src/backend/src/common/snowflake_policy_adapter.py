@@ -6,7 +6,7 @@ the target (Lars, 2026-10-17: "joint groups are an adapter detail"):
 
 * **Principals → roles.** ``group:X`` → the role ``X`` (SCIM provisioning creates a
   role per IdP group with the group's name); everyone → ``PUBLIC``; a user or
-  service principal gets a derived role ``ONTOS_U_<hash>`` that Ontos creates and
+  service principal gets a derived role ``ONTOS_U_<hash>`` per target that Ontos creates and
   grants to that user. Role memberships are ledger rows (securable_type ``role``)
   like any grant, so they are diffed, revoked and expire the same way.
 * **Containers → ALL + FUTURE grants.** ``read`` on a schema becomes SELECT on all
@@ -27,7 +27,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from src.common import odrl
 from src.common import uc_policy_adapter as uc
-from src.common.odrl_compiler import EVERYONE, GATE_UNSUPPORTED, SEVERITY_ERROR, EntitlementPlan, GatedRule
+from src.common.odrl_compiler import (
+    EVERYONE,
+    GATE_UNSUPPORTED,
+    SEVERITY_ERROR,
+    SEVERITY_INFO,
+    EntitlementPlan,
+    GatedRule,
+)
 from src.common.policy_targets import TargetAdapter
 
 SYSTEM = "snowflake"
@@ -37,6 +44,7 @@ DERIVED_ROLE_PREFIX = "ONTOS_U_"
 KIND_DATABASE = "database"
 KIND_SCHEMA = "schema"
 KIND_TABLE = "table"
+KIND_VIEW = "view"
 KIND_ROLE = "role"  # role membership rows: principal = user, securable_name = role
 PRIV_MEMBER = "MEMBER"
 
@@ -50,7 +58,7 @@ _READ = {
 }
 _WRITE_PRIVS = ("INSERT", "UPDATE", "DELETE", "TRUNCATE")
 PRIVILEGE_MAP: Dict[str, Dict[str, List[Tuple[str, str]]]] = {
-    "read": _READ,
+    "read": {**_READ, KIND_VIEW: [("view", "SELECT")]},
     "modify": {
         KIND_TABLE: [("table", p) for p in _WRITE_PRIVS],
         KIND_SCHEMA: [(f"schema:tables:{w}", p) for w in ("all", "future") for p in _WRITE_PRIVS],
@@ -62,6 +70,7 @@ PRIVILEGE_MAP: Dict[str, Dict[str, List[Tuple[str, str]]]] = {
     },
     "use": {
         KIND_TABLE: [("table", "ALL PRIVILEGES")],
+        KIND_VIEW: [("view", "ALL PRIVILEGES")],
     },
 }
 
@@ -75,12 +84,13 @@ def ident(name: str) -> str:
     return ".".join('"' + part.upper().replace('"', '""') + '"' for part in name.split("."))
 
 
-def derived_role(principal: str) -> str:
-    digest = hashlib.sha1(odrl.strip_principal_prefix(principal).encode()).hexdigest()[:10].upper()
-    return DERIVED_ROLE_PREFIX + digest
+def derived_role(principal: str, target_key: str = "") -> str:
+    """One role per (user, target): targets with disjoint scopes never share (or revoke) a membership."""
+    seed = f"{target_key}|{odrl.strip_principal_prefix(principal)}"
+    return DERIVED_ROLE_PREFIX + hashlib.sha1(seed.encode()).hexdigest()[:10].upper()
 
 
-def role_for(principal: str) -> Tuple[str, Optional[str]]:
+def role_for(principal: str, target_key: str = "") -> Tuple[str, Optional[str]]:
     """(role that receives the grants, user to grant the role to — None for groups / PUBLIC)."""
     if principal == EVERYONE:
         return PUBLIC_ROLE, None
@@ -88,11 +98,11 @@ def role_for(principal: str) -> Tuple[str, Optional[str]]:
     if low.startswith("group:"):
         return principal.split(":", 1)[1].upper(), None
     user = principal.split(":", 1)[1] if ":" in principal else principal
-    return derived_role(principal), user
+    return derived_role(principal, target_key), user
 
 
 def _on_clause(securable_type: str, name: str) -> str:
-    if securable_type in (KIND_TABLE, KIND_SCHEMA, KIND_DATABASE):
+    if securable_type in (KIND_TABLE, KIND_VIEW, KIND_SCHEMA, KIND_DATABASE):
         return f"{securable_type.upper()} {ident(name)}"
     scope, plural, which = securable_type.split(":")
     bulk = "ALL" if which == "all" else "FUTURE"
@@ -106,45 +116,38 @@ class SnowflakeAdapter(TargetAdapter):
     capabilities = frozenset()  # no Direct apply / live read / ABAC yet
     implied_privileges = ("USAGE",)
 
-    def grant_in_scope(self, grant: uc.UCGrant, scope: Any) -> bool:
-        if not scope or grant.securable_type == KIND_ROLE:
-            # Role memberships follow the object grants that need them (diffed globally).
-            return True
-        from src.common.policy_targets import inside
-        if any(inside(grant.securable_name, s) for s in scope):
-            return True
-        return grant.privilege in self.implied_privileges and any(inside(s, grant.securable_name) for s in scope)
+    def scope_name(self, grant: uc.UCGrant) -> Optional[str]:
+        # A membership in this target's own derived role belongs to this target.
+        return None if grant.securable_type == KIND_ROLE else grant.securable_name
 
-    def build(self, plan: EntitlementPlan, abac: Any, resolve_object_kind: Any = None) -> List[uc.UCGrant]:
+    def assume_preexisting(self, grant: uc.UCGrant) -> bool:
+        # Only plain USAGE for a group / PUBLIC role is plausibly granted outside Ontos; bulk
+        # (ALL / FUTURE) grants and anything on an Ontos-derived role are Ontos-made → revocable.
+        return (grant.implied and grant.securable_type in (KIND_DATABASE, KIND_SCHEMA)
+                and not grant.principal.startswith(DERIVED_ROLE_PREFIX))
+
+    def build(self, plan: EntitlementPlan, abac: Any, resolve_object_kind: Any = None,
+              target: Any = None) -> List[uc.UCGrant]:
         for rule in plan.abac:
             # A mask stands in for a denial, a row filter narrows a grant: dropping either fails open.
             plan.issue(SEVERITY_ERROR, "abac_unsupported_target",
                        f"{rule.source.label() if rule.source else rule.kind}: Snowflake targets can't enforce "
                        f"{rule.kind.replace('_', ' ')}s yet", rule.source)
-        grants: Dict[uc.GrantKey, uc.UCGrant] = {}
-
-        def add(principal: str, stype: str, name: str, priv: str, expires: Optional[str], implied: bool,
-                src: Optional[Dict[str, Any]]) -> None:
-            key = (principal, stype, name, priv)
-            g = grants.get(key)
-            if g is None:
-                grants[key] = uc.UCGrant(principal, stype, name, priv, expires, implied, [src] if src else [])
-                return
-            g.expires_at = uc._merge_expiry(g.expires_at, expires)
-            g.implied = g.implied and implied
-            if src and src not in g.sources:
-                g.sources.append(src)
-
+        key = target.key if target is not None else ""
+        connection = (target.connection if target is not None else None) or {}
+        views = {str(v).strip().lower() for v in connection.get("views") or []}
+        acc = uc.GrantAccumulator()
+        add = acc.add
         for e in plan.entitlements:
             name = self.native_name(e.securable)
-            kind = _kind(name)
+            kind = KIND_VIEW if name in views else _kind(name)
             privileges = PRIVILEGE_MAP.get(e.action, {}).get(kind)
             if not privileges:
                 if e.source:
                     plan.gated.append(GatedRule(e.source, GATE_UNSUPPORTED,
                                                 f"action '{e.action}' has no Snowflake privilege on a {kind}"))
                 continue
-            role, user = role_for(e.principal)
+            role, user = role_for(e.principal, key)
             src = e.source.to_dict() if e.source else None
             for stype, priv in privileges:
                 add(role, stype, name, priv, e.expires_at, False, src)
@@ -157,10 +160,37 @@ class SnowflakeAdapter(TargetAdapter):
                 add(role, "database:schemas:all", parts[0], "USAGE", e.expires_at, True, src)
                 add(role, "database:schemas:future", parts[0], "USAGE", e.expires_at, True, src)
             if user:
-                # Explicit, not implied: Ontos made the derived role, so the membership is revoked with it
-                # (implied rows count as pre-existing when live grants can't be read).
+                # Explicit, not implied: Ontos made the derived role, so the membership is revoked with it.
                 add(user, KIND_ROLE, role, PRIV_MEMBER, e.expires_at, False, src)
-        return sorted(grants.values(), key=lambda g: g.key)
+        self._future_precedence(acc, plan)
+        if any(_kind(self.native_name(e.securable)) == KIND_TABLE and self.native_name(e.securable) not in views
+               for e in plan.entitlements):
+            plan.issue(SEVERITY_INFO, "snowflake_objects_as_tables",
+                       "Snowflake objects are granted as tables; list views in the target's connection "
+                       "('views') so they are granted ON VIEW")
+        return acc.sorted()
+
+    @staticmethod
+    def _future_precedence(acc: uc.GrantAccumulator, plan: EntitlementPlan) -> None:
+        """Schema-level FUTURE grants override database-level ones for that schema (Snowflake rule):
+        repeat each database-level future grant on the schemas that have their own."""
+        schema_future = {(n, t.split(":")[1]) for (_, t, n, _) in acc.grants if t.startswith("schema:") and t.endswith(":future")}
+        copied = 0
+        for g in list(acc.grants.values()):
+            if not (g.securable_type.startswith("database:") and g.securable_type.endswith(":future")):
+                continue
+            plural = g.securable_type.split(":")[1]
+            if plural == "schemas":
+                continue
+            for schema, p in schema_future:
+                if p == plural and schema.split(".")[0] == g.securable_name:
+                    for s in g.sources or [None]:
+                        acc.add(g.principal, f"schema:{plural}:future", schema, g.privilege, g.expires_at, False, s)
+                    copied += 1
+        if copied:
+            plan.issue(SEVERITY_INFO, "snowflake_future_precedence",
+                       f"{copied} database-level future grant(s) repeated on schemas with their own future grants "
+                       "(Snowflake applies only the schema-level ones there)")
 
     def render_sql(self, diff: uc.GrantDiff) -> List[str]:
         """Runbook / CI script, fail-safe order: memberships off, revokes, roles, grants, memberships on."""
