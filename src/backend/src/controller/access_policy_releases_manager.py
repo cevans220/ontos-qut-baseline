@@ -101,6 +101,17 @@ def _key(row: Any) -> uc.GrantKey:
     return (row.principal, row.securable_type, row.securable_name, row.privilege)
 
 
+def abac_config() -> Any:
+    """UC ABAC strategies enabled by configuration (off unless the UDFs are configured)."""
+    from src.common.config import get_settings
+    from src.common.odrl_compiler import AbacConfig
+
+    st = get_settings()
+    return AbacConfig(mask_function=getattr(st, "ACCESS_POLICIES_ABAC_MASK_FUNCTION", None) or None,
+                      row_filter_function=getattr(st, "ACCESS_POLICIES_ABAC_ROW_FILTER_FUNCTION", None) or None,
+                      spatial_tag=getattr(st, "ACCESS_POLICIES_SPATIAL_COLUMN_TAG", None) or "region")
+
+
 class PolicyReleaseManager:
     def __init__(self, policies: Optional[AccessPoliciesManager] = None):
         self.policies = policies or AccessPoliciesManager()
@@ -156,6 +167,7 @@ class PolicyReleaseManager:
                 now: Optional[datetime] = None) -> Dict[str, Any]:
         """Compile active policies for ``target`` and diff against the ledger (no writes)."""
         self._target(target)
+        abac = abac_config()
         inputs, sources, warnings = self._active_policy_inputs(db)
         plan = compile_policies(
             inputs,
@@ -163,17 +175,18 @@ class PolicyReleaseManager:
             asset_collections=self.policies._collection_defs(db, KIND_ASSET_COLLECTION),
             directory=lambda: self.policies.known_principals(db),
             now=now,
+            abac=abac,
         )
         for w in warnings:
             plan.issue("error", "inheritance", w)
-        grants = uc.build_grants(plan, resolve_object_kind)
+        grants = uc.build_grants(plan, resolve_object_kind) + uc.build_abac(plan, abac)
         diff = uc.diff_grants(grants, [_ledger_grant(r) for r in self.active_ledger(db, target)])
         changes = diff.to_dict()
         changes["sql"] = uc.render_sql(diff)
         ir = plan.to_dict()
         return {
             "target": target,
-            "plan": {"grants": [g.to_dict() for g in grants], "entitlements": ir["entitlements"],
+            "plan": {"grants": [g.to_dict() for g in grants], "entitlements": ir["entitlements"], "abac": ir["abac"],
                      "gated": ir["gated"], "obligations": ir["obligations"], "compiled_at": ir["compiled_at"]},
             "changes": changes,
             "issues": ir["issues"],
@@ -279,7 +292,7 @@ class PolicyReleaseManager:
         Ontos, e.g. to ``account users``), explicit privileges as Ontos-made.
         """
         live: Dict[Tuple[str, str], Optional[set]] = {}
-        securables = sorted({(g.securable_type, g.securable_name) for g in adds})
+        securables = sorted({(g.securable_type, g.securable_name) for g in adds if g.securable_type != uc.ABAC_POLICY})
         results = uc.read_live_grants(securables[:LIVE_DIFF_MAX_SECURABLES], get_grants) if get_grants else {}
         for (stype, sname), res in results.items():
             if res.get("success"):
@@ -358,6 +371,10 @@ class PolicyReleaseManager:
                            f"{len(adds)} to grant, {len(removes)} to revoke.",
                 "grant": uc.group_for_apply(adds),
                 "revoke": uc.group_for_apply(removes),
+                "abac_create": [{**g.spec, "ledger_key": list(g.key)} for g in adds
+                                if g.securable_type == uc.ABAC_POLICY and g.spec],
+                "abac_drop": [{**uc.abac_ref(g), "ledger_key": list(g.key)} for g in removes
+                              if g.securable_type == uc.ABAC_POLICY],
                 "sql": changes["sql"],
                 "link": f"/access-policies/releases/{row.id}",
             },
@@ -398,9 +415,13 @@ class PolicyReleaseManager:
                          removes: List[uc.UCGrant]) -> Tuple[List[uc.UCGrant], List[uc.UCGrant]]:
         ok: Dict[str, set] = {"grant": set(), "revoke": set()}
         for it in items:
-            if it.get("success"):
-                for priv in it.get("privileges") or []:
-                    ok[it["op"]].add((it["principal"], it["securable_type"], it["securable_name"], priv))
+            if not it.get("success"):
+                continue
+            if it["op"] in ("abac_create", "abac_drop"):
+                ok["grant" if it["op"] == "abac_create" else "revoke"].add(tuple(it.get("ledger_key") or ()))
+                continue
+            for priv in it.get("privileges") or []:
+                ok[it["op"]].add((it["principal"], it["securable_type"], it["securable_name"], priv))
         return [g for g in adds if g.key in ok["grant"]], [g for g in removes if g.key in ok["revoke"]]
 
     def confirm_applied(self, db: Session, release_id: str, user: Optional[str],

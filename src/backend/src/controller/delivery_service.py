@@ -335,12 +335,20 @@ class DeliveryService:
         revoke carries explicit privileges (an empty list would revoke everything).
         """
         items: List[Dict[str, Any]] = []
-        for op, entries in (("revoke", data.get("revoke") or []), ("grant", data.get("grant") or [])):
+        # Fail-safe order: new restrictions (ABAC masks / filters) first, then revokes, grants,
+        # and dropping restrictions last.
+        for op, entries in (("abac_create", data.get("abac_create") or []), ("revoke", data.get("revoke") or []),
+                            ("grant", data.get("grant") or []), ("abac_drop", data.get("abac_drop") or [])):
             for entry in entries:
                 if op == "revoke" and not entry.get("privileges"):
                     items.append({"op": op, **entry, "success": False, "error": "Refusing revoke without privileges"})
                     continue
-                fn = self._grant_manager.apply_revoke if op == "revoke" else self._grant_manager.apply_grant
+                fn = {"revoke": self._grant_manager.apply_revoke, "grant": self._grant_manager.apply_grant,
+                      "abac_create": getattr(self._grant_manager, "apply_abac_policy", None),
+                      "abac_drop": getattr(self._grant_manager, "drop_abac_policy", None)}[op]
+                if fn is None:
+                    items.append({"op": op, **entry, "success": False, "error": "ABAC not supported by grant manager"})
+                    continue
                 res = fn(entry, dry_run=dry_run)
                 items.append({"op": op, **entry, "success": bool(res.get("success")), "error": res.get("error")})
         return {"success": all(i["success"] for i in items), "items": items,
