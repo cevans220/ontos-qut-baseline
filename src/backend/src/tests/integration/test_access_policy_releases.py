@@ -337,13 +337,17 @@ def test_abac_policies_are_delivered_tracked_and_dropped(policies, rm, db_sessio
     from src.common.config import get_settings
     st = get_settings()
     monkeypatch.setattr(st, "ACCESS_POLICIES_ABAC_ROW_FILTER_FUNCTION", "gov.abac.region_eq", raising=False)
+    import src.controller.access_policy_releases_manager as arm
+    monkeypatch.setattr(arm, "column_tag_checker", lambda settings: (lambda table, tag: True))
     p = _active_policy(policies, db_session, {"permission": [{
         "target": "uc:main.sales.orders", "action": "read", "assignee": "group:eu",
         "constraint": [{"leftOperand": "spatial", "operator": "eq", "rightOperand": "EU"}]}]})
     grants = AbacGrants()
     r = rm.deliver(db_session, _approved_release(rm, db_session).id, ADMIN, Delivery([DeliveryMode.DIRECT], grants))
     assert r.status == "applied" and grants.calls[0][0] == "abac_create"
-    assert any(x["securable_type"] == "abac_policy" for x in rm.ledger(db_session, "uc"))
+    abac_rows = [x for x in rm.ledger(db_session, "uc") if x["securable_type"] == "abac_policy"]
+    assert abac_rows
+    assert "ABAC policies to create" in rm._summary(r)
     assert any(s.startswith("CREATE POLICY") for s in r.changes["sql"])
     policies.change_status(db_session, KIND_POLICY, p.id, "deprecated", AUTHOR)
     grants.calls.clear()

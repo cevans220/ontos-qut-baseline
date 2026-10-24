@@ -9,7 +9,7 @@ Updated: 2026-01-24 14:47
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from src.common.config import Settings, get_settings
 from src.common.logging import get_logger
@@ -343,13 +343,14 @@ class DeliveryService:
                 if op == "revoke" and not entry.get("privileges"):
                     items.append({"op": op, **entry, "success": False, "error": "Refusing revoke without privileges"})
                     continue
-                fn = {"revoke": self._grant_manager.apply_revoke, "grant": self._grant_manager.apply_grant,
-                      "abac_create": getattr(self._grant_manager, "apply_abac_policy", None),
-                      "abac_drop": getattr(self._grant_manager, "drop_abac_policy", None)}[op]
-                if fn is None:
-                    items.append({"op": op, **entry, "success": False, "error": "ABAC not supported by grant manager"})
+                if op == "grant" and any(i["op"] == "abac_create" and not i["success"] for i in items):
+                    # A grant may rely on a restriction (mask / row filter) that failed: withhold it.
+                    items.append({"op": op, **entry, "success": False,
+                                  "error": "Withheld: an ABAC restriction in this release failed"})
                     continue
-                res = fn(entry, dry_run=dry_run)
+                method = {"revoke": "apply_revoke", "grant": "apply_grant",
+                          "abac_create": "apply_abac_policy", "abac_drop": "drop_abac_policy"}[op]
+                res = getattr(self._grant_manager, method)(entry, dry_run=dry_run)
                 items.append({"op": op, **entry, "success": bool(res.get("success")), "error": res.get("error")})
         return {"success": all(i["success"] for i in items), "items": items,
                 "applied": sum(1 for i in items if i["success"]), "failed": sum(1 for i in items if not i["success"])}

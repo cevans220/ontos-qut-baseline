@@ -5,7 +5,8 @@ from src.common import uc_policy_adapter as uc
 from src.common.odrl_compiler import AbacConfig, PolicyInput, compile_policies
 
 NOW = datetime(2026, 10, 24, tzinfo=timezone.utc)
-ABAC = AbacConfig(mask_function="gov.abac.mask", row_filter_function="gov.abac.region_eq", spatial_tag="region")
+ABAC = AbacConfig(mask_function="gov.abac.mask", row_filter_function="gov.abac.region_eq", spatial_tag="region",
+                  has_tagged_column=lambda table, tag: True)
 MASK = {"prohibition": [{"target": "uc:main.sales", "action": "read", "assignee": "group:contractors",
                          "constraint": [{"leftOperand": "ontos:columnTag", "operator": "eq", "rightOperand": "pii=ssn"}]}]}
 REGION = {"permission": [{"target": "uc:main.sales.orders", "action": "read", "assignee": "group:eu_analysts",
@@ -73,3 +74,83 @@ def test_policy_info_for_the_sdk():
     info = _abac_policy_info(spec)
     assert info.policy_type.value == "POLICY_TYPE_ROW_FILTER" and info.row_filter.function_name == "gov.abac.region_eq"
     assert info.match_columns[0].condition == "has_tag('region')" and info.row_filter.using[1].constant == "EU"
+
+
+
+# ------------------------------------------------------------ /review findings (P3d)
+
+def _perm(target, region=None, principal="group:eu"):
+    c = [{"leftOperand": "spatial", "operator": "eq", "rightOperand": region}] if region else []
+    return {"target": target, "action": "read", "assignee": principal, "constraint": c}
+
+
+def test_row_filter_needs_a_verified_tagged_column_on_a_table():
+    for cfg in (AbacConfig(row_filter_function="f", has_tagged_column=lambda t, g: False),
+                AbacConfig(row_filter_function="f", has_tagged_column=lambda t, g: None),
+                AbacConfig(row_filter_function="f")):
+        plan = _plan({"permission": [_perm("uc:main.sales.orders", "EU")]}, cfg)
+        assert plan.entitlements == [] and plan.abac == [] and [g.gate for g in plan.gated] == ["abac"]
+    plan = _plan({"permission": [_perm("uc:main.sales", "EU")]})  # schema target
+    assert plan.entitlements == []
+
+
+def test_several_regions_are_withheld_and_unconditional_access_needs_no_filter():
+    plan = _plan({"permission": [_perm("uc:main.sales.orders", "EU"), _perm("uc:main.sales.orders", "US")]})
+    assert plan.entitlements == [] and plan.abac == []
+    plan = _plan({"permission": [_perm("uc:main.sales.orders", "EU"), _perm("uc:main.sales")]})
+    assert plan.abac == [] and {e.row_filter for e in plan.entitlements} == {None}
+
+
+def test_only_exact_read_prohibitions_become_masks_and_perm_overrides():
+    use = {"prohibition": [{**MASK["prohibition"][0], "action": "use"}],
+           "permission": [{"target": "uc:main.sales", "action": "modify", "assignee": "group:contractors"}]}
+    plan = _plan(use)
+    assert plan.abac == [] and plan.entitlements == []  # broader deny stays fail-closed
+    perm = compile_policies([PolicyInput(doc={"uid": "urn:ontos:policy:p", "type": "Set", "conflict": "perm", **MASK,
+                                              "permission": [{"target": "uc:main.sales", "action": "read",
+                                                              "assignee": "group:contractors"}]},
+                                         id="p", name="P", version="1.0.0")], now=NOW, abac=ABAC)
+    assert perm.abac == []
+
+
+def test_unbuildable_abac_policy_blocks_the_release():
+    plan = _plan(MASK | {"prohibition": [{**MASK["prohibition"][0], "target": "uc:main.sales.files"}]})
+    uc.build_abac(plan, ABAC, resolve_object_kind=lambda n: "volume")
+    assert plan.has_errors
+
+
+def test_failed_restriction_withholds_grants():
+    from types import SimpleNamespace
+
+    from src.controller.delivery_service import (
+        DeliveryChangeType,
+        DeliveryMode,
+        DeliveryPayload,
+        DeliveryService,
+    )
+
+    class G:
+        def __init__(self):
+            self.calls = []
+
+        def apply_abac_policy(self, spec, dry_run=False):
+            return {"success": False, "error": "ABAC beta disabled"}
+
+        def apply_grant(self, data, dry_run=False):
+            self.calls.append("grant")
+            return {"success": True}
+
+        def apply_revoke(self, data, dry_run=False):
+            self.calls.append("revoke")
+            return {"success": True}
+
+        def drop_abac_policy(self, ref, dry_run=False):
+            return {"success": True}
+
+    g = G()
+    svc = DeliveryService(settings=SimpleNamespace(DELIVERY_DIRECT_DRY_RUN=False), grant_manager=g)
+    data = {"abac_create": [{"name": "m"}], "revoke": [{"principal": "a", "privileges": ["SELECT"], "securable_name": "x"}],
+            "grant": [{"principal": "b", "privileges": ["SELECT"], "securable_name": "y"}]}
+    res = svc.deliver(DeliveryPayload(change_type=DeliveryChangeType.POLICY_RELEASE, entity_type="AccessPolicyRelease",
+                                      entity_id="r", data=data), [DeliveryMode.DIRECT]).results[0]
+    assert g.calls == ["revoke"] and res.success is False

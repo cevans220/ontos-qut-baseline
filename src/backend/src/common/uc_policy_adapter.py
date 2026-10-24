@@ -20,6 +20,7 @@ from src.common import odrl
 from src.common.odrl_compiler import (
     EVERYONE,
     GATE_UNSUPPORTED,
+    SEVERITY_ERROR,
     SEVERITY_WARNING,
     EntitlementPlan,
     GatedRule,
@@ -336,7 +337,8 @@ def _column_condition(tag_key: str, tag_value: Optional[str]) -> str:
     return f"has_tag_value('{esc(tag_key)}', '{esc(tag_value)}')" if tag_value else f"has_tag('{esc(tag_key)}')"
 
 
-def build_abac(plan: EntitlementPlan, abac: Any) -> List[UCGrant]:
+def build_abac(plan: EntitlementPlan, abac: Any,
+               resolve_object_kind: Optional[ObjectKindResolver] = None) -> List[UCGrant]:
     """IR ABAC rules → one UC ABAC policy per (rule, securable), as ledger-shaped rows.
 
     Names are deterministic over the definition, so a changed rule is a new policy (old one
@@ -353,11 +355,19 @@ def build_abac(plan: EntitlementPlan, abac: Any) -> List[UCGrant]:
             continue
         for securable in rule.securables:
             name = securable[len(odrl.UC_PREFIX):]
-            on_type = _ABAC_ON[securable_kind(name)]
+            kind = securable_kind(name, resolve_object_kind)
+            if kind not in _ABAC_ON:
+                # The rule relied on this restriction (a mask replaced a deny, a filter narrows a
+                # grant): not being able to build it must block the release, never fail open.
+                plan.issue(SEVERITY_ERROR, "abac_unsupported_target",
+                           f"{rule.source.label() if rule.source else rule.kind}: ABAC policies apply to "
+                           f"tables, not to a {kind} ({name})", rule.source)
+                continue
+            on_type = _ABAC_ON[kind]
             spec: Dict[str, Any] = {
                 "kind": rule.kind, "on_securable_type": on_type, "on_securable_fullname": name,
                 "to_principals": principals, "function_name": function,
-                "match_condition": _column_condition(rule.tag_key, rule.tag_value),
+                "match_condition": _column_condition(rule.tag_key or abac.spatial_tag, rule.tag_value),
                 "alias": "c",
             }
             if rule.kind == "row_filter":

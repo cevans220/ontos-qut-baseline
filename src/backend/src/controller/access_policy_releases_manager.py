@@ -94,7 +94,8 @@ def _now() -> datetime:
 
 def _ledger_grant(row: AccessGrantLedgerDb) -> uc.UCGrant:
     return uc.UCGrant(row.principal, row.securable_type, row.securable_name, row.privilege,
-                      row.expires_at, bool(row.implied), list(row.sources or []), bool(row.preexisting))
+                      row.expires_at, bool(row.implied), list(row.sources or []), bool(row.preexisting),
+                      row.spec)
 
 
 def _key(row: Any) -> uc.GrantKey:
@@ -107,9 +108,46 @@ def abac_config() -> Any:
     from src.common.odrl_compiler import AbacConfig
 
     st = get_settings()
+    row_filter = getattr(st, "ACCESS_POLICIES_ABAC_ROW_FILTER_FUNCTION", None) or None
     return AbacConfig(mask_function=getattr(st, "ACCESS_POLICIES_ABAC_MASK_FUNCTION", None) or None,
-                      row_filter_function=getattr(st, "ACCESS_POLICIES_ABAC_ROW_FILTER_FUNCTION", None) or None,
-                      spatial_tag=getattr(st, "ACCESS_POLICIES_SPATIAL_COLUMN_TAG", None) or "region")
+                      row_filter_function=row_filter,
+                      spatial_tag=getattr(st, "ACCESS_POLICIES_SPATIAL_COLUMN_TAG", None) or "region",
+                      has_tagged_column=column_tag_checker(st) if row_filter else None)
+
+
+def column_tag_checker(settings: Any) -> Any:
+    """table -> has a column with the tag? via information_schema on the configured warehouse.
+
+    None (can't tell) when no workspace client / warehouse is available; callers fail closed.
+    """
+    cache: Dict[Tuple[str, str], Optional[bool]] = {}
+
+    def check(table: str, tag: str) -> Optional[bool]:
+        if (table, tag) in cache:
+            return cache[(table, tag)]
+        verdict: Optional[bool] = None
+        try:
+            from databricks.sdk.service.sql import StatementParameterListItem
+
+            from src.controller.grant_manager import get_grant_manager
+            ws = get_grant_manager().workspace_client
+            warehouse = getattr(settings, "DATABRICKS_WAREHOUSE_ID", None)
+            if ws and warehouse:
+                catalog, schema, name = table.split(".")
+                res = ws.statement_execution.execute_statement(
+                    statement=(f"SELECT count(*) FROM `{catalog.replace('`', '``')}`.information_schema.column_tags "
+                               "WHERE schema_name = :s AND table_name = :t AND tag_name = :g"),
+                    warehouse_id=warehouse, wait_timeout="30s",
+                    parameters=[StatementParameterListItem(name="s", value=schema),
+                                StatementParameterListItem(name="t", value=name),
+                                StatementParameterListItem(name="g", value=tag)])
+                rows = (res.result.data_array if res and res.result else None) or []
+                verdict = bool(rows) and int(rows[0][0]) > 0
+        except Exception as e:  # can't tell → fail closed upstream
+            logger.warning("Column tag check for %s failed: %s", table, e)
+        cache[(table, tag)] = verdict
+        return verdict
+    return check
 
 
 class PolicyReleaseManager:
@@ -179,7 +217,7 @@ class PolicyReleaseManager:
         )
         for w in warnings:
             plan.issue("error", "inheritance", w)
-        grants = uc.build_grants(plan, resolve_object_kind) + uc.build_abac(plan, abac)
+        grants = uc.build_grants(plan, resolve_object_kind) + uc.build_abac(plan, abac, resolve_object_kind)
         diff = uc.diff_grants(grants, [_ledger_grant(r) for r in self.active_ledger(db, target)])
         changes = diff.to_dict()
         changes["sql"] = uc.render_sql(diff)
@@ -269,8 +307,14 @@ class PolicyReleaseManager:
     @staticmethod
     def _summary(row: AccessPolicyReleaseDb) -> str:
         ch = row.changes or {}
-        return (f"{len(ch.get('add') or [])} to grant, {len(ch.get('remove') or [])} to revoke, "
-                f"{len(ch.get('update') or [])} expiry updates")
+
+        def n(cat: str, abac: bool) -> int:
+            return sum(1 for g in ch.get(cat) or [] if (g.get("securable_type") == uc.ABAC_POLICY) == abac)
+        out = (f"{n('add', False)} to grant, {n('remove', False)} to revoke, "
+               f"{len(ch.get('update') or [])} expiry updates")
+        if n("add", True) or n("remove", True):
+            out += f", {n('add', True)} ABAC policies to create, {n('remove', True)} to drop"
+        return out
 
     # ------------------------------------------------------------ delivery
 
@@ -488,7 +532,8 @@ class PolicyReleaseManager:
             entry = AccessGrantLedgerDb(target=row.target, principal=g.principal, securable_type=g.securable_type,
                                         securable_name=g.securable_name, privilege=g.privilege, implied=g.implied,
                                         expires_at=g.expires_at, sources=g.sources, status=LEDGER_ACTIVE,
-                                        preexisting="|".join(g.key) in preexisting, granted_release_id=row.id)
+                                        preexisting="|".join(g.key) in preexisting, spec=g.spec,
+                                        granted_release_id=row.id)
             db.add(entry)
             active[g.key] = entry
         if row.release_kind == KIND_POLICY_RELEASE:
@@ -563,7 +608,8 @@ class PolicyReleaseManager:
         row = self.require(db, release_id)
         desired = [uc.UCGrant.from_dict(d) for d in (row.plan or {}).get("grants") or []]
         managed = [_ledger_grant(r) for r in self.active_ledger(db, row.target)]
-        securables = sorted({(g.securable_type, g.securable_name) for g in desired + managed})
+        securables = sorted({(g.securable_type, g.securable_name) for g in desired + managed
+                             if g.securable_type != uc.ABAC_POLICY})
         truncated = len(securables) > LIVE_DIFF_MAX_SECURABLES
         live: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
         errors: List[str] = []

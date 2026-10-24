@@ -357,6 +357,35 @@ class GrantManager:
                 "securable_name": securable_name,
             }
     
+    def apply_abac_policy(self, spec: Dict[str, Any], dry_run: bool = False) -> Dict[str, Any]:
+        """Create a UC ABAC row filter / column mask policy (Access Policy releases; ABAC beta)."""
+        if not self._ws:
+            return {"success": False, "error": "Workspace client not available"}
+        if dry_run:
+            return {"success": True, "dry_run": True, "message": f"Would create ABAC policy {spec['name']}"}
+        try:
+            self._ws.policies.create_policy(_abac_policy_info(spec))
+            return {"success": True, "message": f"Created ABAC policy {spec['name']}"}
+        except Exception as e:
+            if "already exists" in str(e).lower():
+                return {"success": True, "message": f"ABAC policy {spec['name']} already exists"}
+            logger.error("Failed to create ABAC policy %s: %s", spec.get("name"), e, exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    def drop_abac_policy(self, ref: Dict[str, str], dry_run: bool = False) -> Dict[str, Any]:
+        if not self._ws:
+            return {"success": False, "error": "Workspace client not available"}
+        if dry_run:
+            return {"success": True, "dry_run": True, "message": f"Would drop ABAC policy {ref['name']}"}
+        try:
+            self._ws.policies.delete_policy(ref["on_securable_type"], ref["on_securable_fullname"], ref["name"])
+            return {"success": True, "message": f"Dropped ABAC policy {ref['name']}"}
+        except Exception as e:
+            if "does not exist" in str(e).lower() or "not found" in str(e).lower():
+                return {"success": True, "message": f"ABAC policy {ref['name']} already gone"}
+            logger.error("Failed to drop ABAC policy %s: %s", ref.get("name"), e, exc_info=True)
+            return {"success": False, "error": str(e)}
+
     def get_grants(
         self,
         securable_type: str,
@@ -438,43 +467,6 @@ def _abac_policy_info(spec: Dict[str, Any]) -> Any:
     )
 
 
-def _abac_methods(cls: Any) -> Any:
-    """ABAC policy create / drop for Access Policy releases (UC ABAC beta must be enabled)."""
-
-    def apply_abac_policy(self: Any, spec: Dict[str, Any], dry_run: bool = False) -> Dict[str, Any]:
-        if not self._ws:
-            return {"success": False, "error": "Workspace client not available"}
-        if dry_run:
-            return {"success": True, "dry_run": True, "message": f"Would create ABAC policy {spec['name']}"}
-        try:
-            self._ws.policies.create_policy(_abac_policy_info(spec))
-            return {"success": True, "message": f"Created ABAC policy {spec['name']}"}
-        except Exception as e:
-            if "already exists" in str(e).lower():
-                return {"success": True, "message": f"ABAC policy {spec['name']} already exists"}
-            logger.error("Failed to create ABAC policy %s: %s", spec.get("name"), e, exc_info=True)
-            return {"success": False, "error": str(e)}
-
-    def drop_abac_policy(self: Any, ref: Dict[str, str], dry_run: bool = False) -> Dict[str, Any]:
-        if not self._ws:
-            return {"success": False, "error": "Workspace client not available"}
-        if dry_run:
-            return {"success": True, "dry_run": True, "message": f"Would drop ABAC policy {ref['name']}"}
-        try:
-            self._ws.policies.delete_policy(ref["on_securable_type"], ref["on_securable_fullname"], ref["name"])
-            return {"success": True, "message": f"Dropped ABAC policy {ref['name']}"}
-        except Exception as e:
-            if "does not exist" in str(e).lower() or "not found" in str(e).lower():
-                return {"success": True, "message": f"ABAC policy {ref['name']} already gone"}
-            logger.error("Failed to drop ABAC policy %s: %s", ref.get("name"), e, exc_info=True)
-            return {"success": False, "error": str(e)}
-
-    cls.apply_abac_policy = apply_abac_policy
-    cls.drop_abac_policy = drop_abac_policy
-    return cls
-
-
-_abac_methods(GrantManager)
 
 
 # Global grant manager instance
