@@ -523,6 +523,9 @@ class CollectionDef:
     refinement: List[Dict[str, Any]] = field(default_factory=list)
 
 
+# Pending duty reported for a permission that is only offered (odrl:Offer): obtain an Agreement.
+OFFER_DUTY = "ontos:obtainApproval"
+
 VERDICT_ALLOW = "allow"
 VERDICT_DENY = "deny"
 VERDICT_CONDITIONAL = "conditional"
@@ -860,6 +863,8 @@ def evaluate(
         uid = pol.get("uid") or "?"
         name = pol.get("name") or uid
         conflict = pol.get("conflict") or SPEC_DEFAULT_CONFLICT
+        # An Offer proposes terms; it entitles nobody until an Agreement is concluded.
+        is_offer = term_key(pol.get("type") or pol.get("@type")) == "Offer"
         permits: List[RuleMatch] = []
         conditionals: List[RuleMatch] = []
         prohibits: List[RuleMatch] = []
@@ -889,6 +894,9 @@ def evaluate(
                 else:
                     unmet = [d.get("action") for d in rule.get("duty") or []
                              if d.get("action") not in request.fulfilled_duties]
+                    if is_offer:
+                        unmet.append(OFFER_DUTY)
+                        trail.append(f"offered by '{name}' — access needs an Agreement (request access)")
                     if unmet:
                         m.effect = "pending_duties"
                         m.pending_duties = [u for u in unmet if u]

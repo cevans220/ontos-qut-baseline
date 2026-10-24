@@ -281,3 +281,12 @@ def test_normalize_is_idempotent():
     once = _pol(doc)
     twice = _pol({"uid": "p", **{k: once[k] for k in odrl.RULE_KINDS}})
     assert twice["permission"] == once["permission"]
+
+
+
+def test_offer_permission_is_conditional_not_allow():
+    offer = odrl.normalize_policy({"@type": "Offer", "uid": "urn:ontos:policy:o", "conflict": "prohibit",
+                                   "permission": [{"target": "uc:main.sales", "action": "read",
+                                                   "assigner": "user:owner@x.com"}]})
+    d = odrl.evaluate([offer], odrl.AccessRequest(principal="ana@x.com", action="read", asset="uc:main.sales.t"))
+    assert d.verdict == odrl.VERDICT_CONDITIONAL and d.pending_duties == [odrl.OFFER_DUTY]
