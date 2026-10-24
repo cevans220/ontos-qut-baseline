@@ -145,8 +145,9 @@ class PolicyReleaseManager:
                 continue
             doc, errs = self.policies._policy_doc(db, p)
             warnings.extend(f"{p.name}: {e}" for e in errs)
+            # One source for fulfilled duties: the policy doc the evaluator reads too.
             inputs.append(PolicyInput(doc=doc, id=p.id, name=p.name, version=p.version,
-                                      fulfilled_duties={d.get("action") for d in p.fulfilled_duties or [] if d.get("action")}))
+                                      fulfilled_duties=set(doc.get("fulfilledDuties") or [])))
             sources.append({"id": p.id, "uid": p.uid, "name": p.name, "version": p.version})
         return inputs, sources, warnings
 

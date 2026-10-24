@@ -228,15 +228,22 @@ class AgreementService:
 ASSIGNEE_DUTIES = {"ontos:acknowledgeTerms"}
 
 
-def _assignee_emails(agreement: AccessPolicyDb) -> List[str]:
+def _assignee_emails(agreement: AccessPolicyDb, *, as_stored: bool = False) -> List[str]:
+    """The Agreement's user assignees — lower-cased for comparison, or as stored (for delivery)."""
     out = []
     for r in (agreement.body or {}).get("permission") or []:
         a = r.get("assignee")
         if isinstance(a, str) and a.lower().startswith(("user:", "mailto:")):
-            email = a.split(":", 1)[1].lower()
+            email = a.split(":", 1)[1]
+            email = email if as_stored else email.lower()
             if email not in out:
                 out.append(email)
     return out
+
+
+def _duty_label(action: str) -> str:
+    spec = odrl.ACTIONS.get(action)
+    return spec.label if spec else action
 
 
 def duty_status(agreement: AccessPolicyDb, viewer: Optional[str], is_admin: bool) -> List[Dict[str, Any]]:
@@ -251,9 +258,10 @@ def duty_status(agreement: AccessPolicyDb, viewer: Optional[str], is_admin: bool
     out = []
     for a in actions:
         rec = done.get(a)
+        # Separation of duties: an admin can't fulfil the admin-only duties of their own Agreement.
         can = rec is None and agreement.status == STATUS_ACTIVE and (
-            is_assignee if a in ASSIGNEE_DUTIES else is_admin)
-        out.append({"action": a, "fulfilled": rec is not None, "fulfilled_by": (rec or {}).get("fulfilled_by"),
+            is_assignee if a in ASSIGNEE_DUTIES else (is_admin and not is_assignee))
+        out.append({"action": a, "label": _duty_label(a), "fulfilled": rec is not None, "fulfilled_by": (rec or {}).get("fulfilled_by"),
                     "fulfilled_at": (rec or {}).get("fulfilled_at"), "note": (rec or {}).get("note"),
                     "can_fulfill": can, "fulfilled_by_assignee_only": a in ASSIGNEE_DUTIES})
     return out
@@ -268,13 +276,20 @@ def fulfill_duty(db: Session, agreement: AccessPolicyDb, action: str, user: Opti
 
     if agreement.policy_type != "Agreement":
         raise AccessPolicyError("Duties are fulfilled on Agreements (a concrete party's deal)", 409)
+    action = odrl.term_key(action) or action
+    if action not in odrl.ACTIONS and f"ontos:{action}" in odrl.ACTIONS:
+        action = f"ontos:{action}"
+    # Lock the row: concurrent fulfilments must not overwrite each other's JSON list.
+    agreement = (db.query(AccessPolicyDb).filter(AccessPolicyDb.id == agreement.id)
+                 .with_for_update().populate_existing().one())
     status = {d["action"]: d for d in duty_status(agreement, user, is_admin)}
     if action not in status:
         raise AccessPolicyError(f"'{action}' is not a duty of this Agreement", 404)
     if status[action]["fulfilled"]:
         raise AccessPolicyError(f"'{action}' is already fulfilled", 409)
     if not status[action]["can_fulfill"]:
-        who = "the Agreement's assignee" if action in ASSIGNEE_DUTIES else "an Access Policies admin"
+        who = ("the Agreement's assignee" if action in ASSIGNEE_DUTIES
+               else "an Access Policies admin other than the Agreement's assignee")
         raise AccessPolicyError(f"Only {who} can fulfil '{action}'", 403)
     agreement.fulfilled_duties = list(agreement.fulfilled_duties or []) + [{
         "action": action, "fulfilled_by": user, "note": note,
@@ -288,17 +303,18 @@ def fulfill_duty(db: Session, agreement: AccessPolicyDb, action: str, user: Opti
 
 def _notify_open_duties(db: Session, agreement: AccessPolicyDb) -> None:
     """Tell the grantee which terms to accept before the access becomes live. Best-effort."""
-    open_assignee = [d["action"] for d in duty_status(agreement, None, False)
-                     if not d["fulfilled"] and d["fulfilled_by_assignee_only"]]
-    if not open_assignee:
-        return
     try:
+        open_assignee = [d["action"] for d in duty_status(agreement, None, False)
+                         if not d["fulfilled"] and d["fulfilled_by_assignee_only"]]
+        if not open_assignee:
+            return
         import uuid
         from datetime import datetime
 
         from src.models.notifications import Notification, NotificationType
         from src.repositories.notification_repository import notification_repo
-        for email in _assignee_emails(agreement):
+        # As stored: the bell matches the recipient against the login email exactly.
+        for email in _assignee_emails(agreement, as_stored=True):
             with db.begin_nested():
                 notification_repo.create(db, obj_in=Notification(
                     id=str(uuid.uuid4()), type=NotificationType.ACTION_REQUIRED,
@@ -308,7 +324,7 @@ def _notify_open_duties(db: Session, agreement: AccessPolicyDb) -> None:
                     created_at=datetime.utcnow(), read=False, can_delete=True,
                 ))
     except Exception as e:  # pragma: no cover - notification is best-effort
-        logger.warning(f"Could not notify about open duties on {agreement.name}: {e}")
+        logger.warning("Could not notify about open duties on %s: %s", agreement.name, e)
 
 
 # ---------------------------------------------------------------- Access Grants hooks
@@ -327,11 +343,11 @@ def on_grant_approved(db: Session, grant: Any, requested_by: Optional[str], appr
         with db.begin_nested():
             agreement = AgreementService().create_for_grant(db, grant, requested_by=requested_by,
                                                             approved_by=approved_by)
-        _notify_open_duties(db, agreement)
-        return agreement
     except Exception as e:
-        logger.error(f"Could not record Agreement for Access Grant {getattr(grant, 'id', '?')}: {e}", exc_info=True)
+        logger.error("Could not record Agreement for Access Grant %s: %s", getattr(grant, 'id', '?'), e, exc_info=True)
         return None
+    _notify_open_duties(db, agreement)  # never raises
+    return agreement
 
 
 def on_grant_ended(db: Session, grant_id: Any, user: Optional[str], reason: str) -> List[AccessPolicyDb]:
@@ -340,7 +356,7 @@ def on_grant_ended(db: Session, grant_id: Any, user: Optional[str], reason: str)
         with db.begin_nested():
             return AgreementService().retire_for_grant(db, grant_id, user, reason)
     except Exception as e:
-        logger.error(f"Could not retire Agreement for Access Grant {grant_id}: {e}", exc_info=True)
+        logger.error("Could not retire Agreement for Access Grant %s: %s", grant_id, e, exc_info=True)
         return []
 
 
@@ -364,14 +380,14 @@ def auto_deliver(db: Session, agreements: List[AccessPolicyDb], user: Optional[s
             AgreementService().policies._log_timeline(
                 db, KIND_POLICY, a.id, f"No Delivery Mode is enabled — the {what} needs a policy release", user)
         db.commit()
-        logger.warning(f"Agreement {what} not delivered: no Delivery Mode available — a policy release is needed")
+        logger.warning("Agreement %s not delivered: no Delivery Mode available — a policy release is needed", what)
         return
     try:
         row = AgreementService().prepare_release(db, agreements, user, revoke=revoke)
         db.commit()
     except Exception as e:
         db.rollback()
-        logger.error(f"Could not prepare the agreement release: {e}", exc_info=True)
+        logger.error("Could not prepare the agreement release: %s", e, exc_info=True)
         return
     if row is None:
         return
@@ -381,7 +397,7 @@ def auto_deliver(db: Session, agreements: List[AccessPolicyDb], user: Optional[s
         db.commit()
     except Exception as e:
         db.rollback()
-        logger.error(f"Agreement release {release_id} failed during delivery: {e}", exc_info=True)
+        logger.error("Agreement release %s failed during delivery: %s", release_id, e, exc_info=True)
         try:
             failed = db.get(AccessPolicyReleaseDb, release_id)
             if failed is not None:
@@ -391,3 +407,7 @@ def auto_deliver(db: Session, agreements: List[AccessPolicyDb], user: Optional[s
                 db.commit()
         except Exception:  # pragma: no cover - best-effort bookkeeping
             db.rollback()
+
+
+def open_duties(agreement: AccessPolicyDb) -> List[str]:
+    return [d["action"] for d in duty_status(agreement, None, False) if not d["fulfilled"]]

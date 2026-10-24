@@ -353,6 +353,8 @@ export interface ReleaseTargets {
 
 export interface DutyStatus {
   action: string;
+  /** Profile label, resolved server-side (consumers may not read the profile endpoint). */
+  label: string;
   fulfilled: boolean;
   fulfilled_by?: string | null;
   fulfilled_at?: string | null;

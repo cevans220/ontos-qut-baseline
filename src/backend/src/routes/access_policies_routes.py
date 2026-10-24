@@ -171,7 +171,8 @@ async def policy_validation(entity_id: str, request: Request, db: DBSessionDep, 
 async def agreement_for_party(entity_id: str, request: Request, db: DBSessionDep, current_user: AuditCurrentUserDep):
     """An Agreement as its party sees it: what it grants, the terms it binds, and the open duties."""
     from src.controller import access_agreements
-    row = await _agreement_for_party(request, db, current_user, entity_id)
+    is_admin = await _is_admin(request, current_user)
+    row = await _agreement_for_party(request, db, current_user, entity_id, is_admin)
     body = row.body or {}
 
     def brief(rules: List[Any]) -> List[Any]:
@@ -182,7 +183,7 @@ async def agreement_for_party(entity_id: str, request: Request, db: DBSessionDep
         "policy_type": row.policy_type, "access_grant_id": row.access_grant_id,
         "permissions": brief(body.get("permission")), "prohibitions": brief(body.get("prohibition")),
         "obligations": brief(body.get("obligation")),
-        "duties": access_agreements.duty_status(row, _email(current_user), await _is_admin(request, current_user)),
+        "duties": access_agreements.duty_status(row, _email(current_user), is_admin),
     }
 
 
@@ -193,11 +194,12 @@ async def agreement_duties(entity_id: str, request: Request, db: DBSessionDep, c
     Readable by the Agreement's own assignee (consumers usually lack the Access Policies feature)
     or with Access Policies read access."""
     from src.controller import access_agreements
-    row = await _agreement_for_party(request, db, current_user, entity_id)
-    return access_agreements.duty_status(row, _email(current_user), await _is_admin(request, current_user))
+    is_admin = await _is_admin(request, current_user)
+    row = await _agreement_for_party(request, db, current_user, entity_id, is_admin)
+    return access_agreements.duty_status(row, _email(current_user), is_admin)
 
 
-async def _agreement_for_party(request: Request, db: Any, user: Any, entity_id: str) -> Any:
+async def _agreement_for_party(request: Request, db: Any, user: Any, entity_id: str, is_admin: bool) -> Any:
     """The Agreement if the caller is its assignee or may read Access Policies; 404 otherwise."""
     from src.controller import access_agreements
     from src.db_models.access_policies import AccessPolicyDb
@@ -210,7 +212,7 @@ async def _agreement_for_party(request: Request, db: Any, user: Any, entity_id: 
     except HTTPException:
         raise HTTPException(status_code=404, detail="Access Policy not found") from None
     try:
-        return manager.require_visible(db, KIND_POLICY, entity_id, _email(user), await _is_admin(request, user))
+        return manager.require_visible(db, KIND_POLICY, entity_id, _email(user), is_admin)
     except AccessPolicyError as e:
         raise _http(e) from None
 
@@ -223,12 +225,13 @@ async def fulfill_agreement_duty(entity_id: str, request: Request, db: DBSession
     from src.controller import access_agreements
     is_admin = await _is_admin(request, current_user)
     try:
-        row = await _agreement_for_party(request, db, current_user, entity_id)
-        access_agreements.fulfill_duty(db, row, payload.action, _email(current_user), is_admin, payload.note)
+        row = await _agreement_for_party(request, db, current_user, entity_id, is_admin)
+        row = access_agreements.fulfill_duty(db, row, payload.action, _email(current_user), is_admin, payload.note)
         db.commit()
     except AccessPolicyError as e:
         raise _http(e)
-    access_agreements.auto_deliver(db, [row], _email(current_user), revoke=False)
+    if not access_agreements.open_duties(row):
+        access_agreements.auto_deliver(db, [row], _email(current_user), revoke=False)
     return access_agreements.duty_status(row, _email(current_user), is_admin)
 
 

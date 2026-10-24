@@ -87,3 +87,33 @@ def test_duties_only_on_agreements(policies, db_session: Session):
         name="S", rules={"permission": [{"target": "uc:x", "action": "read", "duty": [{"action": "inform"}]}]}), OWNER)
     with pytest.raises(AccessPolicyError):
         access_agreements.fulfill_duty(db_session, s, "inform", OWNER, True)
+
+
+# ------------------------------------------------------------ /review findings (P3c)
+
+def test_admin_cannot_fulfil_admin_duties_on_their_own_agreement(policies, agreement, db_session: Session):
+    with pytest.raises(AccessPolicyError) as e:
+        access_agreements.fulfill_duty(db_session, agreement, "ontos:recertify", GRANTEE, True)
+    assert e.value.status_code == 403
+
+
+def test_duty_actions_are_normalized_and_labelled(policies, agreement, db_session: Session):
+    access_agreements.fulfill_duty(db_session, agreement, "acknowledgeTerms", GRANTEE, False)
+    status = {d["action"]: d for d in access_agreements.duty_status(agreement, GRANTEE, False)}
+    assert status["ontos:acknowledgeTerms"]["fulfilled"] and status["ontos:acknowledgeTerms"]["label"] == "Acknowledge terms"
+
+
+def test_notification_uses_the_stored_email_case(policies, db_session: Session):
+    from src.db_models.notifications import NotificationDb
+    agreement = AccessPolicyDb(name="A", status="active", policy_type="Agreement", conflict="prohibit", body={
+        "permission": [{"target": "uc:x.y.z", "action": "read", "assignee": "user:Ana.Smith@Corp.com",
+                        "duty": [{"action": "ontos:acknowledgeTerms"}]}]})
+    db_session.add(agreement)
+    db_session.flush()
+    access_agreements._notify_open_duties(db_session, agreement)
+    assert db_session.query(NotificationDb).filter(NotificationDb.recipient == "Ana.Smith@Corp.com").count() == 1
+
+
+def test_a_failing_notification_does_not_hide_the_agreement(policies, db_session: Session, monkeypatch):
+    monkeypatch.setattr(access_agreements, "duty_status", lambda *a, **k: (_ for _ in ()).throw(TypeError("bad body")))
+    access_agreements._notify_open_duties(db_session, AccessPolicyDb(name="A", body={}))  # must not raise

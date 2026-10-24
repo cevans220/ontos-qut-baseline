@@ -7,7 +7,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Textarea } from '@/components/ui/textarea';
 import { useApi } from '@/hooks/use-api';
 import { useToast } from '@/hooks/use-toast';
-import { useOdrlProfile } from '@/hooks/use-access-policies';
 import type { DutyStatus } from '@/types/access-policy';
 
 /**
@@ -27,7 +26,6 @@ export default function DutiesPanel({
   const { t } = useTranslation(['access-policies', 'common']);
   const { get, post } = useApi();
   const { toast } = useToast();
-  const profile = useOdrlProfile();
   const [duties, setDuties] = useState<DutyStatus[]>(initial || []);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -41,7 +39,7 @@ export default function DutiesPanel({
     if (!initial) load();
   }, [initial, load]);
 
-  const label = (action: string) => profile?.actions.find((a) => a.key === action)?.label || action;
+  const label = (action: string) => duties.find((d) => d.action === action)?.label || action;
 
   const fulfil = async (action: string) => {
     setBusy(action);
@@ -81,7 +79,7 @@ export default function DutiesPanel({
                 <CircleDashed className="mt-0.5 h-4 w-4 text-amber-600" />
               )}
               <div>
-                <div className="font-medium">{label(d.action)}</div>
+                <div className="font-medium">{d.label || d.action}</div>
                 <div className="text-xs text-muted-foreground">
                   {d.fulfilled
                     ? t('access-policies:duties.fulfilledBy', {
