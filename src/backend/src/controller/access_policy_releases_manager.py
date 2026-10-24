@@ -25,6 +25,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from src.common import policy_targets as pt
 from src.common import uc_policy_adapter as uc
 from src.common.logging import get_logger
 from src.common.odrl_compiler import PolicyInput, compile_policies
@@ -32,7 +33,10 @@ from src.controller.access_policies_manager import (
     KIND_ASSET_COLLECTION,
     KIND_AUDIENCE,
     KIND_POLICY,
+    KIND_TARGET,
     STATUS_ACTIVE,
+    STATUS_DEPRECATED,
+    STATUS_NEEDS_REVIEW,
     AccessPoliciesManager,
     AccessPolicyError,
     log_timeline,
@@ -46,7 +50,8 @@ from src.repositories.access_policies_repository import repo_for
 
 logger = get_logger(__name__)
 
-TARGETS = (uc.TARGET_UC,)
+# Default target while no Unity Catalog Access Target is configured.
+TARGETS = (pt.BUILTIN_UC.key,)
 
 KIND_POLICY_RELEASE = "policy"
 KIND_REVOCATION = "revocation"
@@ -157,10 +162,48 @@ class PolicyReleaseManager:
     # ------------------------------------------------------------ helpers
 
     @staticmethod
-    def _target(target: str) -> str:
-        if target not in TARGETS:
-            raise AccessPolicyError(f"Unknown target '{target}'. Supported: {', '.join(TARGETS)}", 400)
-        return target
+    def targets(db: Session, *, include_deprecated: bool = False) -> List[pt.ResolvedTarget]:
+        """Configured targets (active Access Targets) plus the built-in UC one while no UC target is active.
+
+        ``include_deprecated`` adds targets whose families are only deprecated: they take no new
+        compiles but must still deliver pending releases and revoke what they track.
+        """
+        live = (STATUS_ACTIVE, STATUS_NEEDS_REVIEW)
+        by_key: Dict[str, Any] = {}
+        for t in repo_for(KIND_TARGET).list_all(db):
+            if t.status in live or (include_deprecated and t.status == STATUS_DEPRECATED):
+                cur = by_key.get(t.key)
+                if cur is None or (cur.status not in live and t.status in live):
+                    by_key[t.key] = t
+        out: List[pt.ResolvedTarget] = []
+        for key in sorted(by_key):
+            t = by_key[key]
+            adapter = pt.get_adapter(t.system)
+            if adapter is None:
+                logger.warning("Access target %s uses unknown system %s — skipped", key, t.system)
+                continue
+            out.append(pt.ResolvedTarget(
+                key=key, label=t.name, adapter=adapter, scope=list(t.scope or []),
+                delivery_modes=list(t.delivery_modes or []), reconcile_schedule=t.reconcile_schedule,
+                drift_policy=t.drift_policy or pt.DRIFT_REPORT, entity_id=t.id))
+        active_uc = any(t.adapter.system == pt.BUILTIN_UC.adapter.system and by_key[t.key].status in live for t in out)
+        if not active_uc and pt.BUILTIN_UC.key not in by_key:
+            out.insert(0, pt.BUILTIN_UC)
+        return out
+
+    def resolve(self, db: Session, key: str, *, include_deprecated: bool = False) -> pt.ResolvedTarget:
+        options = self.targets(db, include_deprecated=include_deprecated)
+        found = next((t for t in options if t.key == key), None)
+        if found is None:
+            raise AccessPolicyError(f"Unknown target '{key}'. Available: {', '.join(t.key for t in options)}", 400)
+        return found
+
+    def target_for(self, db: Session, system: str, names: List[str]) -> Optional[pt.ResolvedTarget]:
+        """The active target of ``system`` whose scope covers the first of ``names`` (native names)."""
+        for t in self.targets(db):
+            if t.adapter.system == system and (not t.scope or any(pt.inside(names[0], s) for s in t.scope)):
+                return t
+        return None
 
     def require(self, db: Session, release_id: str) -> AccessPolicyReleaseDb:
         row = db.get(AccessPolicyReleaseDb, release_id)
@@ -203,8 +246,13 @@ class PolicyReleaseManager:
     def compile(self, db: Session, target: str, *,
                 resolve_object_kind: Optional[uc.ObjectKindResolver] = None,
                 now: Optional[datetime] = None) -> Dict[str, Any]:
-        """Compile active policies for ``target`` and diff against the ledger (no writes)."""
-        self._target(target)
+        """Compile active policies for ``target`` and diff against the ledger (no writes).
+
+        Only the target's scope is compiled; tracked grants that fell out of scope (the scope
+        was narrowed) are released from tracking, never revoked — another target or nobody owns them now.
+        """
+        resolved = self.resolve(db, target)
+        adapter = resolved.adapter
         abac = abac_config()
         inputs, sources, warnings = self._active_policy_inputs(db)
         plan = compile_policies(
@@ -217,10 +265,25 @@ class PolicyReleaseManager:
         )
         for w in warnings:
             plan.issue("error", "inheritance", w)
-        grants = uc.build_grants(plan, resolve_object_kind) + uc.build_abac(plan, abac, resolve_object_kind)
-        diff = uc.diff_grants(grants, [_ledger_grant(r) for r in self.active_ledger(db, target)])
+        pt.restrict(plan, resolved)
+        grants = adapter.build(plan, abac, resolve_object_kind)
+        tracked = [_ledger_grant(r) for r in self.active_ledger(db, target)]
+        out_of_scope = [g for g in tracked if not adapter.grant_in_scope(g, resolved.scope)]
+        # A parent USE grant that an out-of-scope grant of the same principal still needs stays too.
+        below = {(g.principal, g.securable_name) for g in out_of_scope}
+        out_of_scope += [g for g in tracked if g.privilege in pt.IMPLIED_PRIVILEGES
+                         and adapter.grant_in_scope(g, resolved.scope)
+                         and any(p == g.principal and pt.inside(n, g.securable_name) for p, n in below)]
+        gone = {g.key for g in out_of_scope}
+        in_scope = [g for g in tracked if g.key not in gone]
+        diff = uc.diff_grants(grants, in_scope)
+        if out_of_scope:
+            diff.untrack = sorted(diff.untrack + out_of_scope, key=lambda g: g.key)
+            plan.issue("warning", "untracked_outside_scope",
+                       f"{len(out_of_scope)} tracked grant(s) are outside the target's scope and will no longer be "
+                       "tracked (they stay on the platform)")
         changes = diff.to_dict()
-        changes["sql"] = uc.render_sql(diff)
+        changes["sql"] = adapter.render_sql(diff)
         ir = plan.to_dict()
         return {
             "target": target,
@@ -351,12 +414,18 @@ class PolicyReleaseManager:
         return out, bool(live) and len(live) == len(securables)
 
     @staticmethod
-    def _delivery_modes(delivery_service: Any, modes: Optional[List[str]]) -> List[Any]:
+    def _delivery_modes(delivery_service: Any, modes: Optional[List[str]],
+                        allowed: Optional[List[str]] = None) -> List[Any]:
         from src.controller.delivery_service import DeliveryMode
 
         if delivery_service is None:
             raise AccessPolicyError("Delivery service is not configured", 503)
         active = delivery_service.get_active_modes()
+        if allowed:
+            # The target restricts how its releases may ship (e.g. Indirect only: Git + CI apply).
+            if modes and (bad := [m for m in modes if m not in allowed]):
+                raise AccessPolicyError(f"Delivery mode(s) not allowed for this target: {', '.join(bad)}", 400)
+            active = [m for m in active if m.value in allowed]
         if modes:
             try:
                 chosen = [DeliveryMode(m) for m in modes]
@@ -385,9 +454,10 @@ class PolicyReleaseManager:
             raise AccessPolicyError(f"Only approved, delivered or failed releases can be delivered; this one is '{row.status}'", 409)
         # Revocation / agreement releases are computed against the ledger at delivery time
         # (``_remaining``), so a moved ledger never makes them stale; policy releases are re-based.
+        resolved = self.resolve(db, row.target, include_deprecated=True)
         if row.status == R_APPROVED:
             self._rebase_if_stale(db, row, user)
-        chosen = self._delivery_modes(delivery_service, modes)
+        chosen = self._delivery_modes(delivery_service, modes, resolved.delivery_modes)
         if get_grants is None:
             get_grants = getattr(getattr(delivery_service, "grant_manager", None), "get_grants", None)
 
@@ -395,7 +465,7 @@ class PolicyReleaseManager:
         preexisting, live_checked = self._preexisting(adds, get_grants)
         diff = uc.GrantDiff(add=adds, remove=removes, untrack=untracks)
         changes = diff.to_dict()
-        changes["sql"] = uc.render_sql(diff)
+        changes["sql"] = resolved.adapter.render_sql(diff)
         # Indirect mode serializes this snapshot, so the Git artifact matches what Direct/Manual ship.
         entity = SimpleNamespace(
             id=row.id, name=f"{row.target}-release-{row.sequence}", target=row.target, sequence=row.sequence,
@@ -559,12 +629,12 @@ class PolicyReleaseManager:
     def revoke_expired(self, db: Session, target: str, user: Optional[str], delivery_service: Any,
                        now: Optional[datetime] = None) -> Optional[AccessPolicyReleaseDb]:
         """Ship a revocation release for every expired ledger grant (auto-approved: revocation is mandatory)."""
-        self._target(target)
+        resolved = self.resolve(db, target, include_deprecated=True)
         expired = self.expired_grants(db, target, now)
         if not expired:
             return None
         # Validate delivery before writing anything, so a misconfiguration leaves no orphaned release.
-        self._delivery_modes(delivery_service, None)
+        self._delivery_modes(delivery_service, None, resolved.delivery_modes)
         open_revocations = (db.query(AccessPolicyReleaseDb)
                             .filter(AccessPolicyReleaseDb.target == target,
                                     # Agreement revocations awaiting confirmation cover grants too.
@@ -589,7 +659,7 @@ class PolicyReleaseManager:
         gone = sorted((_ledger_grant(r) for r in expired), key=lambda g: g.key)
         diff = uc.GrantDiff(remove=[g for g in gone if not g.preexisting], untrack=[g for g in gone if g.preexisting])
         changes = diff.to_dict()
-        changes["sql"] = uc.render_sql(diff)
+        changes["sql"] = resolved.adapter.render_sql(diff)
         row = AccessPolicyReleaseDb(
             target=target, release_kind=KIND_REVOCATION, status=R_APPROVED,
             notes=f"Automatic revocation of {len(expired)} expired grant(s)",

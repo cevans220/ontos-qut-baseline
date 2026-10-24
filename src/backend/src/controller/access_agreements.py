@@ -185,7 +185,13 @@ class AgreementService:
         if not uids:
             return None
         rm = PolicyReleaseManager(self.policies)
-        compiled = rm.compile(db, uc.TARGET_UC)
+        names = [t[len(odrl.UC_PREFIX):] for a in agreements for r in (a.body or {}).get("permission") or []
+                 for t in [r.get("target")] if isinstance(t, str) and t.startswith(odrl.UC_PREFIX)]
+        target = rm.target_for(db, uc.TARGET_UC, names) if names else None
+        if target is None:
+            logger.warning("No active Unity Catalog target covers %s — not delivered", ", ".join(names) or "the agreement")
+            return None
+        compiled = rm.compile(db, target.key)
         changes = compiled["changes"]
 
         def mine(cat: str) -> List[uc.UCGrant]:
@@ -203,7 +209,7 @@ class AgreementService:
         out["sql"] = uc.render_sql(scoped)
         names = ", ".join(a.name for a in agreements)
         row = rm._insert(db, AccessPolicyReleaseDb(
-            target=uc.TARGET_UC, release_kind=KIND_AGREEMENT_RELEASE, status=R_APPROVED,
+            target=target.key, release_kind=KIND_AGREEMENT_RELEASE, status=R_APPROVED,
             notes=f"{'Revocation of' if revoke else 'Provisioning'} {names}",
             plan={"compiled_at": compiled["plan"]["compiled_at"]},
             changes=out, issues=[], ledger_fingerprint=compiled["ledger_fingerprint"],
