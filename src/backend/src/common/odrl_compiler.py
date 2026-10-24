@@ -422,8 +422,13 @@ def compile_policies(
         uid = norm.get("uid") or p.id or "?"
         conflict = norm.get("conflict") or odrl.SPEC_DEFAULT_CONFLICT
 
+        is_offer = norm.get("type") == "Offer"
         for i, rule in enumerate(norm.get("permission") or []):
             src = _rule_ref(p, uid, "permission", i, rule)
+            if is_offer:
+                # Offered terms entitle nobody; access comes from the Agreement concluded on them.
+                plan.gated.append(GatedRule(src, GATE_WORKFLOW, "offered — granted through an Agreement"))
+                continue
             candidates.extend(_compile_permission(rule, src, parties, assets, now, plan))
         for i, rule in enumerate(norm.get("prohibition") or []):
             src = _rule_ref(p, uid, "prohibition", i, rule)

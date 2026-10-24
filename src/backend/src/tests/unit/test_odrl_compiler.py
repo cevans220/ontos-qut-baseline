@@ -243,3 +243,14 @@ def test_live_diff_ignores_principal_case():
     desired = [uc.UCGrant("jane.doe@corp.com", "table", "m.s.t", "SELECT")]
     out = uc.live_diff(desired, desired, {("table", "m.s.t"): [{"principal": "Jane.Doe@corp.com", "privileges": ["SELECT"]}]})
     assert out["in_sync"] and out["missing"] == [] and out["unmanaged"] == []
+
+
+
+def test_offer_permissions_are_gated_but_offer_prohibitions_apply():
+    offer = PolicyInput(doc={"uid": "urn:ontos:policy:o", "type": "Offer", "conflict": "prohibit",
+                             "permission": [{"target": "uc:main.sales", "action": "read", "assigner": "user:o@x.com"}],
+                             "prohibition": [{"target": "uc:main.sales.pii", "action": "use", "assigner": "user:o@x.com"}]},
+                        id="o", name="Offer", version="1.0.0")
+    other = _policy({"permission": [{"target": "uc:main.sales.pii", "action": "read", "assignee": "group:g"}]})
+    plan = _compile(offer, other)
+    assert plan.entitlements == [] and [g.gate for g in plan.gated] == ["workflow"]
