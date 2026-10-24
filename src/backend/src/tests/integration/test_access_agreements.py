@@ -101,21 +101,23 @@ def test_agreement_scoped_release_ships_only_its_grants_and_revokes_them(product
     db_session.flush()
     agreement = db_session.query(AccessPolicyDb).filter(AccessPolicyDb.access_grant_id == str(grant.id)).one()
     grants = FakeGrants()
-    release = AgreementService(policies).deliver(db_session, agreement, ADMIN, _delivery(grants))
+    release = AgreementService(policies).deliver(db_session, [agreement], ADMIN, _delivery(grants))
     assert release.release_kind == "agreement" and release.status == "applied"
     assert {c[2] for c in grants.calls} == {"main", "main.sales", "main.sales.orders"}
 
     AgreementService(policies).retire_for_grant(db_session, grant.id, ADMIN, "revoked")
     grants.calls.clear()
-    rev = AgreementService(policies).deliver(db_session, agreement, ADMIN, _delivery(grants), revoke=True)
+    rev = AgreementService(policies).deliver(db_session, [agreement], ADMIN, _delivery(grants), revoke=True)
     assert rev.status == "applied" and grants.calls == [("revoke", "ana@example.com", "main.sales.orders", ("SELECT",))]
 
 
 def test_auto_deliver_is_opt_in(product, db_session: Session, monkeypatch):
     called = []
-    monkeypatch.setattr(AgreementService, "deliver", lambda *a, **k: called.append(1))
+    monkeypatch.setattr(AgreementService, "prepare_release", lambda *a, **k: called.append(1))
     access_agreements.auto_deliver(db_session, [object()], ADMIN, revoke=False)
     assert called == []
+    from src.common.config import get_settings
+    assert get_settings().ACCESS_AGREEMENTS_AUTO_REVOKE is True  # revocation ships by default
 
 
 def test_agreement_failure_never_blocks_approval(product, db_session: Session, monkeypatch):
@@ -124,3 +126,125 @@ def test_agreement_failure_never_blocks_approval(product, db_session: Session, m
     monkeypatch.setattr(AgreementService, "create_for_grant", boom)
     request, grant = _approve(db_session, product)
     assert grant is not None and request.status.lower() == "approved"
+
+
+
+# ------------------------------------------------------------ /review findings (P3a)
+
+def _agreement(db, grant):
+    return db.query(AccessPolicyDb).filter(AccessPolicyDb.access_grant_id == str(grant.id)).order_by(
+        AccessPolicyDb.created_at).all()[-1]
+
+
+def test_permission_levels_are_cumulative(product, db_session: Session):
+    req = AccessGrantRequestDb(requester_email=REQUESTER, entity_type="data_product", entity_id=product.id,
+                               entity_name=product.name, requested_duration_days=30, permission_level="WRITE",
+                               status="pending")
+    db_session.add(req)
+    db_session.flush()
+    _, grant = AccessGrantsManager().handle_request(db_session, ADMIN, AccessGrantHandlePayload(request_id=req.id, approved=True))
+    assert sorted(r["action"] for r in _agreement(db_session, grant).body["permission"]) == ["modify", "read"]
+
+
+def test_targets_are_strict_about_uc_names(product, db_session: Session):
+    db_session.add(OutputPortDb(product_id=product.id, name="topic", version="1.0.0", asset_type="kafka_topic",
+                                asset_identifier="a.b.c", status="active"))
+    db_session.add(OutputPortDb(product_id=product.id, name="flat", version="1.0.0", asset_type="table",
+                                asset_identifier="sales", status="active"))
+    db_session.flush()
+    assert entity_targets(db_session, "data_product", product.id) == ["uc:main.sales.orders"]
+    assert entity_targets(db_session, "asset", str(uuid.uuid4())) == []
+    assert entity_targets(db_session, "schema", "main.sales") == ["uc:main.sales"]
+    assert entity_targets(db_session, "catalog", "main.sales") == []
+
+
+def test_renewal_ships_the_later_expiry(product, db_session: Session):
+    policies = AccessPoliciesManager(attribute_sources=[])
+    _, first = _approve(db_session, product, duration=10)
+    AgreementService(policies).deliver(db_session, [_agreement(db_session, first)], ADMIN, _delivery(FakeGrants()))
+    _, second = _approve(db_session, product, duration=60)
+    release = AgreementService(policies).deliver(db_session, [_agreement(db_session, second)], ADMIN, _delivery(FakeGrants()))
+    assert release is not None and release.changes["update"]
+    rm = PolicyReleaseManager(policies)
+    select = [x for x in rm.ledger(db_session, "uc") if x["privilege"] == "SELECT"][0]
+    assert select["expires_at"].startswith(second.expires_at.date().isoformat())
+
+
+def test_new_agreement_version_stays_linked_to_its_grant(product, db_session: Session):
+    policies = AccessPoliciesManager(attribute_sources=[])
+    _, grant = _approve(db_session, product)
+    v2 = policies.create_new_version(db_session, "policy", _agreement(db_session, grant).id, "1.1.0", None, ADMIN)
+    assert v2.access_grant_id == str(grant.id)
+    AgreementService(policies).retire_for_grant(db_session, grant.id, ADMIN, "revoked")
+    assert {a.status for a in AgreementService(policies).for_grant(db_session, grant.id)} == {"retired"}
+
+
+def test_agreement_release_neither_supersedes_nor_breaks_a_reviewed_policy_release(product, db_session: Session):
+    policies = AccessPoliciesManager(attribute_sources=[])
+    rm = PolicyReleaseManager(policies)
+    other = AccessPolicyDb(name="HR", status="active", policy_type="Set", conflict="prohibit", body=policies._normalize_rules(
+        "Set", "prohibit", [], {"permission": [{"target": "uc:hr.people.t", "action": "read", "assignee": "group:hr"}]}))
+    db_session.add(other)
+    db_session.flush()
+    _, grant = _approve(db_session, product)
+    reviewed = rm.create_release(db_session, "uc", "steward@example.com")  # includes the Agreement's grants too
+    rm.change_status(db_session, reviewed.id, "under_review", "steward@example.com")
+    rm.change_status(db_session, reviewed.id, "approved", "approver@example.com")
+    AgreementService(policies).deliver(db_session, [_agreement(db_session, grant)], ADMIN, _delivery(FakeGrants()))
+    db_session.refresh(reviewed)
+    assert reviewed.status == "approved"
+    grants = FakeGrants()
+    out = rm.deliver(db_session, reviewed.id, ADMIN, _delivery(grants))  # re-based: only the HR grants remain
+    assert out.status == "applied" and {c[1] for c in grants.calls} == {"hr"}
+
+
+def test_scoped_release_does_not_refresh_unrelated_ledger_rows(product, db_session: Session):
+    policies = AccessPoliciesManager(attribute_sources=[])
+    rm = PolicyReleaseManager(policies)
+    hr = AccessPolicyDb(name="HR", status="active", policy_type="Set", conflict="prohibit", body=policies._normalize_rules(
+        "Set", "prohibit", [], {"permission": [{"target": "uc:hr.people.t", "action": "read", "assignee": "group:hr"}]}))
+    db_session.add(hr)
+    db_session.flush()
+    r = rm.create_release(db_session, "uc", "steward@example.com")
+    rm.change_status(db_session, r.id, "under_review", "steward@example.com")
+    rm.change_status(db_session, r.id, "approved", "approver@example.com")
+    rm.deliver(db_session, r.id, ADMIN, _delivery(FakeGrants()))
+    # Unreleased edit: the HR policy now expires.
+    hr.body = policies._normalize_rules("Set", "prohibit", [], {"permission": [{
+        "target": "uc:hr.people.t", "action": "read", "assignee": "group:hr",
+        "constraint": [{"leftOperand": "dateTime", "operator": "lteq", "rightOperand": "2099-01-01T00:00:00Z"}]}]})
+    db_session.flush()
+    _, grant = _approve(db_session, product)
+    AgreementService(policies).deliver(db_session, [_agreement(db_session, grant)], ADMIN, _delivery(FakeGrants()))
+    assert {x["expires_at"] for x in rm.ledger(db_session, "uc", principal="hr")} == {None}
+
+
+def test_revoke_expired_skips_grants_pending_in_an_agreement_revocation(product, db_session: Session):
+    from datetime import datetime, timezone
+
+    from src.controller.access_policy_releases_manager import R_DELIVERED
+    policies = AccessPoliciesManager(attribute_sources=[])
+    rm = PolicyReleaseManager(policies)
+    _, grant = _approve(db_session, product, duration=1)
+    agreement = _agreement(db_session, grant)
+    AgreementService(policies).deliver(db_session, [agreement], ADMIN, _delivery(FakeGrants()))
+    AgreementService(policies).retire_for_grant(db_session, grant.id, ADMIN, "expired")
+    pending = AgreementService(policies).prepare_release(db_session, [agreement], ADMIN, revoke=True)
+    pending.status = R_DELIVERED
+    db_session.flush()
+    later = datetime(2099, 1, 1, tzinfo=timezone.utc)
+    assert rm.revoke_expired(db_session, "uc", "system", _delivery(FakeGrants()), now=later).id == pending.id
+
+
+def test_failed_auto_delivery_keeps_the_release_as_failed(product, db_session: Session, monkeypatch):
+    from src.common.config import get_settings
+    _, grant = _approve(db_session, product)
+    monkeypatch.setattr(get_settings(), "ACCESS_AGREEMENTS_AUTO_DELIVER", True, raising=False)
+    monkeypatch.setattr(access_agreements, "_delivery_service", lambda: _delivery(FakeGrants()))
+    monkeypatch.setattr(PolicyReleaseManager, "deliver", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("ledger flush")))
+    # The fixture's outer transaction makes commit non-durable; emulate a real commit + rollback.
+    monkeypatch.setattr(db_session, "rollback", db_session.expire_all)
+    access_agreements.auto_deliver(db_session, [_agreement(db_session, grant)], ADMIN, revoke=False)
+    from src.db_models.access_policies import AccessPolicyReleaseDb
+    rows = db_session.query(AccessPolicyReleaseDb).filter(AccessPolicyReleaseDb.release_kind == "agreement").all()
+    assert [r.status for r in rows] == ["failed"]

@@ -81,7 +81,7 @@ KINDS: Dict[str, KindSpec] = {
 
 _LIFECYCLE_COPY = ("name", "description", "owner_team_id", "project_id", "uid")
 _KIND_COPY = {
-    KIND_POLICY: ("policy_type", "conflict", "inherit_from", "body"),
+    KIND_POLICY: ("policy_type", "conflict", "inherit_from", "body", "access_grant_id"),
     KIND_AUDIENCE: ("members", "refinement"),
     KIND_ASSET_COLLECTION: ("members", "refinement"),
 }
