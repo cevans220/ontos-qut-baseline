@@ -629,7 +629,8 @@ class AccessPoliciesManager:
     def _policy_doc(self, db: Session, policy: AccessPolicyDb) -> Tuple[Dict[str, Any], List[str]]:
         doc = {"uid": policy.uid, "name": f"{policy.name} v{policy.version}", "type": policy.policy_type,
                "conflict": policy.conflict, "profile": [odrl.ONTOS_PROFILE],
-               "inheritFrom": policy.inherit_from or [], **(policy.body or {})}
+               "inheritFrom": policy.inherit_from or [], **(policy.body or {}),
+               "fulfilledDuties": sorted({d.get("action") for d in policy.fulfilled_duties or [] if d.get("action")})}
         if not doc["inheritFrom"]:
             return doc, []
 
@@ -762,6 +763,7 @@ class AccessPoliciesManager:
             out.update({
                 "policy_type": row.policy_type, "conflict": row.conflict,
                 "access_grant_id": row.access_grant_id,
+                "fulfilled_duties": row.fulfilled_duties or [],
                 "subject_entity_type": row.subject_entity_type, "subject_entity_id": row.subject_entity_id,
                 "subject_name": self._subject_name(db, row),
                 "inherit_from": row.inherit_from or [], "rules": body,
