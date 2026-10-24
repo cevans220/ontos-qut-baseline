@@ -425,3 +425,29 @@ export interface AgreementForParty {
   obligations: { action: string; target: OdrlRef; constraint: OdrlConstraint[] }[];
   duties: DutyStatus[];
 }
+
+// ------------------------------------------------------------ drift (Phase 4)
+
+export interface DriftGrant {
+  principal: string;
+  securable_type: string;
+  securable_name: string;
+  privilege: string;
+}
+
+export interface DriftReport {
+  id: string;
+  target: string;
+  status: 'in_sync' | 'drift' | 'error';
+  checked_at: string;
+  checked_by: string | null;
+  counts: { missing?: number; unmanaged?: number; tracked?: number; errors?: number };
+  report?: {
+    missing: DriftGrant[];
+    unmanaged: DriftGrant[];
+    errors: string[];
+    securables_checked: number;
+    securables_tracked: number;
+    truncated: boolean;
+  };
+}

@@ -306,3 +306,46 @@ def test_snowflake_target_rejects_direct_and_untargeted_platforms_are_reported(p
         {"target": "snowflake:db.s.t", "action": "read", "assignee": "group:g"}]}, "SF only")
     issues = rm.compile(db_session, "uc")["issues"]
     assert any(i["code"] == "no_target" for i in issues)
+
+
+# ------------------------------------------------------------ drift reconcile (P4c)
+
+def _live(grants):
+    """get_grants fake over {(type, name): [(principal, privilege)]}."""
+    def get(stype, name):
+        rows = grants.get((stype, name), [])
+        return {"success": True, "grants": [{"principal": p, "privileges": [v]} for p, v in rows]}
+    return get
+
+
+def test_reconcile_reports_missing_and_unmanaged_and_changes_nothing(policies, rm, db_session: Session):
+    _policy(policies, db_session, SALES, "Sales")
+    _target(policies, db_session, "uc", reconcile_schedule="0 0 5 * * ?")
+    _ship(rm, db_session, "uc", Delivery([DeliveryMode.DIRECT], FakeGrants()))
+    before = rm.ledger(db_session, "uc")
+    live = _live({("catalog", "main"): [("analysts", "USE_CATALOG")],
+                  ("schema", "main.sales"): [("analysts", "USE_SCHEMA")],
+                  # SELECT revoked out of band; someone else got MODIFY.
+                  ("table", "main.sales.orders"): [("Mallory@x.com", "MODIFY")]})
+    reports = rm.reconcile_scheduled(db_session, live, "job")
+    assert [r.status for r in reports] == ["drift"]
+    r = reports[0]
+    assert r.counts["missing"] == 1 and r.counts["unmanaged"] == 1
+    assert r.report["missing"][0]["privilege"] == "SELECT"
+    assert rm.ledger(db_session, "uc") == before  # report only
+
+
+def test_reconcile_in_sync_and_not_for_unreadable_platforms(policies, rm, db_session: Session):
+    _policy(policies, db_session, SALES, "Sales")
+    _ship(rm, db_session, "uc", Delivery([DeliveryMode.DIRECT], FakeGrants()))
+    live = _live({("catalog", "main"): [("analysts", "USE_CATALOG")],
+                  ("schema", "main.sales"): [("analysts", "USE_SCHEMA")],
+                  ("table", "main.sales.orders"): [("ANALYSTS", "SELECT")]})
+    assert rm.reconcile(db_session, "uc", live, ADMIN).status == "in_sync"
+    _target(policies, db_session, "sf", system="snowflake", modes=["manual"])
+    with pytest.raises(AccessPolicyError):
+        rm.reconcile(db_session, "sf", live, ADMIN)
+    # The builtin target has no schedule: the job skips it unless named.
+    assert rm.reconcile_scheduled(db_session, live, "job") == []
+    assert len(rm.reconcile_scheduled(db_session, live, "job", ["uc"])) == 1
+    assert [x.status for x in rm.drift_reports(db_session, "uc")] == ["in_sync", "in_sync"]

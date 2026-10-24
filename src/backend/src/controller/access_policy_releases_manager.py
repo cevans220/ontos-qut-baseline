@@ -43,6 +43,7 @@ from src.controller.access_policies_manager import (
 )
 from src.db_models.access_policies import (
     ENTITY_TYPE_RELEASE,
+    AccessDriftReportDb,
     AccessGrantLedgerDb,
     AccessPolicyReleaseDb,
 )
@@ -91,6 +92,8 @@ LEDGER_REVOKED = "revoked"
 LEDGER_RELEASED = "released"
 
 LIVE_DIFF_MAX_SECURABLES = 200
+# The scheduled reconcile isn't interactive: it may read many more securables.
+RECONCILE_MAX_SECURABLES = 2000
 
 
 def _now() -> datetime:
@@ -734,6 +737,91 @@ class PolicyReleaseManager:
         row.live_diff = report
         db.flush()
         return report
+
+    # ------------------------------------------------------------ drift (report only)
+
+    def reconcile(self, db: Session, target: str, get_grants: Callable[[str, str], Dict[str, Any]],
+                  user: Optional[str], *, max_securables: int = RECONCILE_MAX_SECURABLES) -> AccessDriftReportDb:
+        """Compare the target's Grant Ledger with live grants and store a drift report. Changes nothing.
+
+        Drift is reported, never fixed (Lars, 2026-10-17): a missing grant may have been revoked on
+        purpose, an unmanaged one granted by another process. Admins are notified when it changes.
+        """
+        resolved = self.resolve(db, target, include_deprecated=True)
+        if pt.CAP_READ_GRANTS not in resolved.adapter.capabilities:
+            raise AccessPolicyError(f"Live grants can't be read from {resolved.adapter.label} yet", 409)
+        managed = [_ledger_grant(r) for r in self.active_ledger(db, target) if r.securable_type != uc.ABAC_POLICY]
+        securables = sorted({(g.securable_type, g.securable_name) for g in managed})
+        live: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+        errors: List[str] = []
+        for (stype, sname), res in uc.read_live_grants(securables[:max_securables], get_grants).items():
+            if res.get("success"):
+                live[(stype, sname)] = res.get("grants") or []
+            else:
+                errors.append(f"{stype} {sname}: {res.get('error') or 'unreadable'}")
+        checked = [g for g in managed if (g.securable_type, g.securable_name) in live]
+        report = uc.live_diff(checked, checked, live)
+        report.update({"securables_checked": len(live), "securables_tracked": len(securables),
+                       "truncated": len(securables) > max_securables, "errors": errors[:50]})
+        counts = {"missing": len(report["missing"]), "unmanaged": len(report["unmanaged"]),
+                  "tracked": len(managed), "errors": len(errors)}
+        status = ("error" if errors and not live else
+                  "drift" if counts["missing"] or counts["unmanaged"] else "in_sync")
+        previous = (db.query(AccessDriftReportDb).filter(AccessDriftReportDb.target == target)
+                    .order_by(AccessDriftReportDb.checked_at.desc()).first())
+        row = AccessDriftReportDb(target=target, status=status, checked_by=user, counts=counts, report=report,
+                                  checked_at=_now())
+        db.add(row)
+        db.flush()
+        if status != "in_sync" and (previous is None or previous.status != status or previous.counts != counts):
+            self._notify_drift(db, resolved, row)
+        return row
+
+    @staticmethod
+    def _notify_drift(db: Session, target: pt.ResolvedTarget, row: AccessDriftReportDb) -> None:
+        """Best-effort admin notification (savepoint: never touches the caller's transaction)."""
+        try:
+            import uuid
+
+            from src.models.notifications import Notification, NotificationType
+            from src.repositories.notification_repository import notification_repo
+            c = row.counts or {}
+            what = (f"{c.get('missing', 0)} tracked grant(s) missing, {c.get('unmanaged', 0)} unmanaged"
+                    if row.status == "drift" else f"live grants could not be read ({c.get('errors', 0)} errors)")
+            with db.begin_nested():
+                notification_repo.create(db, obj_in=Notification(
+                    id=str(uuid.uuid4()), type=NotificationType.WARNING,
+                    title=f"Access drift on {target.label}",
+                    description=f"Target '{target.key}': {what}. Report only — nothing was changed.",
+                    link="/access-policies?tab=targets", recipient="Admin",
+                    created_at=_now().replace(tzinfo=None), read=False, can_delete=True,
+                ))
+        except Exception as e:  # pragma: no cover - notification is best-effort
+            logger.warning("Could not notify about drift on %s: %s", target.key, e)
+
+    def drift_reports(self, db: Session, target: Optional[str] = None, limit: int = 50) -> List[AccessDriftReportDb]:
+        q = db.query(AccessDriftReportDb)
+        if target:
+            q = q.filter(AccessDriftReportDb.target == target)
+        return q.order_by(AccessDriftReportDb.checked_at.desc()).limit(limit).all()
+
+    @staticmethod
+    def drift_to_dict(row: AccessDriftReportDb, *, full: bool = False) -> Dict[str, Any]:
+        out = {"id": row.id, "target": row.target, "status": row.status, "checked_at": row.checked_at,
+               "checked_by": row.checked_by, "counts": row.counts or {}}
+        if full:
+            out["report"] = row.report or {}
+        return out
+
+    def reconcile_scheduled(self, db: Session, get_grants: Callable[[str, str], Dict[str, Any]], user: Optional[str],
+                            keys: Optional[List[str]] = None) -> List[AccessDriftReportDb]:
+        """The job's entry point: every readable target with a reconcile schedule (or the given keys)."""
+        out = []
+        for t in self.targets(db, include_deprecated=True):
+            wanted = t.key in keys if keys else bool(t.reconcile_schedule)
+            if wanted and pt.CAP_READ_GRANTS in t.adapter.capabilities:
+                out.append(self.reconcile(db, t.key, get_grants, user))
+        return out
 
     # ------------------------------------------------------------ read model
 
