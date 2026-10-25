@@ -38,6 +38,8 @@ logger = get_logger(__name__)
 
 WORKFLOW_ID = "metagen_generate"
 RESULTS_TABLE = "metagen_results"
+# Rows per results query; keeps each response well below the 25 MiB inline limit
+RESULTS_PAGE_SIZE = 2000
 DEFAULT_MODEL = "databricks-claude-sonnet-4-6"
 MAX_ACTIVE_RUNS_PER_USER = 1
 # An ingest claim older than this is treated as abandoned (e.g. the app restarted)
@@ -428,6 +430,9 @@ class MetadataGenerationManager:
             return count
         except Exception as e:
             logger.error("Failed to ingest metadata generation results for run %s: %s", run.id, e, exc_info=True)
+            # Drop whatever the failed attempt left in the session (incl. a failed commit)
+            db.rollback()
+            db.refresh(run)
             run.ingest_attempts = (run.ingest_attempts or 0) + 1
             if run.ingest_attempts < MAX_INGEST_ATTEMPTS:
                 # The job succeeded and its rows stay in Delta: the next refresh retries
@@ -482,19 +487,33 @@ class MetadataGenerationManager:
         return len(targets)
 
     def _fetch_results(self, run_id: str) -> List[Dict[str, Optional[str]]]:
-        """Read this run's rows from the metagen_results Delta table via the SQL warehouse."""
-        from databricks.sdk.service.sql import StatementParameterListItem, StatementState
+        """Read this run's rows from the metagen_results Delta table via the SQL warehouse.
 
+        Paged (stable order + LIMIT/OFFSET) so no single response gets near
+        the statement API's inline result limit.
+        """
         ws = self._ws_factory() if self._ws_factory else None
         if ws is None:
             from src.common.workspace_client import get_workspace_client
             ws = get_workspace_client()
 
         table = ".".join(f"`{part}`" for part in (*self._output_schema(), RESULTS_TABLE))
+        rows: List[Dict[str, Optional[str]]] = []
+        while True:
+            page = self._fetch_results_page(ws, table, run_id, offset=len(rows))
+            rows.extend(page)
+            if len(page) < RESULTS_PAGE_SIZE:
+                return rows
+
+    def _fetch_results_page(self, ws: Any, table: str, run_id: str, *, offset: int) -> List[Dict[str, Optional[str]]]:
+        from databricks.sdk.service.sql import StatementParameterListItem, StatementState
+
         resp = ws.statement_execution.execute_statement(
             statement=(
                 f"SELECT object_type, table_fqn, column_name, base_text, proposed_text "
-                f"FROM {table} WHERE ontos_run_id = :run_id"
+                f"FROM {table} WHERE ontos_run_id = :run_id "
+                f"ORDER BY table_fqn, column_name NULLS FIRST "
+                f"LIMIT {int(RESULTS_PAGE_SIZE)} OFFSET {int(offset)}"
             ),
             warehouse_id=self._settings.DATABRICKS_WAREHOUSE_ID,
             parameters=[StatementParameterListItem(name="run_id", value=run_id)],

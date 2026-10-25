@@ -1272,8 +1272,6 @@ class JobsManager:
                     except Exception as e:
                         logger.error(f"Error polling job {installation.job_id} ({installation.workflow_id}): {e}")
 
-                self._run_poll_cycle_handlers(db)
-
                 # Commit all updates
                 try:
                     db.commit()
@@ -1286,6 +1284,19 @@ class JobsManager:
             finally:
                 # Always close the session
                 db.close()
+
+            # After the cycle's own updates are committed, on a separate session,
+            # so a handler's commit or rollback can't touch them
+            if self._poll_cycle_handlers and self._has_installations:
+                try:
+                    handler_db = next(get_db())
+                    try:
+                        self._run_poll_cycle_handlers(handler_db)
+                    finally:
+                        handler_db.close()
+                except Exception as e:
+                    # Never let a handler (or opening its session) end the polling thread
+                    logger.error(f"Error running poll-cycle handlers: {e}", exc_info=True)
 
             # Adaptive interval: reset to base when there's live activity to
             # track, otherwise ease off toward the cap so a quiet system stops

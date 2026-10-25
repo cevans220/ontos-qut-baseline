@@ -84,3 +84,78 @@ def test_poll_cycle_handlers_run_every_cycle_and_failures_are_contained():
     failing.assert_called_once_with(session)
     sweep.assert_called_once_with(session)  # still runs after the failing one
     session.rollback.assert_called()
+
+
+def _poll_with_sessions(installations, cycle_handler):
+    """Poll once with a distinct session per get_db() call and a shared call log."""
+    mgr = JobsManager(db=MagicMock(), ws_client=MagicMock())
+    mgr.register_poll_cycle_handler(cycle_handler)
+    mgr._client.jobs.list_runs.return_value = []
+    log, sessions = [], []
+
+    def fake_get_db():
+        session = MagicMock(name=f"session{len(sessions)}")
+        session.commit.side_effect = lambda: log.append(("commit", session))
+        session.close.side_effect = lambda: log.append(("close", session))
+        sessions.append(session)
+        yield session
+
+    def stop_after_first(timeout=None):
+        mgr._stop_polling.set()
+        return True
+
+    with patch("src.common.database.get_db", fake_get_db), \
+         patch.object(mgr._stop_polling, "wait", side_effect=stop_after_first), \
+         patch("src.controller.jobs_manager.workflow_installation_repo") as inst_repo:
+        inst_repo.get_all_installed.return_value = installations
+        mgr._poll_job_states(interval_seconds=0)
+    return log, sessions
+
+
+def test_poll_cycle_handlers_use_their_own_session_after_the_commit():
+    log = []
+    handler = MagicMock(side_effect=lambda db: log.append(("handler", db)))
+    installation = SimpleNamespace(id="i", workflow_id="w", name="w", job_id=1, last_polled_at=None)
+    events, sessions = _poll_with_sessions([installation], handler)
+
+    poll_session, handler_session = sessions
+    handler.assert_called_once_with(handler_session)
+    order = [name for name, s in events if s is poll_session]
+    assert order == ["commit", "close"]  # poller finished before the handler started
+    assert ("close", handler_session) in events
+
+
+def test_poll_cycle_handlers_skip_when_nothing_is_installed():
+    handler = MagicMock()
+    _, sessions = _poll_with_sessions([], handler)
+    handler.assert_not_called()
+    assert len(sessions) == 1
+
+
+def test_failure_opening_the_handler_session_does_not_end_polling():
+    mgr = JobsManager(db=MagicMock(), ws_client=MagicMock())
+    mgr.register_poll_cycle_handler(MagicMock())
+    mgr._client.jobs.list_runs.return_value = []
+    installation = SimpleNamespace(id="i", workflow_id="w", name="w", job_id=1, last_polled_at=None)
+    calls = {"n": 0}
+
+    def fake_get_db():
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("db unreachable")
+        yield MagicMock()
+
+    cycles = {"n": 0}
+
+    def wait(timeout=None):
+        cycles["n"] += 1
+        if cycles["n"] >= 2:
+            mgr._stop_polling.set()
+        return True
+
+    with patch("src.common.database.get_db", fake_get_db), \
+         patch.object(mgr._stop_polling, "wait", side_effect=wait), \
+         patch("src.controller.jobs_manager.workflow_installation_repo") as inst_repo:
+        inst_repo.get_all_installed.return_value = [installation]
+        mgr._poll_job_states(interval_seconds=0)
+    assert cycles["n"] == 2  # the loop survived the failure and polled again

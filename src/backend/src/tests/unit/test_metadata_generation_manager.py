@@ -75,6 +75,15 @@ def _manager(jobs=None, ws=None):
 
 
 @pytest.fixture(autouse=True)
+def rollback_keeps_fixture_data(db_session, monkeypatch):
+    """A real Session.rollback() would discard the harness's outer transaction
+    (and every row the test created); record calls instead."""
+    rollback = MagicMock()
+    monkeypatch.setattr(db_session, "rollback", rollback)
+    return rollback
+
+
+@pytest.fixture(autouse=True)
 def background_session(db_session, monkeypatch):
     """Background ingests open their own session; hand them the test session."""
     session = MagicMock(wraps=db_session)
@@ -750,3 +759,62 @@ def test_retry_backoff_doubles_per_attempt(db_session, installation):
     _backdate(db_session, run, seconds=150)
     manager.refresh_run(db_session, run)
     jobs.get_job_status.assert_called_once()
+
+
+def test_fetch_results_pages_through_large_runs(db_session, installation, monkeypatch):
+    monkeypatch.setattr("src.controller.metadata_generation_manager.RESULTS_PAGE_SIZE", 2)
+    ws = MagicMock()
+    ws.statement_execution.execute_statement.side_effect = [
+        _statement(StatementState.SUCCEEDED, rows=[
+            ["table", "main.sales.orders", None, None, "Orders."],
+            ["column", "main.sales.orders", "amount", None, "Amount."],
+        ]),
+        _statement(StatementState.SUCCEEDED, rows=[["column", "main.sales.orders", "id", None, "Order id."]]),
+    ]
+    manager = _manager(ws=ws)
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+
+    assert manager.ingest_results(db_session, run) == 3
+    statements = [c.kwargs["statement"] for c in ws.statement_execution.execute_statement.call_args_list]
+    assert "ORDER BY table_fqn, column_name NULLS FIRST LIMIT 2 OFFSET 0" in statements[0]
+    assert statements[1].endswith("LIMIT 2 OFFSET 2")
+
+
+def test_list_and_count_suggestions_filter_by_status(db_session, installation):
+    rows = [
+        ["table", "main.sales.orders", None, None, "Orders."],
+        ["column", "main.sales.orders", "id", None, "Order id."],
+    ]
+    manager = _manager(ws=_ws_returning(rows))
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    manager.ingest_results(db_session, run)
+    db_session.query(DescriptionSuggestionDb).filter_by(run_id=run.id, column_name="id").update({"status": "rejected"})
+    db_session.commit()
+
+    pending = manager.list_suggestions(db_session, run.id, status="pending")
+    assert [s.column_name for s in pending] == [None]
+    assert manager.count_suggestions(db_session, run.id, status="pending") == 1
+    assert manager.count_suggestions(db_session, run.id, status="rejected") == 1
+    assert manager.count_suggestions(db_session, run.id) == 2
+    assert [s.column_name for s in manager.list_suggestions(db_session, run.id, limit=1, skip=1)] == ["id"]
+
+
+def test_failed_commit_is_rolled_back_and_counted(db_session, installation, monkeypatch):
+    ws = _ws_returning([["table", "main.sales.orders", None, None, "Orders."]])
+    manager = _manager(ws=ws)
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    real_commit = db_session.commit
+    calls = {"n": 0}
+
+    def flaky_commit():
+        calls["n"] += 1
+        if calls["n"] == 2:  # the commit after storing the suggestions
+            raise RuntimeError("connection reset")
+        return real_commit()
+
+    monkeypatch.setattr(db_session, "commit", flaky_commit)
+    monkeypatch.setattr(db_session, "refresh", MagicMock())
+
+    manager.ingest_results(db_session, run)
+    db_session.rollback.assert_called_once()
+    assert (run.status, run.ingest_attempts) == ("running", 1)
