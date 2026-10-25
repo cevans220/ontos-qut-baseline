@@ -35,6 +35,7 @@ def upgrade() -> None:
         sa.Column('job_run_id', sa.String(), nullable=True),
         sa.Column('token_usage', JSON(), nullable=True),
         sa.Column('suggestion_count', sa.Integer(), nullable=False, server_default='0'),
+        sa.Column('ingest_attempts', sa.Integer(), nullable=False, server_default='0'),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column('started_at', sa.DateTime(timezone=True), nullable=True),

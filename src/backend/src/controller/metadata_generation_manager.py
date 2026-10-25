@@ -41,6 +41,8 @@ DEFAULT_MODEL = "databricks-claude-sonnet-4-6"
 MAX_ACTIVE_RUNS_PER_USER = 1
 # An ingest claim older than this is treated as abandoned (e.g. the app restarted)
 STALE_INGEST_CLAIM = timedelta(minutes=15)
+# Loading a successful job's results is retried this often before the run fails
+MAX_INGEST_ATTEMPTS = 3
 
 # Jobs API life-cycle states after which a run will not change any more
 _TERMINAL_LIFE_CYCLE_STATES = {"TERMINATED", "SKIPPED", "INTERNAL_ERROR"}
@@ -86,6 +88,9 @@ class MetadataGenerationManager:
         self._ws_factory = workspace_client_factory
         if self._jobs is not None and hasattr(self._jobs, "register_run_terminated_handler"):
             self._jobs.register_run_terminated_handler(WORKFLOW_ID, self.handle_job_terminated)
+            # Each poller cycle also retries runs a one-off notification can't
+            # finish: a failed ingest attempt, an abandoned claim, an orphan
+            self._jobs.register_poll_cycle_handler(self._refresh_active_runs)
 
     def _output_schema(self) -> Tuple[str, str]:
         """The app's deploy-time catalog and schema.
@@ -391,10 +396,16 @@ class MetadataGenerationManager:
             return count
         except Exception as e:
             logger.error("Failed to ingest metadata generation results for run %s: %s", run.id, e, exc_info=True)
-            run.status = GenerationRunStatus.FAILED.value
-            run.error = "Failed to read the generated descriptions"
-            run.progress_message = None
-            run.completed_at = _now()
+            run.ingest_attempts = (run.ingest_attempts or 0) + 1
+            if run.ingest_attempts < MAX_INGEST_ATTEMPTS:
+                # The job succeeded and its rows stay in Delta: the next refresh retries
+                run.status = GenerationRunStatus.RUNNING.value
+                run.progress_message = "Retrying to load the generated descriptions"
+            else:
+                run.status = GenerationRunStatus.FAILED.value
+                run.error = "Failed to read the generated descriptions"
+                run.progress_message = None
+                run.completed_at = _now()
             db.commit()
             return 0
 

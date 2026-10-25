@@ -17,10 +17,12 @@ from databricks.sdk.service.jobs import RunLifeCycleState, RunResultState
 from src.controller.jobs_manager import JobsManager
 
 
-def _poll_once(life_cycle_state, result_state, *, notified_at=None):
+def _poll_once(life_cycle_state, result_state, *, notified_at=None, cycle_handlers=()):
     mgr = JobsManager(db=MagicMock(), ws_client=MagicMock())
     handler = MagicMock()
     mgr.register_run_terminated_handler("metagen_generate", handler)
+    for cycle_handler in cycle_handlers:
+        mgr.register_poll_cycle_handler(cycle_handler)
 
     installation = SimpleNamespace(
         id="inst-1", workflow_id="metagen_generate", name="Metadata Generation", job_id=42, last_polled_at=None,
@@ -73,3 +75,12 @@ def test_running_run_is_not_handed_over():
 def test_already_notified_run_is_not_handed_over_again():
     handler, _ = _poll_once(RunLifeCycleState.TERMINATED, RunResultState.SUCCESS, notified_at="2026-10-24")
     handler.assert_not_called()
+
+
+def test_poll_cycle_handlers_run_every_cycle_and_failures_are_contained():
+    failing = MagicMock(side_effect=RuntimeError("boom"))
+    sweep = MagicMock()
+    _, session = _poll_once(RunLifeCycleState.RUNNING, None, cycle_handlers=(failing, sweep))
+    failing.assert_called_once_with(session)
+    sweep.assert_called_once_with(session)  # still runs after the failing one
+    session.rollback.assert_called()

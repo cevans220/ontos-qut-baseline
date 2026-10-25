@@ -92,6 +92,7 @@ def test_registers_poller_handler():
     jobs = _jobs()
     manager = _manager(jobs=jobs)
     jobs.register_run_terminated_handler.assert_called_once_with(WORKFLOW_ID, manager.handle_job_terminated)
+    jobs.register_poll_cycle_handler.assert_called_once_with(manager._refresh_active_runs)
 
 
 def test_start_run_launches_job_with_app_schema_and_default_model(db_session, installation):
@@ -222,9 +223,31 @@ def test_ingest_failure_marks_run_failed(db_session, installation):
     ws.statement_execution.execute_statement.side_effect = RuntimeError("warehouse down")
     manager = _manager(ws=ws)
     run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+
+    # Transient failures leave the successful run retryable...
+    for attempt in (1, 2):
+        manager.ingest_results(db_session, run)
+        assert (run.status, run.ingest_attempts, run.error) == ("running", attempt, None)
+    # ...until the attempts are used up
     manager.ingest_results(db_session, run)
     assert run.status == "failed"
     assert run.error == "Failed to read the generated descriptions"
+    assert ws.statement_execution.execute_statement.call_count == 3
+
+
+def test_ingest_retry_succeeds_after_transient_failure(db_session, installation):
+    ws = _ws_returning([["table", "main.sales.orders", None, None, "Orders."]])
+    good = ws.statement_execution.execute_statement.return_value
+    ws.statement_execution.execute_statement.side_effect = [RuntimeError("warehouse throttled"), good]
+    jobs = _jobs()
+    manager = _manager(jobs=jobs, ws=ws)
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    jobs.get_job_status.return_value = {"life_cycle_state": "TERMINATED", "result_state": "SUCCESS"}
+
+    manager.refresh_run(db_session, run)
+    assert run.status == "running"
+    manager.refresh_run(db_session, run)  # the next poll retries
+    assert (run.status, run.suggestion_count) == ("completed", 1)
 
 
 def test_cancel_and_delete_rules(db_session, installation):
@@ -382,7 +405,7 @@ def test_fetch_results_failed_statement_fails_run(db_session, installation):
     run = manager.start_run(db_session, user_id="a@x.com", request=_request())
 
     manager.ingest_results(db_session, run)
-    assert run.status == "failed"
+    assert (run.status, run.ingest_attempts) == ("running", 1)  # retried on the next refresh
     assert manager.count_suggestions(db_session, run.id) == 0
 
 
@@ -436,7 +459,7 @@ def test_store_failure_rolls_back_partial_suggestions(db_session, installation, 
     )
     assert manager.ingest_results(db_session, run) == 0
 
-    assert run.status == "failed"
+    assert (run.status, run.ingest_attempts) == ("running", 1)
     rows = manager.list_suggestions(db_session, run.id)
     assert [r.proposed_text for r in rows] == ["Earlier."]  # nothing half-written, nothing lost
     assert manager.list_runs(db_session, "a@x.com")[0].id == run.id  # session still usable
@@ -634,3 +657,19 @@ def test_failed_refresh_rolls_back_before_start_continues(db_session, installati
     other = StartRunRequest(selection=[SelectionItem(type="schema", fqn="main.hr")])
     manager.start_run(db_session, user_id="b@x.com", request=other)
     rollback.assert_called_once()
+
+
+def test_poll_cycle_sweep_retries_a_failed_ingest(db_session, installation):
+    ws = _ws_returning([["table", "main.sales.orders", None, None, "Orders."]])
+    good = ws.statement_execution.execute_statement.return_value
+    ws.statement_execution.execute_statement.side_effect = [RuntimeError("warehouse throttled"), good]
+    jobs = _jobs(job_run_id=321)
+    manager = _manager(jobs=jobs, ws=ws)
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    jobs.get_job_status.return_value = {"life_cycle_state": "TERMINATED", "result_state": "SUCCESS"}
+
+    manager.handle_job_terminated(db_session, 321, "SUCCESS")  # the one-off notification fails
+    assert run.status == "running"
+    sweep = jobs.register_poll_cycle_handler.call_args.args[0]
+    sweep(db_session)  # next poller cycle
+    assert run.status == "completed"

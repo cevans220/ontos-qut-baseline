@@ -54,12 +54,27 @@ class JobsManager:
         # handler(db, run_id, result_state). Lets features that track their
         # own run records (e.g. Metadata Generation) finish runs nobody watches.
         self._run_terminated_handlers: Dict[str, Callable[[Session, int, Optional[str]], None]] = {}
+        # Callbacks run once per polling cycle that saw installed workflows:
+        # handler(db). For features that retry their own unfinished work.
+        self._poll_cycle_handlers: List[Callable[[Session], None]] = []
 
     def register_run_terminated_handler(
         self, workflow_id: str, handler: Callable[[Session, int, Optional[str]], None]
     ) -> None:
         """Register a callback for terminated runs of ``workflow_id``."""
         self._run_terminated_handlers[workflow_id] = handler
+
+    def register_poll_cycle_handler(self, handler: Callable[[Session], None]) -> None:
+        """Register a callback invoked on every polling cycle."""
+        self._poll_cycle_handlers.append(handler)
+
+    def _run_poll_cycle_handlers(self, db: Session) -> None:
+        for handler in self._poll_cycle_handlers:
+            try:
+                handler(db)
+            except Exception as e:
+                logger.error(f"Poll-cycle handler {handler!r} failed: {e}", exc_info=True)
+                db.rollback()
 
     def _notify_run_terminated(self, workflow_id: str, run_id: int, result_state: Optional[str], db: Session) -> None:
         handler = self._run_terminated_handlers.get(workflow_id)
@@ -1256,6 +1271,8 @@ class JobsManager:
 
                     except Exception as e:
                         logger.error(f"Error polling job {installation.job_id} ({installation.workflow_id}): {e}")
+
+                self._run_poll_cycle_handlers(db)
 
                 # Commit all updates
                 try:

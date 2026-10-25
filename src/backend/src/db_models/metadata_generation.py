@@ -38,6 +38,8 @@ class MetadataGenerationRunDb(Base):
     # Token usage reported by dbxmetagen (filled in a later slice)
     token_usage = Column(JSON, nullable=True)
     suggestion_count = Column(Integer, nullable=False, default=0)
+    # Failed attempts at loading the job's results; retried up to a limit
+    ingest_attempts = Column(Integer, nullable=False, default=0)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
