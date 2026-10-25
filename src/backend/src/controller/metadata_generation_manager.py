@@ -12,6 +12,7 @@ See docs/decisions/metadata-generation-execution.md.
 """
 
 import time
+from concurrent.futures import Executor, ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -43,6 +44,8 @@ MAX_ACTIVE_RUNS_PER_USER = 1
 STALE_INGEST_CLAIM = timedelta(minutes=15)
 # Loading a successful job's results is retried this often before the run fails
 MAX_INGEST_ATTEMPTS = 3
+# Wait before retrying a failed ingest: this, doubled per further attempt
+INGEST_RETRY_DELAY = timedelta(minutes=1)
 
 # Jobs API life-cycle states after which a run will not change any more
 _TERMINAL_LIFE_CYCLE_STATES = {"TERMINATED", "SKIPPED", "INTERNAL_ERROR"}
@@ -82,15 +85,28 @@ class MetadataGenerationManager:
         settings: Settings,
         jobs_manager: Any = None,
         workspace_client_factory: Optional[Callable[[], Any]] = None,
+        ingest_executor: Optional[Executor] = None,
     ):
         self._settings = settings
         self._jobs = jobs_manager
         self._ws_factory = workspace_client_factory
+        # Ingests started from the jobs poller run here, so a slow warehouse
+        # read doesn't stall polling for every other workflow
+        self._ingest_executor = ingest_executor or ThreadPoolExecutor(
+            max_workers=2, thread_name_prefix="metagen-ingest"
+        )
         if self._jobs is not None and hasattr(self._jobs, "register_run_terminated_handler"):
             self._jobs.register_run_terminated_handler(WORKFLOW_ID, self.handle_job_terminated)
             # Each poller cycle also retries runs a one-off notification can't
             # finish: a failed ingest attempt, an abandoned claim, an orphan
-            self._jobs.register_poll_cycle_handler(self._refresh_active_runs)
+            self._jobs.register_poll_cycle_handler(self.sweep_active_runs)
+
+    def _submit_ingest(self, run_id: str) -> None:
+        self._ingest_executor.submit(self.ingest_run_by_id, run_id)
+
+    def sweep_active_runs(self, db: Session) -> None:
+        """Poll-cycle hook: finish or retry active runs, ingesting off the poller thread."""
+        self._refresh_active_runs(db, defer_ingest=self._submit_ingest)
 
     def _output_schema(self) -> Tuple[str, str]:
         """The app's deploy-time catalog and schema.
@@ -263,6 +279,8 @@ class MetadataGenerationManager:
             return run
         if not self._jobs:
             return run
+        if self._in_ingest_backoff(run):
+            return run
         if run.status == GenerationRunStatus.INGESTING.value and not self._is_stale(run.updated_at):
             return run  # the job is done; someone is loading its results
         status = self._jobs.get_job_status(int(run.job_run_id))
@@ -274,6 +292,17 @@ class MetadataGenerationManager:
             else:
                 self._finish(db, run, result_state)
         return run
+
+    @staticmethod
+    def _in_ingest_backoff(run: MetadataGenerationRunDb) -> bool:
+        """Whether a failed ingest attempt was too recent to retry yet."""
+        attempts = run.ingest_attempts or 0
+        if attempts == 0 or run.status != GenerationRunStatus.RUNNING.value or run.updated_at is None:
+            return False
+        last_failure = run.updated_at
+        if last_failure.tzinfo is None:  # SQLite returns naive UTC
+            last_failure = last_failure.replace(tzinfo=timezone.utc)
+        return _now() < last_failure + INGEST_RETRY_DELAY * (2 ** (attempts - 1))
 
     @staticmethod
     def _is_stale(timestamp: Optional[datetime]) -> bool:
@@ -325,6 +354,9 @@ class MetadataGenerationManager:
         """JobsManager poller callback for terminated ``metagen_generate`` runs."""
         run = metagen_runs_repo.get_by_job_run_id(db, str(job_run_id))
         if run is None or run.status in TERMINAL_RUN_STATUSES:
+            return
+        if result_state == "SUCCESS":
+            self._submit_ingest(run.id)
             return
         self._finish(db, run, result_state)
 

@@ -58,12 +58,39 @@ def _jobs(job_run_id=111):
     return jobs
 
 
+class SyncExecutor:
+    """Runs submitted work immediately, so background ingests are deterministic."""
+
+    def submit(self, fn, *args, **kwargs):
+        fn(*args, **kwargs)
+
+
 def _manager(jobs=None, ws=None):
     return MetadataGenerationManager(
         settings=_settings(),
         jobs_manager=jobs or _jobs(),
         workspace_client_factory=(lambda: ws) if ws else None,
+        ingest_executor=SyncExecutor(),
     )
+
+
+@pytest.fixture(autouse=True)
+def background_session(db_session, monkeypatch):
+    """Background ingests open their own session; hand them the test session."""
+    session = MagicMock(wraps=db_session)
+    session.close = MagicMock()
+    monkeypatch.setattr("src.common.database.get_session_factory", lambda: (lambda: session))
+    return session
+
+
+def _backdate(db_session, run, **delta):
+    from datetime import datetime, timedelta, timezone
+
+    db_session.query(type(run)).filter_by(id=run.id).update(
+        {"updated_at": datetime.now(timezone.utc) - timedelta(**delta)}, synchronize_session=False
+    )
+    db_session.commit()
+    db_session.refresh(run)
 
 
 def _request(**kwargs):
@@ -92,7 +119,7 @@ def test_registers_poller_handler():
     jobs = _jobs()
     manager = _manager(jobs=jobs)
     jobs.register_run_terminated_handler.assert_called_once_with(WORKFLOW_ID, manager.handle_job_terminated)
-    jobs.register_poll_cycle_handler.assert_called_once_with(manager._refresh_active_runs)
+    jobs.register_poll_cycle_handler.assert_called_once_with(manager.sweep_active_runs)
 
 
 def test_start_run_launches_job_with_app_schema_and_default_model(db_session, installation):
@@ -246,7 +273,10 @@ def test_ingest_retry_succeeds_after_transient_failure(db_session, installation)
 
     manager.refresh_run(db_session, run)
     assert run.status == "running"
-    manager.refresh_run(db_session, run)  # the next poll retries
+    manager.refresh_run(db_session, run)  # too soon: backing off
+    assert ws.statement_execution.execute_statement.call_count == 1
+    _backdate(db_session, run, minutes=2)
+    manager.refresh_run(db_session, run)  # the next poll after the delay retries
     assert (run.status, run.suggestion_count) == ("completed", 1)
 
 
@@ -669,7 +699,54 @@ def test_poll_cycle_sweep_retries_a_failed_ingest(db_session, installation):
     jobs.get_job_status.return_value = {"life_cycle_state": "TERMINATED", "result_state": "SUCCESS"}
 
     manager.handle_job_terminated(db_session, 321, "SUCCESS")  # the one-off notification fails
+    db_session.refresh(run)
     assert run.status == "running"
+    _backdate(db_session, run, minutes=2)
     sweep = jobs.register_poll_cycle_handler.call_args.args[0]
-    sweep(db_session)  # next poller cycle
+    sweep(db_session)  # next poller cycle, past the retry delay
+    db_session.refresh(run)
     assert run.status == "completed"
+
+
+def test_poller_success_ingests_on_the_executor_not_inline(db_session, installation):
+    submitted = []
+    ws = _ws_returning([["table", "main.sales.orders", None, None, "Orders."]])
+    jobs = _jobs(job_run_id=444)
+    manager = MetadataGenerationManager(
+        settings=_settings(), jobs_manager=jobs, workspace_client_factory=lambda: ws,
+        ingest_executor=SimpleNamespace(submit=lambda fn, *a: submitted.append((fn, a))),
+    )
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+
+    manager.handle_job_terminated(db_session, 444, "SUCCESS")
+    assert submitted == [(manager.ingest_run_by_id, (run.id,))]
+    ws.statement_execution.execute_statement.assert_not_called()
+
+
+def test_cancelled_run_stays_cancelled_when_job_later_terminates(db_session, installation):
+    ws = _ws_returning([["table", "main.sales.orders", None, None, "Orders."]])
+    jobs = _jobs(job_run_id=900)
+    manager = _manager(jobs=jobs, ws=ws)
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    manager.cancel_run(db_session, run)
+
+    for state in ("SUCCESS", "FAILED"):
+        manager.handle_job_terminated(db_session, 900, state)
+        assert run.status == "cancelled"
+    ws.statement_execution.execute_statement.assert_not_called()
+
+
+def test_retry_backoff_doubles_per_attempt(db_session, installation):
+    jobs = _jobs()
+    manager = _manager(jobs=jobs)
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    jobs.get_job_status.return_value = {"life_cycle_state": "RUNNING", "result_state": None}
+    run.ingest_attempts = 2  # second retry waits 2 minutes
+    db_session.commit()
+
+    _backdate(db_session, run, seconds=90)
+    manager.refresh_run(db_session, run)
+    jobs.get_job_status.assert_not_called()
+    _backdate(db_session, run, seconds=150)
+    manager.refresh_run(db_session, run)
+    jobs.get_job_status.assert_called_once()
