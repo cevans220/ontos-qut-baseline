@@ -25,6 +25,7 @@ import {
 
 const FEATURE_ID = 'metadata-generation';
 const POLL_INTERVAL_MS = 2000;
+const SUGGESTIONS_PAGE_SIZE = 1000;
 const SUGGESTION_STATUSES: SuggestionStatus[] = [
   'pending',
   'accepted',
@@ -49,6 +50,7 @@ export default function MetadataGenerationRunDetails() {
   const [run, setRun] = useState<GenerationRunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<DescriptionSuggestion[] | null>(null);
+  const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<SuggestionStatus | 'all'>('all');
   const [actionPending, setActionPending] = useState(false);
 
@@ -76,9 +78,25 @@ export default function MetadataGenerationRunDetails() {
 
   const fetchSuggestions = useCallback(async () => {
     if (!runId) return;
-    const query = statusFilter === 'all' ? '' : `?status=${statusFilter}`;
-    const res = await get<SuggestionListResponse>(`/api/metadata-generation/runs/${runId}/suggestions${query}`);
-    setSuggestions(res.error ? [] : (res.data?.suggestions ?? []));
+    const status = statusFilter === 'all' ? '' : `&status=${statusFilter}`;
+    // Page through: a large run has more suggestions than one page holds
+    const all: DescriptionSuggestion[] = [];
+    for (;;) {
+      const res = await get<SuggestionListResponse>(
+        `/api/metadata-generation/runs/${runId}/suggestions?limit=${SUGGESTIONS_PAGE_SIZE}&skip=${all.length}${status}`,
+      );
+      if (res.error) {
+        // Don't present a partial list as the whole run
+        setSuggestions([]);
+        setSuggestionsError(res.error);
+        return;
+      }
+      const page = res.data?.suggestions ?? [];
+      all.push(...page);
+      if (page.length === 0 || all.length >= (res.data?.total ?? 0)) break;
+    }
+    setSuggestionsError(null);
+    setSuggestions(all);
   }, [get, runId, statusFilter]);
 
   useEffect(() => {
@@ -244,7 +262,14 @@ export default function MetadataGenerationRunDetails() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            {suggestions === null ? (
+            {suggestionsError ? (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>
+                  {t('detail.suggestionsLoadFailed')}: {suggestionsError}
+                </AlertDescription>
+              </Alert>
+            ) : suggestions === null ? (
               <div className="flex justify-center py-6">
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
               </div>

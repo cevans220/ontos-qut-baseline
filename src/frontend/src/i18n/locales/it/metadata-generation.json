@@ -74,6 +74,7 @@
     "statusFilter": "Filtra per stato",
     "allStatuses": "Tutti gli stati",
     "noSuggestions": "Nessun suggerimento.",
+    "suggestionsLoadFailed": "Impossibile caricare i suggerimenti",
     "current": "Attuale",
     "proposed": "Proposta",
     "noDescription": "Nessuna descrizione"

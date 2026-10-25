@@ -74,6 +74,7 @@
     "statusFilter": "Filter by status",
     "allStatuses": "All statuses",
     "noSuggestions": "No suggestions.",
+    "suggestionsLoadFailed": "Failed to load the suggestions",
     "current": "Current",
     "proposed": "Proposed",
     "noDescription": "No description"

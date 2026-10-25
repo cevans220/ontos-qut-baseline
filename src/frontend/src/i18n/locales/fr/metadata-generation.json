@@ -74,6 +74,7 @@
     "statusFilter": "Filtrer par statut",
     "allStatuses": "Tous les statuts",
     "noSuggestions": "Aucune suggestion.",
+    "suggestionsLoadFailed": "Échec du chargement des suggestions",
     "current": "Actuelle",
     "proposed": "Proposée",
     "noDescription": "Aucune description"

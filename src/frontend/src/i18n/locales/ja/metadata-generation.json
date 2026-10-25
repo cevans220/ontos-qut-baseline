@@ -74,6 +74,7 @@
     "statusFilter": "ステータスで絞り込み",
     "allStatuses": "すべてのステータス",
     "noSuggestions": "提案はありません。",
+    "suggestionsLoadFailed": "提案を読み込めませんでした",
     "current": "現在",
     "proposed": "提案",
     "noDescription": "説明なし"

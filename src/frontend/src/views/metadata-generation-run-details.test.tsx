@@ -64,7 +64,7 @@ describe('MetadataGenerationRunDetails', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const statuses = ['running', 'ingesting', 'completed'];
     api.get.mockImplementation(async (url: string) =>
-      url.endsWith('/suggestions')
+      url.includes('/suggestions')
         ? { data: { suggestions: SUGGESTIONS, total: 2 } }
         : { data: run(statuses.shift() ?? 'completed') },
     );
@@ -82,7 +82,7 @@ describe('MetadataGenerationRunDetails', () => {
 
   it('groups suggestions under their table and shows current vs proposed', async () => {
     api.get.mockImplementation(async (url: string) =>
-      url.endsWith('/suggestions') ? { data: { suggestions: SUGGESTIONS, total: 2 } } : { data: run('completed') },
+      url.includes('/suggestions') ? { data: { suggestions: SUGGESTIONS, total: 2 } } : { data: run('completed') },
     );
     renderPage();
 
@@ -94,10 +94,58 @@ describe('MetadataGenerationRunDetails', () => {
     expect(screen.queryByText('Cancel run')).not.toBeInTheDocument();
   });
 
+  it('pages through all suggestions of a large run', async () => {
+    const make = (n: number) => ({ ...SUGGESTIONS[0], id: `s${n}`, table_fqn: `main.sales.t${n}` });
+    api.get.mockImplementation(async (url: string) => {
+      if (!url.includes('/suggestions')) return { data: run('completed') };
+      const skip = Number(new URL(url, 'http://x').searchParams.get('skip'));
+      const page = skip === 0 ? Array.from({ length: 1000 }, (_, i) => make(i)) : [make(1000)];
+      return { data: { suggestions: page, total: 1001 } };
+    });
+    renderPage();
+
+    expect(await screen.findByText('main.sales.t1000')).toBeInTheDocument();
+    const pages = api.get.mock.calls.map(([url]) => url).filter((url) => url.includes('/suggestions'));
+    expect(pages).toEqual([
+      '/api/metadata-generation/runs/run-1/suggestions?limit=1000&skip=0',
+      '/api/metadata-generation/runs/run-1/suggestions?limit=1000&skip=1000',
+    ]);
+  });
+
+  it('shows an error instead of a partial list when a later page fails', async () => {
+    api.get.mockImplementation(async (url: string) => {
+      if (!url.includes('/suggestions')) return { data: run('completed') };
+      return url.includes('skip=0')
+        ? { data: { suggestions: [SUGGESTIONS[0]], total: 2 } }
+        : { data: {}, error: 'Gateway timeout' };
+    });
+    renderPage();
+
+    expect(await screen.findByText(/Failed to load the suggestions: Gateway timeout/)).toBeInTheDocument();
+    expect(screen.queryByText('main.sales.orders')).not.toBeInTheDocument();
+  });
+
+  it('filters suggestions by status', async () => {
+    // Radix Select needs pointer capture, which jsdom lacks
+    Element.prototype.hasPointerCapture ??= () => false;
+    Element.prototype.releasePointerCapture ??= () => undefined;
+    api.get.mockImplementation(async (url: string) =>
+      url.includes('/suggestions') ? { data: { suggestions: SUGGESTIONS, total: 2 } } : { data: run('completed') },
+    );
+    renderPage();
+
+    await userEvent.click(await screen.findByRole('combobox', { name: 'Filter by status' }));
+    await userEvent.click(await screen.findByRole('option', { name: 'Rejected' }));
+
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith('/api/metadata-generation/runs/run-1/suggestions?limit=1000&skip=0&status=rejected'),
+    );
+  });
+
   it('deletes a finished run and returns to the list', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     api.get.mockImplementation(async (url: string) =>
-      url.endsWith('/suggestions') ? { data: { suggestions: [], total: 0 } } : { data: run('failed') },
+      url.includes('/suggestions') ? { data: { suggestions: [], total: 0 } } : { data: run('failed') },
     );
     api.delete.mockResolvedValue({ data: null });
     renderPage();

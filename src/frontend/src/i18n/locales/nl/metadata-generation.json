@@ -74,6 +74,7 @@
     "statusFilter": "Filteren op status",
     "allStatuses": "Alle statussen",
     "noSuggestions": "Geen suggesties.",
+    "suggestionsLoadFailed": "De suggesties konden niet worden geladen",
     "current": "Huidig",
     "proposed": "Voorgesteld",
     "noDescription": "Geen beschrijving"
