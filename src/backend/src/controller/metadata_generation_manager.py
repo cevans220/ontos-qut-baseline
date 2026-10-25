@@ -11,6 +11,7 @@ and by the JobsManager background poller (see ``handle_job_terminated``).
 See docs/decisions/metadata-generation-execution.md.
 """
 
+import threading
 import time
 from concurrent.futures import Executor, ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -52,6 +53,8 @@ INGEST_RETRY_DELAY = timedelta(minutes=1)
 # must have ended (its own timeout is 2h) and reads have kept failing a while
 JOB_STATUS_GIVE_UP = timedelta(hours=2, minutes=30)
 JOB_STATUS_UNAVAILABLE_FOR = timedelta(minutes=30)
+# How long a queued-ingest marker suppresses queueing the same run again
+QUEUED_INGEST_TTL = STALE_INGEST_CLAIM
 
 # Jobs API life-cycle states after which a run will not change any more
 _TERMINAL_LIFE_CYCLE_STATES = {"TERMINATED", "SKIPPED", "INTERNAL_ERROR"}
@@ -101,14 +104,48 @@ class MetadataGenerationManager:
         self._ingest_executor = ingest_executor or ThreadPoolExecutor(
             max_workers=2, thread_name_prefix="metagen-ingest"
         )
+        # Runs with an ingest queued or in progress in this process (run id ->
+        # time.monotonic() when queued), so the poller, the sweep and page polls
+        # don't queue the same run repeatedly. Markers expire, so one whose task
+        # never ran (its request failed after deferring) can't block the run.
+        self._queued_ingests: Dict[str, float] = {}
+        self._queued_lock = threading.Lock()
+        self._submit_ingest = self.make_deferrer(self._ingest_executor.submit)
         if self._jobs is not None and hasattr(self._jobs, "register_run_terminated_handler"):
             self._jobs.register_run_terminated_handler(WORKFLOW_ID, self.handle_job_terminated)
             # Each poller cycle also retries runs a one-off notification can't
             # finish: a failed ingest attempt, an abandoned claim, an orphan
             self._jobs.register_poll_cycle_handler(self.sweep_active_runs)
 
-    def _submit_ingest(self, run_id: str) -> None:
-        self._ingest_executor.submit(self.ingest_run_by_id, run_id)
+    def make_deferrer(self, schedule: Callable[..., Any]) -> Callable[[str], None]:
+        """A ``defer_ingest`` callback that queues each run at most once at a time.
+
+        ``schedule(fn, run_id)`` runs ``fn(run_id)`` later, e.g. an executor's
+        ``submit`` or FastAPI's ``BackgroundTasks.add_task``.
+        """
+        def defer(run_id: str) -> None:
+            with self._queued_lock:
+                queued_at = self._queued_ingests.get(run_id)
+                if queued_at is not None and time.monotonic() - queued_at < QUEUED_INGEST_TTL.total_seconds():
+                    return
+                self._queued_ingests[run_id] = time.monotonic()
+            try:
+                schedule(self._run_queued_ingest, run_id)
+            except Exception:
+                self._release_queued(run_id)
+                raise
+
+        return defer
+
+    def _run_queued_ingest(self, run_id: str) -> None:
+        try:
+            self.ingest_run_by_id(run_id)
+        finally:
+            self._release_queued(run_id)
+
+    def _release_queued(self, run_id: str) -> None:
+        with self._queued_lock:
+            self._queued_ingests.pop(run_id, None)
 
     def sweep_active_runs(self, db: Session) -> None:
         """Poll-cycle hook: finish or retry active runs, ingesting off the poller thread."""
@@ -231,6 +268,8 @@ class MetadataGenerationManager:
     def cancel_run(self, db: Session, run: MetadataGenerationRunDb) -> MetadataGenerationRunDb:
         if run.status in TERMINAL_RUN_STATUSES:
             raise ValueError(f"Run is already {run.status}")
+        if run.status == GenerationRunStatus.INGESTING.value:
+            raise ValueError("The job has finished and its results are being loaded")
         if run.job_run_id and self._jobs:
             self._jobs.cancel_run(int(run.job_run_id))
         run.status = GenerationRunStatus.CANCELLED.value
@@ -459,7 +498,11 @@ class MetadataGenerationManager:
         Idempotent: a completed run, or one another worker is ingesting, is
         left alone; rows of an interrupted earlier attempt are replaced.
         """
-        if run.status == GenerationRunStatus.COMPLETED.value or not self._claim_for_ingest(db, run):
+        if (
+            run.status == GenerationRunStatus.COMPLETED.value
+            or self._in_ingest_backoff(run)
+            or not self._claim_for_ingest(db, run)
+        ):
             return run.suggestion_count
         try:
             rows = self._fetch_results(run.id)

@@ -264,6 +264,9 @@ def test_ingest_failure_marks_run_failed(db_session, installation):
     for attempt in (1, 2):
         manager.ingest_results(db_session, run)
         assert (run.status, run.ingest_attempts, run.error) == ("running", attempt, None)
+        manager.ingest_results(db_session, run)  # within the retry delay: skipped
+        assert run.ingest_attempts == attempt
+        _backdate(db_session, run, minutes=5)
     # ...until the attempts are used up
     manager.ingest_results(db_session, run)
     assert run.status == "failed"
@@ -728,7 +731,7 @@ def test_poller_success_ingests_on_the_executor_not_inline(db_session, installat
     run = manager.start_run(db_session, user_id="a@x.com", request=_request())
 
     manager.handle_job_terminated(db_session, 444, "SUCCESS")
-    assert submitted == [(manager.ingest_run_by_id, (run.id,))]
+    assert submitted == [(manager._run_queued_ingest, (run.id,))]
     ws.statement_execution.execute_statement.assert_not_called()
 
 
@@ -925,3 +928,60 @@ def test_give_up_needs_both_an_old_run_and_a_sustained_outage(
 
     manager.refresh_run(db_session, run)
     assert run.status == expected
+
+
+def test_deferrer_queues_each_run_once_until_it_finished():
+    scheduled = []
+    manager = _manager()
+    defer = manager.make_deferrer(lambda fn, rid: scheduled.append((fn, rid)))
+
+    defer("run-1")
+    defer("run-1")  # poller, sweep and page polls racing
+    defer("run-2")
+    assert [rid for _, rid in scheduled] == ["run-1", "run-2"]
+
+    fn, rid = scheduled[0]
+    manager.ingest_run_by_id = MagicMock()
+    fn(rid)  # the queued ingest ran
+    defer("run-1")
+    assert [rid for _, rid in scheduled] == ["run-1", "run-2", "run-1"]
+
+
+def test_deferrer_releases_the_run_when_scheduling_fails():
+    manager = _manager()
+
+    def broken(fn, rid):
+        raise RuntimeError("executor shut down")
+
+    with pytest.raises(RuntimeError):
+        manager.make_deferrer(broken)("run-1")
+    scheduled = []
+    manager.make_deferrer(lambda fn, rid: scheduled.append(rid))("run-1")
+    assert scheduled == ["run-1"]
+
+
+def test_cancel_is_rejected_while_results_are_loading(db_session, installation):
+    jobs = _jobs()
+    manager = _manager(jobs=jobs)
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    run.status = "ingesting"
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="being loaded"):
+        manager.cancel_run(db_session, run)
+    jobs.cancel_run.assert_not_called()
+
+
+def test_queued_marker_expires_when_its_task_never_ran(monkeypatch):
+    clock = {"now": 1000.0}
+    monkeypatch.setattr("src.controller.metadata_generation_manager.time.monotonic", lambda: clock["now"])
+    scheduled = []
+    manager = _manager()
+    defer = manager.make_deferrer(lambda fn, rid: scheduled.append(rid))
+
+    defer("run-1")  # the request that deferred it then failed: the task never runs
+    defer("run-1")
+    assert scheduled == ["run-1"]
+    clock["now"] += 16 * 60
+    defer("run-1")
+    assert scheduled == ["run-1", "run-1"]

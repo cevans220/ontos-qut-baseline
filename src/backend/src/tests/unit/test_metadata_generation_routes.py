@@ -168,7 +168,8 @@ async def test_get_run_defers_ingest_to_a_background_task():
     background_tasks = MagicMock()
     with _admin(False):
         await routes.get_run("run-1", _request(manager), background_tasks, db=MagicMock(), current_user=OWNER)
-    background_tasks.add_task.assert_called_once_with(manager.ingest_run_by_id, "run-1")
+    manager.make_deferrer.assert_called_once_with(background_tasks.add_task)
+    manager.make_deferrer.return_value.assert_called_once_with("run-1")
     manager.ingest_results.assert_not_called()
 
 
@@ -183,4 +184,5 @@ def test_start_run_defers_ingest_of_finished_runs_to_background():
     background_tasks = MagicMock()
     body = StartRunRequest(selection=[SelectionItem(type="schema", fqn="main.sales")])
     routes.start_run(_request(manager), body, background_tasks, db=MagicMock(), audit_manager=MagicMock(), current_user=OWNER)
-    background_tasks.add_task.assert_called_once_with(manager.ingest_run_by_id, "finished-run")
+    manager.make_deferrer.assert_called_once_with(background_tasks.add_task)
+    manager.make_deferrer.return_value.assert_called_once_with("finished-run")

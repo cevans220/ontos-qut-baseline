@@ -100,7 +100,7 @@ def start_run(
             user_id=_user_id(current_user),
             request=body,
             # Finished runs found on the way are ingested after the response
-            defer_ingest=lambda rid: background_tasks.add_task(manager.ingest_run_by_id, rid),
+            defer_ingest=manager.make_deferrer(background_tasks.add_task),
         )
         success = True
         details["run_id"] = run.id
@@ -168,7 +168,7 @@ async def get_run(
             manager.refresh_run,
             db,
             run,
-            defer_ingest=lambda rid: background_tasks.add_task(manager.ingest_run_by_id, rid),
+            defer_ingest=manager.make_deferrer(background_tasks.add_task),
         )
     except Exception:
         logger.warning("Failed to refresh metadata generation run %s", run_id, exc_info=True)
