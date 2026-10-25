@@ -505,7 +505,7 @@ class MetadataGenerationManager:
         ):
             return run.suggestion_count
         try:
-            rows = self._fetch_results(run.id)
+            rows = self._fetch_results(run.id, on_page=lambda: self._heartbeat(db, run))
             # A failure while storing rolls back only the half-written suggestions
             with db.begin_nested():
                 count = self._store_suggestions(db, run, rows)
@@ -534,7 +534,12 @@ class MetadataGenerationManager:
 
         regenerate_existing = bool((run.options or {}).get("regenerate_existing"))
         db.query(DescriptionSuggestionDb).filter(DescriptionSuggestionDb.run_id == run.id).delete()
+        # A newer run that already covered an object wins, even if this ingest finishes later
+        newer = metagen_suggestions_repo.targets_of_newer_runs(
+            db, run=run, table_fqns={row["table_fqn"] for row in rows}
+        )
 
+        stored = 0
         targets = []
         for row in rows:
             base_text = (row.get("base_text") or "").strip() or None
@@ -547,6 +552,7 @@ class MetadataGenerationManager:
             if base_text == proposed_text:
                 continue
             column_name = row.get("column_name") or None
+            outdated = (row["table_fqn"], column_name) in newer
             db.add(DescriptionSuggestionDb(
                 run_id=run.id,
                 kind="description",
@@ -555,22 +561,37 @@ class MetadataGenerationManager:
                 column_name=column_name,
                 base_text=base_text,
                 proposed_text=proposed_text,
-                status=SuggestionStatus.PENDING.value,
+                status=SuggestionStatus.SUPERSEDED.value if outdated else SuggestionStatus.PENDING.value,
             ))
-            targets.append((row["table_fqn"], column_name))
+            stored += 1
+            if not outdated:
+                targets.append((row["table_fqn"], column_name))
 
-        # A newer run replaces older, not yet reviewed suggestions for the same objects
-        metagen_suggestions_repo.supersede_pending_for_targets(db, exclude_run_id=run.id, targets=targets)
+        # This run replaces older runs' not yet reviewed suggestions for the same objects
+        metagen_suggestions_repo.supersede_pending_for_targets(db, run=run, targets=targets)
 
-        run.suggestion_count = len(targets)
+        run.suggestion_count = stored
         run.status = GenerationRunStatus.COMPLETED.value
         run.progress_message = None
         run.error = None
         run.completed_at = _now()
         db.flush()
-        return len(targets)
+        return stored
 
-    def _fetch_results(self, run_id: str) -> List[Dict[str, Optional[str]]]:
+    def _heartbeat(self, db: Session, run: MetadataGenerationRunDb) -> None:
+        """Keep a long ingest's claim (and queued marker) from looking abandoned."""
+        db.query(MetadataGenerationRunDb).filter(
+            MetadataGenerationRunDb.id == run.id,
+            MetadataGenerationRunDb.status == GenerationRunStatus.INGESTING.value,
+        ).update({MetadataGenerationRunDb.updated_at: _now()}, synchronize_session=False)
+        db.commit()
+        with self._queued_lock:
+            if run.id in self._queued_ingests:
+                self._queued_ingests[run.id] = time.monotonic()
+
+    def _fetch_results(
+        self, run_id: str, *, on_page: Optional[Callable[[], None]] = None
+    ) -> List[Dict[str, Optional[str]]]:
         """Read this run's rows from the metagen_results Delta table via the SQL warehouse.
 
         Paged (stable order + LIMIT/OFFSET) so no single response gets near
@@ -586,6 +607,8 @@ class MetadataGenerationManager:
         while True:
             page = self._fetch_results_page(ws, table, run_id, offset=len(rows))
             rows.extend(page)
+            if on_page is not None:
+                on_page()
             if len(page) < RESULTS_PAGE_SIZE:
                 return rows
 

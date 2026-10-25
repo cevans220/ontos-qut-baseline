@@ -92,6 +92,17 @@ def background_session(db_session, monkeypatch):
     return session
 
 
+def _created_ago(db_session, run, minutes):
+    """Order runs explicitly (SQLite's second-resolution timestamps would tie)."""
+    from datetime import datetime, timedelta, timezone
+
+    db_session.query(type(run)).filter_by(id=run.id).update(
+        {"created_at": datetime.now(timezone.utc) - timedelta(minutes=minutes)}, synchronize_session=False
+    )
+    db_session.commit()
+    db_session.refresh(run)
+
+
 def _backdate(db_session, run, **delta):
     from datetime import datetime, timedelta, timezone
 
@@ -230,6 +241,7 @@ def test_newer_run_supersedes_older_pending_suggestions(db_session, installation
     rows = [["table", "main.sales.orders", None, None, "Customer orders."]]
     manager = _manager(ws=_ws_returning(rows))
     first = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    _created_ago(db_session, first, minutes=10)
     manager.ingest_results(db_session, first)
     second = manager.start_run(db_session, user_id="a@x.com", request=_request())
     manager.ingest_results(db_session, second)
@@ -985,3 +997,63 @@ def test_queued_marker_expires_when_its_task_never_ran(monkeypatch):
     clock["now"] += 16 * 60
     defer("run-1")
     assert scheduled == ["run-1", "run-1"]
+
+
+def test_late_ingest_of_an_older_run_does_not_supersede_a_newer_run(db_session, installation):
+    rows = [
+        ["table", "main.sales.orders", None, None, "Orders."],
+        ["column", "main.sales.orders", "id", None, "Order id."],
+    ]
+    manager = _manager(ws=_ws_returning(rows))
+    older = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    _created_ago(db_session, older, minutes=10)
+    older.status = "completed"  # its job finished; the ingest is still queued
+    db_session.commit()
+    newer = manager.start_run(
+        db_session, user_id="a@x.com",
+        request=StartRunRequest(selection=[SelectionItem(type="table", fqn="main.sales.orders")]),
+    )
+    manager._ws_factory = lambda: _ws_returning([["table", "main.sales.orders", None, None, "Newer orders."]])
+    manager.ingest_results(db_session, newer)
+
+    older.status = "running"
+    db_session.commit()
+    manager._ws_factory = lambda: _ws_returning(rows)
+    manager.ingest_results(db_session, older)  # finishes last
+
+    assert manager.counts(db_session, newer.id) == {"pending": 1}
+    older_rows = {s.column_name: s.status for s in manager.list_suggestions(db_session, older.id)}
+    assert older_rows == {None: "superseded", "id": "pending"}  # only what the newer run covered
+
+
+def test_long_ingest_heartbeats_after_each_page(db_session, installation, monkeypatch):
+    monkeypatch.setattr("src.controller.metadata_generation_manager.RESULTS_PAGE_SIZE", 1)
+    ws = MagicMock()
+    ws.statement_execution.execute_statement.side_effect = [
+        _statement(StatementState.SUCCEEDED, rows=[["table", "main.sales.orders", None, None, "Orders."]]),
+        _statement(StatementState.SUCCEEDED, rows=[]),
+    ]
+    manager = _manager(ws=ws)
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    beats = []
+    real_heartbeat = manager._heartbeat
+    monkeypatch.setattr(manager, "_heartbeat", lambda db, r: (beats.append(r.status), real_heartbeat(db, r)))
+
+    assert manager.ingest_results(db_session, run) == 1
+    assert beats == ["ingesting", "ingesting"]
+
+
+def test_heartbeat_refreshes_claim_and_queued_marker(db_session, installation, monkeypatch):
+    clock = {"now": 1000.0}
+    monkeypatch.setattr("src.controller.metadata_generation_manager.time.monotonic", lambda: clock["now"])
+    manager = _manager()
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    run.status = "ingesting"
+    db_session.commit()
+    _backdate(db_session, run, minutes=14)
+    manager._queued_ingests[run.id] = 900.0
+
+    manager._heartbeat(db_session, run)
+    db_session.refresh(run)
+    assert not manager._is_stale(run.updated_at)
+    assert manager._queued_ingests[run.id] == 1000.0

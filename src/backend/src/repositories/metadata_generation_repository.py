@@ -107,24 +107,27 @@ class DescriptionSuggestionsRepository:
         return {status: count for status, count in rows}
 
     def supersede_pending_for_targets(
-        self, db: Session, *, exclude_run_id: str, targets: List[tuple]
+        self, db: Session, *, run: MetadataGenerationRunDb, targets: List[tuple]
     ) -> int:
-        """Mark pending suggestions from other runs for the same targets as superseded.
+        """Mark not-yet-reviewed pending suggestions of *older* runs for the same targets as superseded.
 
-        ``targets`` is a list of ``(table_fqn, column_name_or_None)``.
+        ``targets`` is a list of ``(table_fqn, column_name_or_None)``. Runs are
+        ordered by creation, so a late ingest of an older run can't supersede
+        a newer run's suggestions.
         """
         if not targets:
             return 0
         superseded = 0
         target_set = set(targets)
-        table_fqns = {t[0] for t in targets}
         candidates = (
             db.query(DescriptionSuggestionDb)
+            .join(MetadataGenerationRunDb, MetadataGenerationRunDb.id == DescriptionSuggestionDb.run_id)
             .filter(
-                DescriptionSuggestionDb.run_id != exclude_run_id,
+                DescriptionSuggestionDb.run_id != run.id,
+                MetadataGenerationRunDb.created_at < run.created_at,
                 DescriptionSuggestionDb.status == 'pending',
                 DescriptionSuggestionDb.review_request_id.is_(None),
-                DescriptionSuggestionDb.table_fqn.in_(table_fqns),
+                DescriptionSuggestionDb.table_fqn.in_({t[0] for t in targets}),
             )
             .all()
         )
@@ -134,6 +137,24 @@ class DescriptionSuggestionsRepository:
                 superseded += 1
         db.flush()
         return superseded
+
+    def targets_of_newer_runs(
+        self, db: Session, *, run: MetadataGenerationRunDb, table_fqns: set
+    ) -> set:
+        """``(table_fqn, column_name)`` that runs created after ``run`` already have suggestions for."""
+        if not table_fqns:
+            return set()
+        rows = (
+            db.query(DescriptionSuggestionDb.table_fqn, DescriptionSuggestionDb.column_name)
+            .join(MetadataGenerationRunDb, MetadataGenerationRunDb.id == DescriptionSuggestionDb.run_id)
+            .filter(
+                DescriptionSuggestionDb.run_id != run.id,
+                MetadataGenerationRunDb.created_at > run.created_at,
+                DescriptionSuggestionDb.table_fqn.in_(table_fqns),
+            )
+            .all()
+        )
+        return {(fqn, column) for fqn, column in rows}
 
 
 metagen_runs_repo = MetadataGenerationRunsRepository()
