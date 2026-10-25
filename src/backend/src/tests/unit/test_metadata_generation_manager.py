@@ -818,3 +818,110 @@ def test_failed_commit_is_rolled_back_and_counted(db_session, installation, monk
     manager.ingest_results(db_session, run)
     db_session.rollback.assert_called_once()
     assert (run.status, run.ingest_attempts) == ("running", 1)
+
+
+def test_run_with_unavailable_job_status_is_given_up_only_after_a_while(db_session, installation):
+    from datetime import datetime, timedelta, timezone
+
+    jobs = _jobs()
+    manager = _manager(jobs=jobs)
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    run.started_at = datetime.now(timezone.utc) - timedelta(hours=3)
+    db_session.commit()
+    jobs.get_job_status.return_value = None  # purged run id / Jobs API failing
+
+    manager.refresh_run(db_session, run)
+    assert run.status == "running" and run.status_unavailable_since is not None  # could be a blip
+
+    # A successful read in between resets the clock
+    jobs.get_job_status.return_value = {"life_cycle_state": "RUNNING", "result_state": None}
+    manager.refresh_run(db_session, run)
+    assert run.status_unavailable_since is None
+
+    jobs.get_job_status.return_value = None
+    manager.refresh_run(db_session, run)
+    run.status_unavailable_since = datetime.now(timezone.utc) - timedelta(minutes=45)
+    db_session.commit()
+    manager.refresh_run(db_session, run)
+    assert run.status == "failed"
+    assert run.error == "The background job's status is unavailable"
+
+
+def test_unavailable_status_after_job_success_keeps_ingesting(db_session, installation):
+    from datetime import datetime, timedelta, timezone
+
+    ws = _ws_returning([["table", "main.sales.orders", None, None, "Orders."]])
+    jobs = _jobs()
+    manager = _manager(jobs=jobs, ws=ws)
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    run.ingest_attempts = 1  # the job succeeded; one ingest attempt failed
+    run.started_at = datetime.now(timezone.utc) - timedelta(hours=3)
+    db_session.commit()
+    _backdate(db_session, run, minutes=5)  # past the retry delay
+    jobs.get_job_status.return_value = None
+
+    manager.refresh_run(db_session, run)
+    assert (run.status, run.suggestion_count) == ("completed", 1)
+
+
+def test_unavailable_status_after_job_success_defers_from_requests(db_session, installation):
+    ws = _ws_returning([["table", "main.sales.orders", None, None, "Orders."]])
+    jobs = _jobs()
+    manager = _manager(jobs=jobs, ws=ws)
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    run.ingest_attempts = 1
+    db_session.commit()
+    _backdate(db_session, run, minutes=5)
+    jobs.get_job_status.return_value = None
+    deferred = []
+
+    manager.refresh_run(db_session, run, defer_ingest=deferred.append)
+    assert deferred == [run.id]
+    assert run.status == "running"
+    ws.statement_execution.execute_statement.assert_not_called()
+
+
+def test_unavailable_status_on_stale_ingest_claim_ingests(db_session, installation):
+    ws = _ws_returning([["table", "main.sales.orders", None, None, "Orders."]])
+    jobs = _jobs()
+    manager = _manager(jobs=jobs, ws=ws)
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    run.status = "ingesting"  # claim abandoned, no failed attempt recorded
+    db_session.commit()
+    _backdate(db_session, run, hours=1)
+    jobs.get_job_status.return_value = None
+
+    manager.refresh_run(db_session, run)
+    assert (run.status, run.suggestion_count) == ("completed", 1)
+    assert run.status_unavailable_since is None
+
+
+@pytest.mark.parametrize("started_ago,unavailable_for,expected", [
+    ({"hours": 3}, {"minutes": 5}, "running"),       # brief outage on an old run
+    ({"minutes": 30}, {"minutes": 45}, "running"),   # the job may still be running
+    ({"hours": 3}, {"minutes": 45}, "failed"),
+    (None, {"minutes": 45}, "failed"),               # no started_at: created_at decides
+])
+def test_give_up_needs_both_an_old_run_and_a_sustained_outage(
+    db_session, installation, started_ago, unavailable_for, expected,
+):
+    from datetime import datetime, timedelta, timezone
+
+    jobs = _jobs()
+    manager = _manager(jobs=jobs)
+    run = manager.start_run(db_session, user_id="a@x.com", request=_request())
+    now = datetime.now(timezone.utc)
+    if started_ago is None:
+        run.started_at = None
+        db_session.query(type(run)).filter_by(id=run.id).update(
+            {"created_at": now - timedelta(hours=3)}, synchronize_session=False
+        )
+    else:
+        run.started_at = now - timedelta(**started_ago)
+    run.status_unavailable_since = now - timedelta(**unavailable_for)
+    db_session.commit()
+    db_session.refresh(run)
+    jobs.get_job_status.return_value = None
+
+    manager.refresh_run(db_session, run)
+    assert run.status == expected

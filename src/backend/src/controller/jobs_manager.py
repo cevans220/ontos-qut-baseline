@@ -1111,6 +1111,9 @@ class JobsManager:
             # Tracks whether this cycle observed anything worth polling promptly
             # for: an active (non-terminal) run, or a persisted state change.
             saw_activity = False
+            # (workflow_id, run_id, state) of runs that ended this cycle; handed
+            # to run-terminated handlers once the cycle's updates are committed
+            terminated_runs: List[tuple] = []
 
             # Create a new database session for this polling iteration
             db = next(get_db())
@@ -1201,13 +1204,12 @@ class JobsManager:
 
                             if (run.state.life_cycle_state in _FINAL_LIFE_CYCLE_STATES and
                                     not job_run.notified_at):
-                                self._notify_run_terminated(
+                                terminated_runs.append((
                                     installation.workflow_id,
                                     run.run_id,
                                     # SKIPPED / INTERNAL_ERROR runs have no result state
                                     (run.state.result_state or run.state.life_cycle_state).value,
-                                    db,
-                                )
+                                ))
 
                             # Create notification if job terminated unsuccessfully (failed, canceled, timed out, etc.)
                             if (run.state.life_cycle_state == RunLifeCycleState.TERMINATED and
@@ -1285,18 +1287,22 @@ class JobsManager:
                 # Always close the session
                 db.close()
 
-            # After the cycle's own updates are committed, on a separate session,
-            # so a handler's commit or rollback can't touch them
-            if self._poll_cycle_handlers and self._has_installations:
+            # Feature handlers run after the cycle's own updates are committed,
+            # on a separate session, so their commits or rollbacks can't touch them
+            has_run_handlers = terminated_runs and self._run_terminated_handlers
+            if has_run_handlers or (self._poll_cycle_handlers and self._has_installations):
                 try:
                     handler_db = next(get_db())
                     try:
-                        self._run_poll_cycle_handlers(handler_db)
+                        for workflow_id, run_id, state in terminated_runs:
+                            self._notify_run_terminated(workflow_id, run_id, state, handler_db)
+                        if self._has_installations:
+                            self._run_poll_cycle_handlers(handler_db)
                     finally:
                         handler_db.close()
                 except Exception as e:
                     # Never let a handler (or opening its session) end the polling thread
-                    logger.error(f"Error running poll-cycle handlers: {e}", exc_info=True)
+                    logger.error(f"Error running job handlers: {e}", exc_info=True)
 
             # Adaptive interval: reset to base when there's live activity to
             # track, otherwise ease off toward the cap so a quiet system stops

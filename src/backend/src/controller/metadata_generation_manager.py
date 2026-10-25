@@ -48,6 +48,10 @@ STALE_INGEST_CLAIM = timedelta(minutes=15)
 MAX_INGEST_ATTEMPTS = 3
 # Wait before retrying a failed ingest: this, doubled per further attempt
 INGEST_RETRY_DELAY = timedelta(minutes=1)
+# A run is given up on when its job status can't be read although the job
+# must have ended (its own timeout is 2h) and reads have kept failing a while
+JOB_STATUS_GIVE_UP = timedelta(hours=2, minutes=30)
+JOB_STATUS_UNAVAILABLE_FOR = timedelta(minutes=30)
 
 # Jobs API life-cycle states after which a run will not change any more
 _TERMINAL_LIFE_CYCLE_STATES = {"TERMINATED", "SKIPPED", "INTERNAL_ERROR"}
@@ -286,7 +290,12 @@ class MetadataGenerationManager:
         if run.status == GenerationRunStatus.INGESTING.value and not self._is_stale(run.updated_at):
             return run  # the job is done; someone is loading its results
         status = self._jobs.get_job_status(int(run.job_run_id))
-        if status and status.get("life_cycle_state") in _TERMINAL_LIFE_CYCLE_STATES:
+        if status is None:
+            return self._handle_unavailable_status(db, run, defer_ingest)
+        if run.status_unavailable_since is not None:
+            run.status_unavailable_since = None
+            db.commit()
+        if status.get("life_cycle_state") in _TERMINAL_LIFE_CYCLE_STATES:
             # SKIPPED / INTERNAL_ERROR runs have no result state
             result_state = status.get("result_state") or status.get("life_cycle_state")
             if result_state == "SUCCESS" and defer_ingest is not None:
@@ -294,6 +303,42 @@ class MetadataGenerationManager:
             else:
                 self._finish(db, run, result_state)
         return run
+
+    def _handle_unavailable_status(
+        self,
+        db: Session,
+        run: MetadataGenerationRunDb,
+        defer_ingest: Optional[Callable[[str], None]],
+    ) -> MetadataGenerationRunDb:
+        """The Jobs API didn't report the run's job (unknown/purged run, or an API error)."""
+        # Already known to be past job success: its rows are in Delta, so keep ingesting
+        if (run.ingest_attempts or 0) > 0 or run.status == GenerationRunStatus.INGESTING.value:
+            if defer_ingest is not None:
+                defer_ingest(run.id)
+            else:
+                self.ingest_results(db, run)
+            return run
+        if run.status_unavailable_since is None:
+            run.status_unavailable_since = _now()
+            db.commit()
+            return run
+        if self._is_older_than(run.started_at or run.created_at, JOB_STATUS_GIVE_UP) and self._is_older_than(
+            run.status_unavailable_since, JOB_STATUS_UNAVAILABLE_FOR
+        ):
+            run.status = GenerationRunStatus.FAILED.value
+            run.error = "The background job's status is unavailable"
+            run.progress_message = None
+            run.completed_at = _now()
+            db.commit()
+        return run
+
+    @staticmethod
+    def _is_older_than(timestamp: Optional[datetime], age: timedelta) -> bool:
+        if timestamp is None:
+            return True
+        if timestamp.tzinfo is None:  # SQLite returns naive UTC
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        return timestamp < _now() - age
 
     @staticmethod
     def _in_ingest_backoff(run: MetadataGenerationRunDb) -> bool:
@@ -306,13 +351,9 @@ class MetadataGenerationManager:
             last_failure = last_failure.replace(tzinfo=timezone.utc)
         return _now() < last_failure + INGEST_RETRY_DELAY * (2 ** (attempts - 1))
 
-    @staticmethod
-    def _is_stale(timestamp: Optional[datetime]) -> bool:
-        if timestamp is None:
-            return True
-        if timestamp.tzinfo is None:  # SQLite returns naive UTC
-            timestamp = timestamp.replace(tzinfo=timezone.utc)
-        return timestamp < _now() - STALE_INGEST_CLAIM
+    @classmethod
+    def _is_stale(cls, timestamp: Optional[datetime]) -> bool:
+        return cls._is_older_than(timestamp, STALE_INGEST_CLAIM)
 
     def ingest_run_by_id(self, run_id: str) -> None:
         """Ingest a finished run in its own session (for background tasks)."""

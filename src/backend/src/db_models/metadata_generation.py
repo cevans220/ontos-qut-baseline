@@ -40,6 +40,8 @@ class MetadataGenerationRunDb(Base):
     suggestion_count = Column(Integer, nullable=False, default=0)
     # Failed attempts at loading the job's results; retried up to a limit
     ingest_attempts = Column(Integer, nullable=False, default=0)
+    # Since when the Jobs API has kept failing to report this run's job
+    status_unavailable_since = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
