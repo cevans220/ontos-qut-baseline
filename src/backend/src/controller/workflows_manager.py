@@ -322,33 +322,31 @@ class WorkflowsManager:
 
     @staticmethod
     def _activation_scopes_overlap(left: Dict[str, Any], right: Dict[str, Any]) -> bool:
-        """Whether two workflow scopes can select the same entity."""
-        left_type = left.get('type', 'all')
-        right_type = right.get('type', 'all')
-        if left_type == 'all' or right_type == 'all':
-            return True
-        if left_type != right_type:
-            return False
-        left_ids = set(left.get('ids') or [])
-        right_ids = set(right.get('ids') or [])
-        # An empty scoped list is treated as unrestricted by the runtime.
-        return not left_ids or not right_ids or bool(left_ids & right_ids)
+        """Whether two scopes can consume the same event at runtime.
+
+        Trigger callers currently do not supply scope metadata, so
+        ``get_for_trigger`` does not filter scoped workflows. The one-to-one
+        ``for_*`` lookup ignores scope as well. Until runtime events carry a
+        scope, every pair of scopes therefore has to be treated as overlapping.
+        """
+        return True
 
     def activation_conflicts_for(
         self,
         trigger: WorkflowTrigger | Dict[str, Any],
-        scope: WorkflowScope | Dict[str, Any],
+        scope: WorkflowScope | Dict[str, Any] | None,
         *,
         exclude_workflow_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Active workflows that can match the supplied trigger and scope.
 
         Empty entity type lists and status filters are wildcards, matching the
-        trigger runtime. Scope overlap is deliberately conservative: only
-        global scopes or intersecting scopes of the same type are definite.
+        trigger runtime. Scope is deliberately conservative because current
+        trigger events do not carry the metadata needed to filter it.
         """
         target_trigger = trigger.model_dump(mode='json') if isinstance(trigger, WorkflowTrigger) else trigger
-        target_scope = scope.model_dump(mode='json') if isinstance(scope, WorkflowScope) else scope
+        target_trigger = target_trigger or {}
+        target_scope = scope.model_dump(mode='json') if isinstance(scope, WorkflowScope) else (scope or {'type': 'all'})
 
         conflicts = []
         query = self._db.query(ProcessWorkflowDb).filter(ProcessWorkflowDb.is_active.is_(True))
@@ -369,12 +367,13 @@ class WorkflowsManager:
                 continue
             if not self._activation_scopes_overlap(target_scope, scope):
                 continue
-            if any(
-                target_trigger.get(field) and trigger.get(field)
-                and target_trigger[field] != trigger[field]
-                for field in ('from_status', 'to_status')
-            ):
-                continue
+            if target_trigger.get('type') in {'on_status_change', 'before_status_change'}:
+                if any(
+                    target_trigger.get(field) and trigger.get(field)
+                    and target_trigger[field] != trigger[field]
+                    for field in ('from_status', 'to_status')
+                ):
+                    continue
             conflicts.append({
                 'id': candidate.id,
                 'name': candidate.name,

@@ -32,6 +32,7 @@ from src.models.process_workflows import (
     ProcessWorkflow,
     ProcessWorkflowCreate,
     ProcessWorkflowUpdate,
+    WorkflowScope,
     WorkflowExecution,
     WorkflowListResponse,
     WorkflowExecutionListResponse,
@@ -738,7 +739,9 @@ async def create_workflow(
     if not validation.valid:
         raise HTTPException(status_code=400, detail=_invalid_workflow_detail(validation))
 
-    conflicts = manager.activation_conflicts_for(workflow.trigger, workflow.scope) if workflow.is_active else []
+    conflicts = manager.activation_conflicts_for(
+        workflow.trigger, workflow.scope or WorkflowScope(type='all'),
+    ) if workflow.is_active else []
     if conflicts and not confirm_overlap:
         raise HTTPException(status_code=409, detail=_activation_overlap_detail(conflicts))
     
@@ -797,10 +800,18 @@ async def update_workflow(
 
     resulting_active = workflow.is_active if workflow.is_active is not None else existing.is_active
     resulting_trigger = workflow.trigger or existing.trigger
-    resulting_scope = workflow.scope or existing.scope
+    resulting_scope = workflow.scope or existing.scope or WorkflowScope(type='all')
+    trigger_changed = workflow.trigger is not None and workflow.trigger != existing.trigger
+    scope_was_sent = 'scope' in workflow.model_fields_set
+    scope_changed = scope_was_sent and (
+        (workflow.scope or WorkflowScope(type='all'))
+        != (existing.scope or WorkflowScope(type='all'))
+    )
+    becoming_active = resulting_active and not existing.is_active
+    check_overlap = resulting_active and (becoming_active or trigger_changed or scope_changed)
     conflicts = manager.activation_conflicts_for(
         resulting_trigger, resulting_scope, exclude_workflow_id=workflow_id,
-    ) if resulting_active else []
+    ) if check_overlap else []
     if conflicts and not confirm_overlap:
         raise HTTPException(status_code=409, detail=_activation_overlap_detail(conflicts))
     
@@ -881,7 +892,10 @@ async def toggle_workflow_active(
     """Toggle workflow active status."""
     user_email = current_user.email if current_user else None
 
-    conflicts = manager.activation_conflicts(workflow_id) if is_active else []
+    existing = manager.get_workflow(workflow_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    conflicts = manager.activation_conflicts(workflow_id) if is_active and not existing.is_active else []
     if conflicts and not confirm_overlap:
         raise HTTPException(status_code=409, detail=_activation_overlap_detail(conflicts))
     

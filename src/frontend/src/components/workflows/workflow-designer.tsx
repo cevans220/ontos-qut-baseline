@@ -138,6 +138,8 @@ import {
   ALL_ENTITY_TYPES,
   isTriggerEntitySupported,
   ENTITY_TYPE_TO_APPROVAL_ENTITY,
+  getTriggerTypeLabel,
+  getEntityTypeLabel,
 } from '@/lib/workflow-labels';
 import { TriggerPicker, type TriggerTypeOption } from './trigger-picker';
 import { EntityTypeMultiselect } from './entity-type-multiselect';
@@ -1803,8 +1805,10 @@ export default function WorkflowDesigner({ workflowId }: WorkflowDesignerProps) 
                   <div className="font-medium">{conflict.name}</div>
                   <div className="text-sm text-muted-foreground">
                     {t('workflows:view.dialogs.activationOverlapDetails', {
-                      trigger: conflict.trigger_type,
-                      entities: conflict.entity_types.join(', ') || t('workflows:view.dialogs.allEntities'),
+                      trigger: getTriggerTypeLabel(conflict.trigger_type as TriggerType, t),
+                      entities: conflict.entity_types.map(entity =>
+                        getEntityTypeLabel(entity as EntityType, t)
+                      ).join(', ') || t('workflows:view.dialogs.allEntities'),
                     })}
                   </div>
                 </div>

@@ -46,16 +46,70 @@ def test_duplicate_review_workflow_is_reported(db_session):
     }]
 
 
-def test_distinct_entity_status_and_scope_do_not_conflict(db_session):
+def test_distinct_entity_types_do_not_conflict(db_session):
     _workflow(db_session, 'Product review', active=True, entities=['data_product'])
-    _workflow(db_session, 'Other transition', active=True, trigger='on_status_change',
-              entities=['data_contract'], from_status='draft', to_status='active')
-    _workflow(db_session, 'Other domain', active=True, entities=['data_contract'],
-              scope_type='domain', scope_ids=['domain-b'])
     target = _workflow(db_session, 'Target', active=False, entities=['data_contract'],
                        scope_type='domain', scope_ids=['domain-a'])
 
     assert WorkflowsManager(db_session).activation_conflicts(target.id) == []
+
+
+def test_distinct_scopes_still_conflict_until_runtime_events_carry_scope(db_session):
+    active = _workflow(db_session, 'Domain B', active=True, entities=['data_contract'],
+                       scope_type='domain', scope_ids=['domain-b'])
+    target = _workflow(db_session, 'Domain A', active=False, entities=['data_contract'],
+                       scope_type='domain', scope_ids=['domain-a'])
+
+    assert [item['id'] for item in WorkflowsManager(db_session).activation_conflicts(target.id)] == [active.id]
+
+
+def test_global_and_scoped_workflows_conflict(db_session):
+    active = _workflow(db_session, 'Global', active=True, entities=['data_contract'])
+    target = _workflow(db_session, 'Domain A', active=False, entities=['data_contract'],
+                       scope_type='domain', scope_ids=['domain-a'])
+
+    assert [item['id'] for item in WorkflowsManager(db_session).activation_conflicts(target.id)] == [active.id]
+
+
+def test_status_filters_only_disambiguate_status_change_triggers(db_session):
+    request_active = _workflow(
+        db_session, 'Request active', active=True, trigger='on_request_status_change',
+        entities=['data_product'], to_status='active',
+    )
+    request_deprecated = _workflow(
+        db_session, 'Request deprecated', active=False, trigger='on_request_status_change',
+        entities=['data_product'], to_status='deprecated',
+    )
+    transition_active = _workflow(
+        db_session, 'Transition active', active=True, trigger='on_status_change',
+        entities=['data_product'], to_status='active',
+    )
+    transition_deprecated = _workflow(
+        db_session, 'Transition deprecated', active=False, trigger='on_status_change',
+        entities=['data_product'], to_status='deprecated',
+    )
+
+    assert [item['id'] for item in WorkflowsManager(db_session).activation_conflicts(request_deprecated.id)] == [request_active.id]
+    assert WorkflowsManager(db_session).activation_conflicts(transition_deprecated.id) == []
+
+
+def test_status_change_same_and_wildcard_filters_overlap(db_session):
+    same = _workflow(
+        db_session, 'Same transition', active=True, trigger='on_status_change',
+        entities=['data_product'], to_status='active',
+    )
+    wildcard = _workflow(
+        db_session, 'Any transition', active=True, trigger='on_status_change',
+        entities=['data_product'],
+    )
+    target = _workflow(
+        db_session, 'Target transition', active=False, trigger='on_status_change',
+        entities=['data_product'], to_status='active',
+    )
+
+    assert {item['id'] for item in WorkflowsManager(db_session).activation_conflicts(target.id)} == {
+        same.id, wildcard.id,
+    }
 
 
 def test_empty_entity_list_is_a_wildcard(db_session):
@@ -110,11 +164,12 @@ def test_route_activates_after_confirmation_and_audits_conflict(db_session):
     assert details['conflicting_workflow_ids'] == [active.id]
 
 
-def _create_model(name='Review copy'):
+def _create_model(name='Review copy', *, scope=...):
+    workflow_scope = WorkflowScope(type='all') if scope is ... else scope
     return ProcessWorkflowCreate(
         name=name,
         trigger=WorkflowTrigger(type='on_request_review', entity_types=['data_contract']),
-        scope=WorkflowScope(type='all'),
+        scope=workflow_scope,
         is_active=True,
         steps=[WorkflowStepCreate(step_id='done', name='Done', step_type='pass')],
     )
@@ -140,6 +195,42 @@ def test_create_active_workflow_requires_overlap_confirmation(db_session):
     assert db_session.query(ProcessWorkflowDb).filter_by(name='Review copy').count() == 0
 
 
+def test_create_with_null_scope_is_treated_as_all(db_session):
+    _workflow(db_session, 'Active review', active=True, entities=['data_contract'])
+
+    with pytest.raises(HTTPException) as raised:
+        asyncio.run(create_workflow(
+            request=SimpleNamespace(client=SimpleNamespace(host='127.0.0.1')),
+            workflow=_create_model(scope=None),
+            db=db_session,
+            audit_manager=MagicMock(),
+            current_user=SimpleNamespace(email='admin@example.com', username='admin'),
+            confirm_overlap=False,
+            manager=WorkflowsManager(db_session),
+            _=True,
+        ))
+
+    assert raised.value.status_code == 409
+    assert raised.value.detail['code'] == 'workflow_activation_overlap'
+
+
+def test_confirmed_create_audits_conflicting_workflows(db_session):
+    active = _workflow(db_session, 'Active review', active=True, entities=['data_contract'])
+    audit = MagicMock()
+
+    result = asyncio.run(create_workflow(
+        request=SimpleNamespace(client=SimpleNamespace(host='127.0.0.1')),
+        workflow=_create_model(), db=db_session, audit_manager=audit,
+        current_user=SimpleNamespace(email='admin@example.com', username='admin'),
+        confirm_overlap=True, manager=WorkflowsManager(db_session), _=True,
+    ))
+
+    assert result.is_active is True
+    details = audit.log_action.call_args.kwargs['details']
+    assert details['overlap_confirmed'] is True
+    assert details['conflicting_workflow_ids'] == [active.id]
+
+
 def test_update_active_workflow_requires_overlap_confirmation(db_session):
     _workflow(db_session, 'Active review', active=True, entities=['data_contract'])
     target = _workflow(db_session, 'Product review', active=True, entities=['data_product'])
@@ -162,3 +253,65 @@ def test_update_active_workflow_requires_overlap_confirmation(db_session):
     assert raised.value.status_code == 409
     unchanged = WorkflowsManager(db_session).get_workflow(target.id)
     assert unchanged.trigger.entity_types == ['data_product']
+
+
+def test_put_activation_requires_confirmation_and_audits_override(db_session):
+    active = _workflow(db_session, 'Active review', active=True, entities=['data_contract'])
+    target = _workflow(db_session, 'Review copy', active=False, entities=['data_contract'])
+    request = SimpleNamespace(client=SimpleNamespace(host='127.0.0.1'))
+    user = SimpleNamespace(email='admin@example.com', username='admin')
+
+    with pytest.raises(HTTPException) as raised:
+        asyncio.run(update_workflow(
+            request=request, workflow_id=target.id,
+            workflow=ProcessWorkflowUpdate(is_active=True),
+            db=db_session, audit_manager=MagicMock(), current_user=user,
+            confirm_overlap=False, manager=WorkflowsManager(db_session), _=True,
+        ))
+    assert raised.value.status_code == 409
+    assert db_session.get(ProcessWorkflowDb, target.id).is_active is False
+
+    audit = MagicMock()
+    result = asyncio.run(update_workflow(
+        request=request, workflow_id=target.id,
+        workflow=ProcessWorkflowUpdate(is_active=True),
+        db=db_session, audit_manager=audit, current_user=user,
+        confirm_overlap=True, manager=WorkflowsManager(db_session), _=True,
+    ))
+    assert result.is_active is True
+    details = audit.log_action.call_args.kwargs['details']
+    assert details['overlap_confirmed'] is True
+    assert details['conflicting_workflow_ids'] == [active.id]
+
+
+def test_renaming_an_already_active_overlap_does_not_require_reconfirmation(db_session):
+    _workflow(db_session, 'Active review', active=True, entities=['data_contract'])
+    target = _workflow(db_session, 'Review copy', active=True, entities=['data_contract'])
+
+    result = asyncio.run(update_workflow(
+        request=SimpleNamespace(client=SimpleNamespace(host='127.0.0.1')),
+        workflow_id=target.id,
+        workflow=ProcessWorkflowUpdate(name='Renamed review'),
+        db=db_session, audit_manager=MagicMock(),
+        current_user=SimpleNamespace(email='admin@example.com', username='admin'),
+        confirm_overlap=False, manager=WorkflowsManager(db_session), _=True,
+    ))
+
+    assert result.name == 'Renamed review'
+
+
+def test_deactivation_and_idempotent_activation_skip_overlap_check(db_session):
+    _workflow(db_session, 'Active review', active=True, entities=['data_contract'])
+    target = _workflow(db_session, 'Review copy', active=True, entities=['data_contract'])
+
+    idempotent = _toggle(db_session, target, MagicMock())
+    assert idempotent.is_active is True
+
+    deactivated = asyncio.run(toggle_workflow_active(
+        request=SimpleNamespace(client=SimpleNamespace(host='127.0.0.1')),
+        workflow_id=target.id, db=db_session, audit_manager=MagicMock(),
+        current_user=SimpleNamespace(email='admin@example.com', username='admin'),
+        is_active=False, confirm_overlap=False,
+        manager=WorkflowsManager(db_session), _=True,
+    ))
+    assert deactivated.is_active is False
