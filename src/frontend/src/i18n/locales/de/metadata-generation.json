@@ -83,7 +83,8 @@
   },
   "confirm": {
     "cancel": "Diesen Generierungslauf abbrechen?",
-    "delete": "Diesen Generierungslauf und seine Vorschläge löschen?"
+    "delete": "Diesen Generierungslauf und seine Vorschläge löschen?",
+    "forceApply": "Die in Unity Catalog geänderten Beschreibungen von {{count}} Konflikten überschreiben?"
   },
   "toast": {
     "cancelFailed": "Der Lauf konnte nicht abgebrochen werden",
@@ -129,5 +130,13 @@
     "openReview": "Prüfung {{number}}",
     "inReview": "In Prüfung",
     "editedByReviewer": "Vom Prüfer bearbeitet"
+  },
+  "apply": {
+    "button": "{{count}} genehmigte anwenden",
+    "forceButton": "{{count}} Konflikte erzwingen",
+    "done": "{{count}} Beschreibungen in Unity Catalog übernommen",
+    "summary": "{{conflict}} Konflikte, {{notApplicable}} nicht anwendbar, {{failed}} fehlgeschlagen",
+    "failed": "Die Beschreibungen konnten nicht angewendet werden",
+    "appliedBy": "Angewendet von {{user}}"
   }
 }

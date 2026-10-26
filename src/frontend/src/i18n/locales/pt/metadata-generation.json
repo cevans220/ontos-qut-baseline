@@ -83,7 +83,8 @@
   },
   "confirm": {
     "cancel": "Cancelar esta execução de geração?",
-    "delete": "Excluir esta execução de geração e suas sugestões?"
+    "delete": "Excluir esta execução de geração e suas sugestões?",
+    "forceApply": "Substituir as descrições alteradas no Unity Catalog de {{count}} conflitos?"
   },
   "toast": {
     "cancelFailed": "Falha ao cancelar a execução",
@@ -129,5 +130,13 @@
     "openReview": "Revisão {{number}}",
     "inReview": "Em revisão",
     "editedByReviewer": "Editada pelo revisor"
+  },
+  "apply": {
+    "button": "Aplicar {{count}} aprovadas",
+    "forceButton": "Forçar {{count}} conflitos",
+    "done": "{{count}} descrições aplicadas no Unity Catalog",
+    "summary": "{{conflict}} conflitos, {{notApplicable}} não aplicáveis, {{failed}} com falha",
+    "failed": "Não foi possível aplicar as descrições",
+    "appliedBy": "Aplicada por {{user}}"
   }
 }

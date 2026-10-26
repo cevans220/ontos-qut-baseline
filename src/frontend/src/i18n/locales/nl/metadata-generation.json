@@ -83,7 +83,8 @@
   },
   "confirm": {
     "cancel": "Deze generatierun annuleren?",
-    "delete": "Deze generatierun en de bijbehorende suggesties verwijderen?"
+    "delete": "Deze generatierun en de bijbehorende suggesties verwijderen?",
+    "forceApply": "De in Unity Catalog gewijzigde beschrijvingen van {{count}} conflicten overschrijven?"
   },
   "toast": {
     "cancelFailed": "De run kon niet worden geannuleerd",
@@ -129,5 +130,13 @@
     "openReview": "Beoordeling {{number}}",
     "inReview": "In beoordeling",
     "editedByReviewer": "Bewerkt door beoordelaar"
+  },
+  "apply": {
+    "button": "{{count}} goedgekeurde toepassen",
+    "forceButton": "{{count}} conflicten forceren",
+    "done": "{{count}} beschrijvingen toegepast in Unity Catalog",
+    "summary": "{{conflict}} conflicten, {{notApplicable}} niet van toepassing, {{failed}} mislukt",
+    "failed": "De beschrijvingen konden niet worden toegepast",
+    "appliedBy": "Toegepast door {{user}}"
   }
 }
