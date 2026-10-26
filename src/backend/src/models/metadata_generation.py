@@ -113,6 +113,10 @@ class DescriptionSuggestion(BaseModel):
 
 class GenerationRunDetail(GenerationRunSummary):
     counts: SuggestionCounts = Field(default_factory=SuggestionCounts)
+    # Pending suggestions that can be submitted for review
+    unsubmitted: int = 0
+    # Asset Reviews holding the run's suggestions
+    review_request_ids: List[str] = Field(default_factory=list)
 
 
 class RunListResponse(BaseModel):

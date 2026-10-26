@@ -357,3 +357,13 @@ def test_reviewer_token_resolves_to_the_requests_reviewer(db_session):
     assert _resolve_role_to_users(db_session, "reviewer", context) == [(REVIEWER, None)]
     empty = SimpleNamespace(trigger_context=None, entity={})
     assert _resolve_role_to_users(db_session, "reviewer", empty) == []
+
+
+def test_review_summary_counts_unsubmitted_and_lists_reviews(db_session, manager):
+    run, (first, _) = _submitted(db_session, manager)
+    _suggestion(db_session, run, "later")
+    _suggestion(db_session, run, "gone", status="superseded")
+
+    unsubmitted, reviews = manager.review_summary(db_session, run.id)
+    assert unsubmitted == 1
+    assert reviews == [first.review_request_id]

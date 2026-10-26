@@ -931,6 +931,13 @@ class MetadataGenerationManager:
     def counts(self, db: Session, run_id: str) -> Dict[str, int]:
         return metagen_suggestions_repo.counts_by_status(db, run_id)
 
+    def review_summary(self, db: Session, run_id: str) -> Tuple[int, List[str]]:
+        """(pending suggestions not yet submitted, ids of the reviews the run is in)."""
+        return (
+            metagen_suggestions_repo.count_unsubmitted(db, run_id),
+            metagen_suggestions_repo.review_request_ids(db, run_id),
+        )
+
     def list_suggestions(
         self, db: Session, run_id: str, *, status: Optional[str] = None, limit: int = 1000, skip: int = 0
     ) -> List[DescriptionSuggestionDb]:

@@ -183,7 +183,13 @@ async def get_run(
         logger.warning("Failed to refresh metadata generation run %s", run_id, exc_info=True)
         db.rollback()
     summary = _to_summary(run)
-    return GenerationRunDetail(**summary.model_dump(), counts=SuggestionCounts(**manager.counts(db, run.id)))
+    unsubmitted, review_request_ids = manager.review_summary(db, run.id)
+    return GenerationRunDetail(
+        **summary.model_dump(),
+        counts=SuggestionCounts(**manager.counts(db, run.id)),
+        unsubmitted=unsubmitted,
+        review_request_ids=review_request_ids,
+    )
 
 
 @router.get(

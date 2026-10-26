@@ -45,6 +45,7 @@ def _manager(run=None):
     manager.refresh_run.side_effect = lambda db, r, **kwargs: r
     manager.cancel_run.side_effect = lambda db, r: r
     manager.counts.return_value = {}
+    manager.review_summary.return_value = (0, [])
     manager.list_suggestions.return_value = []
     manager.count_suggestions.return_value = 0
     return manager
