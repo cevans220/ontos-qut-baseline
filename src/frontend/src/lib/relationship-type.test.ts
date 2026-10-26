@@ -16,7 +16,23 @@ describe('getTargetTypeName', () => {
     })).toBe('DataProduct');
   });
 
-  it('falls back to the label with whitespace removed when there is no IRI', () => {
+  it('ignores a trailing "/" or "#" on the IRI', () => {
+    expect(getTargetTypeName({
+      target_type_iri: 'http://ontos.app/ontology/DataProduct/',
+      target_type_label: 'Data Product',
+    })).toBe('DataProduct');
+    expect(getTargetTypeName({
+      target_type_iri: 'http://ontos.app/ontology/DataProduct#',
+      target_type_label: 'Data Product',
+    })).toBe('DataProduct');
+  });
+
+  it('falls back to the label when the IRI is undefined or null', () => {
+    expect(getTargetTypeName({ target_type_iri: undefined, target_type_label: 'Data Product' })).toBe('DataProduct');
+    expect(getTargetTypeName({ target_type_iri: null, target_type_label: 'Data Product' })).toBe('DataProduct');
+  });
+
+  it('falls back to the label", with whitespace removed when there is no IRI', () => {
     expect(getTargetTypeName({ target_type_iri: '', target_type_label: 'Data Product' })).toBe('DataProduct');
   });
 

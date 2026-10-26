@@ -5,7 +5,7 @@
  */
 import { screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderWithProviders } from '@/test/utils';
+import { renderWithProviders, userEvent } from '@/test/utils';
 import { LineageEditor } from './lineage-editor';
 
 const relationships = {
@@ -36,7 +36,16 @@ describe('LineageEditor candidate search', () => {
       if (url.includes('/api/ontology/entity-types/relationships')) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve(relationships) });
       }
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({ candidates: [], total: 0 }) });
+      if (url.includes('/api/suggestions/link-candidates')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            candidates: [{ id: 'p1', name: 'Sales Product', entity_type: 'DataProduct', score: 1 }],
+            total: 1,
+          }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
     });
     vi.stubGlobal('fetch', fetchMock);
   });
@@ -66,5 +75,38 @@ describe('LineageEditor candidate search', () => {
     });
     // Display text still uses the human-readable label.
     expect(screen.getAllByText(/has product/i).length).toBeGreaterThan(0);
+  });
+
+  it('shows the display label in the review step but POSTs the machine type name', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <LineageEditor
+        isOpen
+        onOpenChange={() => {}}
+        entityType="DataContract"
+        entityId="c1"
+        entityName="Contract"
+      />,
+    );
+
+    await user.click(await screen.findByRole('button', { name: /^add$/i }));
+    await user.click(screen.getByRole('button', { name: /review & save/i }));
+
+    expect(await screen.findByText('Data Product')).toBeInTheDocument();
+    expect(screen.queryByText('DataProduct')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /save all/i }));
+
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find(
+        c => String(c[0]) === '/api/entity-relationships' && c[1]?.method === 'POST',
+      );
+      expect(post).toBeDefined();
+      expect(JSON.parse(post![1].body)).toMatchObject({
+        source_type: 'DataContract',
+        target_type: 'DataProduct',
+        target_id: 'p1',
+      });
+    });
   });
 });
