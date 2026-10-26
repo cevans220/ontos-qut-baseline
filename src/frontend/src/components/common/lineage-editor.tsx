@@ -17,6 +17,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useToast } from '@/hooks/use-toast';
 import { useFormatLabel } from '@/lib/format-label';
+import { getTargetTypeName } from '@/lib/relationship-type';
 import type { RelationshipDefinition, EntityRelationships } from '@/types/ontology-schema';
 
 interface LinkCandidate {
@@ -48,7 +49,7 @@ const TARGET_TYPE_ICONS: Record<string, React.ElementType> = {
 };
 
 function getIconForRelationship(rel: RelationshipDefinition): React.ElementType {
-  const typeName = rel.target_type_label || rel.target_type_iri.split('#').pop() || '';
+  const typeName = getTargetTypeName(rel);
   return TARGET_TYPE_ICONS[typeName] || Link2;
 }
 
@@ -311,7 +312,7 @@ function CandidateSearchStep({
 
   const { t } = useTranslation('common');
   const formatLabel = useFormatLabel();
-  const targetType = relationship.target_type_label || relationship.target_type_iri.split('#').pop() || '';
+  const targetType = getTargetTypeName(relationship);
 
   useEffect(() => {
     const search = async () => {
