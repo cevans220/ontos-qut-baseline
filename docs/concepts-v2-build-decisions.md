@@ -206,7 +206,9 @@ Each ADR: **Context** (the problem) / **Decision** (what we did) /
     the approver's decision drives the concept directly in `resume_workflow`
     (`approve -> approved`, `reject -> draft + reason as reviewer comment`),
     making the workflow the single source of truth for a governed concept.
-- **Consequences.** `require_all` named approvers become the mandatory gate; the
+- **Consequences.** The approval step is the mandatory gate: the first approver's
+  decision settles it, because `require_all` is stored with the step but not
+  enforced yet ([#1119](https://github.com/databrickslabs/ontos/issues/1119)). The
   wizard and the async gate are independent and either can be absent.
 
 ### C2. Concept-review gate is all-or-nothing (scope = ALL)
