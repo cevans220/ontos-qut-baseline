@@ -55,6 +55,7 @@ def _ws_returning(rows):
 def _jobs(job_run_id=111):
     jobs = MagicMock()
     jobs.run_job.return_value = job_run_id
+    jobs.get_job_parameter_names.return_value = None  # definition unknown: launch
     return jobs
 
 

@@ -258,3 +258,16 @@ def test_main_rejects_a_non_uuid_run_id(job, monkeypatch):
     ])
     with pytest.raises(ValueError):
         job.main()
+
+
+def test_job_definition_declares_every_parameter_the_app_passes():
+    import yaml
+    from pathlib import Path
+
+    from src.controller.metadata_generation_manager import JOB_PARAMETERS
+
+    yaml_path = Path(__file__).resolve().parents[2] / "workflows" / "metagen_generate" / "metagen_generate.yaml"
+    spec = yaml.safe_load(yaml_path.read_text())
+    assert set(spec["parameters"]) == set(JOB_PARAMETERS)
+    args = spec["tasks"][0]["spark_python_task"]["parameters"]
+    assert {a[2:] for a in args if a.startswith("--")} == set(JOB_PARAMETERS)

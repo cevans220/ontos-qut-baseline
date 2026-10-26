@@ -15,7 +15,9 @@ from databricks.sdk.service.catalog import Privilege, TableType
 from databricks.sdk.service.sql import StatementState
 from pydantic import ValidationError
 
+from src.common.errors import ConflictError
 from src.controller.metadata_generation_manager import (
+    JOB_PARAMETERS,
     SETTINGS_KEY,
     WORKFLOW_ID,
     ActiveRunLimitError,
@@ -47,6 +49,7 @@ def _settings():
 def _jobs():
     jobs = MagicMock()
     jobs.run_job.return_value = 111
+    jobs.get_job_parameter_names.return_value = None
     return jobs
 
 
@@ -233,6 +236,38 @@ def test_table_limit_leaves_it_to_the_job_when_uc_cant_be_listed(db_session, ins
     assert run.status == "running"
 
 
+def test_start_run_refuses_a_job_installed_from_an_older_definition(db_session, installation):
+    jobs = _jobs()
+    jobs.get_job_parameter_names.return_value = {
+        "ontos_run_id", "table_names", "output_catalog", "output_schema", "model",
+        "comment_style", "allow_data", "sample_size", "regenerate_existing",
+    }
+    manager = _manager(jobs=jobs)
+    with pytest.raises(ConflictError, match="outdated"):
+        manager.start_run(db_session, user_id="a@x.com", request=_request())
+    jobs.run_job.assert_not_called()
+    jobs.get_job_parameter_names.assert_called_once_with(42)
+    assert manager.list_runs(db_session, "a@x.com") == []  # no run left behind
+
+    jobs.get_job_parameter_names.return_value |= {"add_metadata", "max_tables"}
+    assert manager.start_run(db_session, user_id="a@x.com", request=_request("main.hr")).status == "running"
+    # The list matches what is actually passed
+    assert set(jobs.run_job.call_args.kwargs["job_parameters"]) == set(JOB_PARAMETERS)
+
+
+def test_jobs_manager_reads_the_installed_parameter_names():
+    from src.controller.jobs_manager import JobsManager
+
+    jobs_manager = JobsManager.__new__(JobsManager)
+    jobs_manager._client = MagicMock()
+    jobs_manager._client.jobs.get.return_value = SimpleNamespace(
+        settings=SimpleNamespace(parameters=[SimpleNamespace(name="a"), SimpleNamespace(name="b")])
+    )
+    assert jobs_manager.get_job_parameter_names(7) == {"a", "b"}
+    jobs_manager._client.jobs.get.side_effect = RuntimeError("gone")
+    assert jobs_manager.get_job_parameter_names(7) is None
+
+
 # ---------------------------------------------------------------- pre-flight writability
 
 def test_unwritable_tables_by_ownership_and_privileges():
@@ -250,6 +285,20 @@ def test_unwritable_tables_by_ownership_and_privileges():
     assert set(result) == {"main.s.v_other", "main.s.select", "main.s.none"}
     assert "own this view" in result["main.s.v_other"]
     assert "MODIFY" in result["main.s.select"]
+
+
+def test_write_privilege_is_found_on_a_later_page_of_effective_grants():
+    ws = _uc()
+    pages = {
+        None: SimpleNamespace(privilege_assignments=[SimpleNamespace(
+            principal=SP, privileges=[SimpleNamespace(privilege=Privilege.SELECT)])], next_page_token="p2"),
+        "p2": SimpleNamespace(privilege_assignments=[SimpleNamespace(
+            principal=SP, privileges=[SimpleNamespace(privilege=Privilege.MODIFY)])], next_page_token=None),
+    }
+    ws.grants.get_effective.side_effect = lambda securable_type, full_name, principal, page_token=None: pages[page_token]
+
+    assert _manager(ws=ws)._unwritable_tables({"main.s.t"}) == {}
+    assert [c.kwargs["page_token"] for c in ws.grants.get_effective.call_args_list] == [None, "p2"]
 
 
 def test_unwritable_tables_leaves_out_what_it_cant_check():

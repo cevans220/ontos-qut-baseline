@@ -69,6 +69,11 @@ from src.repositories.metadata_generation_repository import (
 logger = get_logger(__name__)
 
 WORKFLOW_ID = "metagen_generate"
+# Job parameters start_run passes; the installed job must define all of them
+JOB_PARAMETERS = (
+    "ontos_run_id", "table_names", "output_catalog", "output_schema", "model", "comment_style",
+    "allow_data", "sample_size", "add_metadata", "max_tables", "regenerate_existing",
+)
 RESULTS_TABLE = "metagen_results"
 # Rows per results query; keeps each response well below the 25 MiB inline limit
 RESULTS_PAGE_SIZE = 2000
@@ -322,6 +327,8 @@ class MetadataGenerationManager:
                 "Ask an administrator to enable it under Settings > Jobs."
             )
 
+        self._check_job_is_current(int(installation.job_id))
+
         if request.auto_submit and request.reviewer_email and request.reviewer_email.lower() == user_id.lower():
             raise ValueError("You can't review your own Generation Run; pick another reviewer")
 
@@ -392,6 +399,22 @@ class MetadataGenerationManager:
                             f"Another Generation Run is already describing objects in {item['fqn']}. "
                             "Wait for it to finish or cancel it."
                         )
+
+    def _check_job_is_current(self, job_id: int) -> None:
+        """Refuse to launch a job installed from an older definition.
+
+        Installed jobs keep their definition; one without the parameters this
+        version passes would reject the run or ignore settings such as the
+        column-statistics switch.
+        """
+        names = self._jobs.get_job_parameter_names(job_id)
+        if names is None:
+            return
+        if set(JOB_PARAMETERS) - names:
+            raise ConflictError(
+                "The Metadata Generation background job is outdated. Ask an administrator to "
+                "turn it off and on again under Settings > Jobs."
+            )
 
     def _check_table_limit(self, table_names: List[str], limit: int) -> None:
         """Reject a selection that covers more than ``limit`` tables.
