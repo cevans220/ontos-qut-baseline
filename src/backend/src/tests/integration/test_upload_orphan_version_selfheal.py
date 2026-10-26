@@ -1,6 +1,6 @@
 """ACCEPTANCE gate for the re-upload / diff-apply orphan-version self-heal.
 
-BUG (repro'd via cbv2b app logs 2026-08-14): a diff-apply 500'd with
+BUG (repro'd from app logs of a live test instance, 2026-08-14): a diff-apply 500'd with
 ``sqlalchemy.exc.IntegrityError: duplicate key value violates unique constraint
 "uq_concept_version_iri_version"`` and the whole atomic apply rolled back
 ("Upload apply failed; the store is unchanged").

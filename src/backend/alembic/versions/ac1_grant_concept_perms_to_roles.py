@@ -7,8 +7,8 @@ Create Date: 2026-08-18
 No non-admin role could work with Concepts: the default roles were seeded with
 `business-glossary` but never `semantic-models` (the "Concept Browser" feature)
 or `term-mapping` (Enrich). `ensure_default_roles_exist` skips existing DBs, so
-updating DEFAULT_ROLE_PERMISSIONS only helps fresh installs — existing customers
-(and cbv2b) need this backfill.
+updating DEFAULT_ROLE_PERMISSIONS only helps fresh installs — existing installs
+need this backfill.
 
 Additive + idempotent: only sets a key when the role LACKS it, so it never
 downgrades an admin's explicit grant or a hand-edited role. Levels mirror the

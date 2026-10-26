@@ -1,7 +1,7 @@
 """Regression: concepts-grouped must list EVERY concept in a scheme, including
 ones that have been versioned (published to v2).
 
-Live bug (cbv2b, 2026-08-14): a scheme with 4 concepts (one published to v2)
+Bug seen on a live test instance (2026-08-14): a scheme with 4 concepts (one published to v2)
 showed only 1-2 in Explore. Root cause was NOT data loss — every concept was
 present in the store and reachable by-iri + via a UNION-graph SPARQL query — but
 ``_compute_all_concepts`` enumerated PER-CONTEXT via ``context.query(...)``, and

@@ -167,7 +167,7 @@ def t_b2_ungoverned(base: str) -> None:
     if ss == 200 and st == "under_review" and governed is False:
         record("B2.2 submit -> under_review (ungoverned)", PASS, f"governed={governed}")
     elif ss == 200 and st == "under_review" and governed:
-        # EXPECTED on cbv2b: the "Concept Review Approval" process workflow is
+        # EXPECTED when the default workflow is active: the "Concept Review Approval" process workflow is
         # scope=ALL (the scope model has no per-scheme option), so EVERY concept
         # submit is governed and no ungoverned scheme can exist. Per the
         # 2026-08-18 decision, B2 (ungoverned) is intentionally left untestable

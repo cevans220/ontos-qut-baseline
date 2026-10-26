@@ -1,4 +1,4 @@
-"""ACCEPTANCE gate for two live cbv2b production bugs (2026-08-14).
+"""ACCEPTANCE gate for two bugs seen on a live test instance (2026-08-14).
 
 BUG A — publishing a concept blanked its ENTIRE scheme in Explore.
     Root cause: ``_compute_all_concepts`` constructed every OntologyConcept inside
