@@ -475,11 +475,17 @@
     "titleFallback": "Esecuzione del workflow",
     "executionId": "ID esecuzione: {{id}}...",
     "stepsProgress": "{{done}}/{{total}} passaggi",
+    "stepsProgressWithRemoved_one": "{{done}}/{{total}} passaggi (+{{count}} rimosso)",
+    "stepsProgressWithRemoved_other": "{{done}}/{{total}} passaggi (+{{count}} rimossi)",
     "triggeredBy": "Attivato da: {{user}}",
     "workflowSteps": "Passaggi del workflow",
     "loadDefinitionFailed": "Impossibile caricare la definizione del workflow",
+    "removedSteps": "Passaggi rimossi",
+    "removedStepsHint": "Questi passaggi sono stati eseguiti in questa esecuzione e poi rimossi dal workflow.",
     "stepErrors": {
-      "rule_entity_load_failed": "Impossibile caricare {{entityType}} {{entityId}} per valutare la regola"
+      "approval_rejected": "Richiesta rifiutata",
+      "rule_entity_load_failed": "Impossibile caricare {{entityType}} {{entityId}} per valutare la regola",
+      "rule_entity_not_found": "{{entityType}} {{entityId}} non è stato trovato, quindi la regola non può essere valutata"
     },
     "states": {
       "pending": "In sospeso",
