@@ -4,8 +4,8 @@ A Generation Run executes dbxmetagen over a selection of Unity Catalog
 objects; its output is ingested as Description Suggestions which go through
 Asset Review before being applied to UC (PRD #1184).
 
-Revision ID: b5_metadata_generation
-Revises: b4_compliance_run_error_code
+Revision ID: b8_metadata_generation
+Revises: b7_workflow_step_results_kept
 Create Date: 2026-10-23 10:00:00.000000
 
 """
@@ -16,8 +16,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSON
 
 
-revision: str = 'b5_metadata_generation'
-down_revision: Union[str, None] = 'b4_compliance_run_error_code'
+revision: str = 'b8_metadata_generation'
+down_revision: Union[str, None] = 'b7_workflow_step_results_kept'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
