@@ -22,4 +22,4 @@ The **app** — not the job — ingests `metagen_results` into its own `metagen_
 - `ingest_results(run_id)` must be idempotent because both paths can call it.
 - A SQL warehouse (`DATABRICKS_WAREHOUSE_ID`) is required for ingestion.
 - The app service principal needs write access on the app schema and `SELECT` on target tables (see `uc-grants-for-app-sp.md`).
-- dbxmetagen's license must be confirmed compatible with use as a dependency.
+- dbxmetagen is under the Databricks License, the same as Ontos; it is credited in `NOTICE` and installed at runtime, not bundled.

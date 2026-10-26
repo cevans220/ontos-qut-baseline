@@ -97,6 +97,6 @@ Review decisions follow the `data-asset-reviews` permissions and the workflow ap
 - Contextual "Generate descriptions" actions on Data Products / Contracts.
 - dbxmetagen's knowledge base, ontology, metric view and Genie features.
 
-## Open Questions
+## Licensing
 
-- dbxmetagen's license ("Other") must be confirmed compatible with use as a dependency before slice 1 merges.
+dbxmetagen is under the Databricks License, the same license as Ontos, so using it within the Databricks Services is covered. It is not bundled: the background job installs it at a pinned commit. It is credited in `NOTICE`. Its own NOTICE states that using it implies consent to Databricks collecting usage and tracking information; the feature's user documentation must say so (#1188).
