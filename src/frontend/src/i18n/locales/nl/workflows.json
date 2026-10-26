@@ -477,11 +477,17 @@
     "titleFallback": "Workflow-uitvoering",
     "executionId": "Uitvoerings-ID: {{id}}...",
     "stepsProgress": "{{done}}/{{total}} stappen",
+    "stepsProgressWithRemoved_one": "{{done}}/{{total}} stappen (+{{count}} verwijderd)",
+    "stepsProgressWithRemoved_other": "{{done}}/{{total}} stappen (+{{count}} verwijderd)",
     "triggeredBy": "Geactiveerd door: {{user}}",
     "workflowSteps": "Workflowstappen",
     "loadDefinitionFailed": "Kon workflowdefinitie niet laden",
+    "removedSteps": "Verwijderde stappen",
+    "removedStepsHint": "Deze stappen zijn in deze uitvoering uitgevoerd en later uit de workflow verwijderd.",
     "stepErrors": {
-      "rule_entity_load_failed": "{{entityType}} {{entityId}} kon niet worden geladen om de regel te evalueren"
+      "approval_rejected": "Verzoek afgewezen",
+      "rule_entity_load_failed": "{{entityType}} {{entityId}} kon niet worden geladen om de regel te evalueren",
+      "rule_entity_not_found": "{{entityType}} {{entityId}} is niet gevonden, dus de regel kan niet worden geëvalueerd"
     },
     "states": {
       "pending": "In Afwachting",

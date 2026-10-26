@@ -12,6 +12,7 @@ interface BlockedReason {
 const REASON_KEYS: Record<string, string> = {
   waiting_for_approval: 'workflow-gates:reasons.waitingForApproval',
   rule_entity_load_failed: 'workflow-gates:reasons.entityLoadFailed',
+  rule_entity_not_found: 'workflow-gates:reasons.entityNotFound',
 };
 
 function reasonText(reason: BlockedReason, t: TFunction): string {

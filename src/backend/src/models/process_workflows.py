@@ -485,7 +485,7 @@ class ScriptStepConfig(BaseModel):
         json_schema_extra = {
             "example": {
                 "language": "python",
-                "code": "return {'status': 'ok'}",
+                "code": "result = {'passed': True, 'data': {'status': 'ok'}}",
                 "timeout_seconds": 30
             }
         }
@@ -683,7 +683,11 @@ class TriggerContext(BaseModel):
 class WorkflowStepExecutionResult(BaseModel):
     """Result of a step execution."""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    step_id: str
+    # The step's row id; None once the step was removed from the workflow
+    step_id: Optional[str] = None
+    # The step's step_id and name when it ran, kept if the step is removed
+    step_key: Optional[str] = None
+    step_name: Optional[str] = None
     status: StepExecutionStatus
     passed: Optional[bool] = None
     result_data: Optional[Dict[str, Any]] = None
@@ -716,6 +720,11 @@ class WorkflowExecution(WorkflowExecutionBase):
     success_count: int = Field(default=0)
     failure_count: int = Field(default=0)
     error_message: Optional[str] = None
+    error_code: Optional[str] = Field(
+        None,
+        description="Code of error_message when it is a failed step's coded error",
+    )
+    error_params: Optional[Dict[str, Any]] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     triggered_by: Optional[str] = None

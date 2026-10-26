@@ -200,6 +200,10 @@ class StepHandler(ABC):
         pass
 
 
+# Step error code of an approval rejected without a reason
+APPROVAL_REJECTED = 'approval_rejected'
+
+
 class _ReviewStepRefused(Exception):
     """A lifecycle step of a product review outcome was refused."""
 
@@ -216,6 +220,20 @@ class RuleEntityLoadError(RuntimeError):
     def __init__(self, entity_type: Optional[str], entity_id: Optional[str]):
         self.params = {'entityType': entity_type, 'entityId': entity_id}
         super().__init__(f"Could not load {entity_type} {entity_id} to evaluate the rule")
+
+
+class RuleEntityNotFoundError(RuntimeError):
+    """The entity a rule is about no longer exists (or never did).
+
+    Same shape as ``RuleEntityLoadError``: a stable code and parameters next
+    to the English message.
+    """
+
+    code = 'rule_entity_not_found'
+
+    def __init__(self, entity_type: Optional[str], entity_id: Optional[str]):
+        self.params = {'entityType': entity_type, 'entityId': entity_id}
+        super().__init__(f"{entity_type} {entity_id} was not found, so the rule can't be evaluated")
 
 
 def _rule_step_error(error: Exception, data: Optional[Dict[str, Any]] = None) -> 'StepResult':
@@ -245,9 +263,13 @@ def _rule_object(db: Session, context: 'StepContext') -> Dict[str, Any]:
     derived from the stored row (``has_owner``, counts) would describe the
     entity before it.
 
-    Raises when the stored entity can't be loaded: evaluating the rule on the
-    payload alone could let it pass on fields the payload doesn't carry, so the
-    step fails instead (its handler turns the error into a failed result).
+    Raises when the stored entity can't be loaded, or doesn't exist (deleted
+    while a workflow waited, or a wrong id): evaluating the rule on the payload
+    alone could let it pass on fields the payload doesn't carry, so the step
+    fails instead (its handler turns the error into a failed result).
+    ``before_create`` gates keep the payload: their entity isn't stored yet.
+    ``on_delete`` workflows keep it too: they fire after the row is deleted,
+    so there is nothing stored to load.
     """
     from src.controller.entity_dict_builder import (
         build_data_contract_dict,
@@ -256,7 +278,7 @@ def _rule_object(db: Session, context: 'StepContext') -> Dict[str, Any]:
 
     payload = context.entity if isinstance(context.entity, dict) else {}
     trigger_type = getattr(getattr(context, 'trigger_context', None), 'trigger_type', None)
-    if getattr(trigger_type, 'value', trigger_type) == 'before_update':
+    if getattr(trigger_type, 'value', trigger_type) in ('before_update', 'before_create', 'on_delete'):
         return payload
     builder = {
         'data_product': build_data_product_dict,
@@ -273,7 +295,9 @@ def _rule_object(db: Session, context: 'StepContext') -> Dict[str, Any]:
         # The database error stays in the server log; the step result shows
         # only what failed.
         raise RuleEntityLoadError(context.entity_type, context.entity_id) from e
-    return {**stored, **payload} if stored else payload
+    if not stored:
+        raise RuleEntityNotFoundError(context.entity_type, context.entity_id)
+    return {**stored, **payload}
 
 
 class ValidationStepHandler(StepHandler):
@@ -288,9 +312,12 @@ class ValidationStepHandler(StepHandler):
         
         try:
             passed, message = evaluate_rule_on_object(rule, _rule_object(self._db, context))
+            # A failed rule's message is the step's error, so it is stored with
+            # the step and shown under it in the execution dialog.
             return StepResult(
                 passed=passed,
                 message=message,
+                error=None if passed else message,
                 data={'rule': rule}
             )
         except Exception as e:
@@ -972,6 +999,9 @@ class NotificationStepHandler(StepHandler):
 
             created_count = 0
             email_count = 0
+            # The in-app notices, so a later step can withdraw one (see
+            # WorkflowExecutor._withdraw_approval_notices)
+            notices: List[Dict[str, str]] = []
 
             # --- in_app channel ---
             if 'in_app' in channels:
@@ -994,6 +1024,7 @@ class NotificationStepHandler(StepHandler):
                         )
                         notification_repo.create(db=self._db, obj_in=notification)
                         created_count += 1
+                        notices.append({'id': notification.id, 'recipient': recipient_id})
                         logger.info(f"Notification created for {recipient_id}: {title}")
                     except Exception as e:
                         logger.warning(f"Failed to create notification for {recipient_id}: {e}")
@@ -1061,6 +1092,7 @@ class NotificationStepHandler(StepHandler):
                     'created_count': created_count,
                     'email_count': email_count,
                     'channels': channels,
+                    'notices': notices,
                 }
             )
         except Exception as e:
@@ -2818,6 +2850,8 @@ class WorkflowExecutor:
                 self._db,
                 execution_id=db_execution.id,
                 step_id=step.id,
+                step_key=step.step_id,
+                step_name=step.name,
                 status=step_status.value,
                 passed=result.passed,
                 result_data=result.data,
@@ -2933,18 +2967,28 @@ class WorkflowExecutor:
         current_step = steps_by_id[current_step_id]
         
         # Record the approval result for the paused step
+        denied_without_reason = not step_result and not (result_data or {}).get('reason')
         workflow_execution_repo.add_step_execution(
             self._db,
             execution_id=execution_id,
             step_id=current_step.id,
+            step_key=current_step.step_id,
+            step_name=current_step.name,
             status=StepExecutionStatus.SUCCEEDED.value if step_result else StepExecutionStatus.FAILED.value,
             passed=step_result,
             result_data={
                 'approval_result': 'approved' if step_result else 'rejected',
                 'responded_by': user_email,
                 **(result_data or {}),
+                # A rejection without a reason: the UI translates the code,
+                # the English text stays in error_message
+                **(
+                    {'error_code': APPROVAL_REJECTED, 'error_params': {}}
+                    if denied_without_reason else {}
+                ),
             },
-            error_message=None if step_result else (result_data or {}).get('reason', 'Request denied'),
+            # The approve routes send reason None when the approver wrote none
+            error_message=None if step_result else ((result_data or {}).get('reason') or 'Request denied'),
             duration_ms=0,  # Approval duration not tracked this way
         )
         
@@ -3061,7 +3105,12 @@ class WorkflowExecutor:
                         approval_entry = context.step_results.setdefault(
                             current_step_id, {}
                         )
-                        approval_entry.update(merged)
+                        # The wizard is the requester's: its fields never replace
+                        # the approver's decision (passed, decision, message,
+                        # reason), which ${step_results.<approval>.reason} names.
+                        for key, value in merged.items():
+                            if key not in approval_entry:
+                                approval_entry[key] = value
                         logger.info(
                             "Merged %d wizard field(s) into step_results.%s",
                             len(merged),
@@ -3079,14 +3128,23 @@ class WorkflowExecutor:
         success_count = db_execution.success_count
         failure_count = db_execution.failure_count
         
-        # Count the approval step
-        if step_result:
-            success_count += 1
-        else:
+        # Count the approval step. The pause already counted it as passed (the
+        # pending approval's result passes), so an approval keeps that count and
+        # a rejection moves it to the failures.
+        if not step_result:
+            success_count = max(success_count - 1, 0)
             failure_count += 1
         
         final_status = ExecutionStatus.RUNNING
         error_message = None
+        
+        # The approval was the last step for this decision: the execution ends here.
+        if not next_step_id:
+            if step_result:
+                final_status = ExecutionStatus.SUCCEEDED
+            else:
+                final_status = ExecutionStatus.FAILED
+                error_message = (result_data or {}).get('reason') or 'Request denied'
         
         while next_step_id:
             step = steps_by_id.get(next_step_id)
@@ -3106,6 +3164,8 @@ class WorkflowExecutor:
                 self._db,
                 execution_id=execution_id,
                 step_id=step.id,
+                step_key=step.step_id,
+                step_name=step.name,
                 status=step_status.value,
                 passed=result.passed,
                 result_data=result.data,
@@ -3173,6 +3233,7 @@ class WorkflowExecutor:
                 succeeded=(final_status == ExecutionStatus.SUCCEEDED),
                 responded_by=user_email,
                 approved=step_result,
+                execution_id=execution_id,
             )
         
         # Return updated execution
@@ -3185,6 +3246,7 @@ class WorkflowExecutor:
         contract_id: str,
         approved: bool,
         responded_by: Optional[str],
+        execution_id: Optional[str] = None,
     ) -> None:
         """Set a reviewed contract to ``approved`` or back to ``draft``.
 
@@ -3229,7 +3291,10 @@ class WorkflowExecutor:
                 'notApplied', {'reason': str(e)}, error=e,
             )
             # The workflow has already told the requester the review was
-            # decided; say that the contract's status didn't follow.
+            # decided; say that the contract's status didn't follow. An
+            # "approved" notice of this run would contradict it, so it goes.
+            if approved:
+                self._withdraw_approval_notices(execution_id, trigger_context.user_email)
             self._notify_status_not_changed(
                 trigger_context, target_status, str(e), trigger_context.user_email,
                 'requesterNotApplied', {'reason': str(e)}, error=e,
@@ -3243,6 +3308,51 @@ class WorkflowExecutor:
             "Data contract %s moved to '%s' after its review was decided",
             contract_id, target_status,
         )
+
+    # Notification templates that tell the requester their request was approved
+    _APPROVAL_NOTICE_TEMPLATES = ('request_approved', 'product_approved')
+
+    def _withdraw_approval_notices(self, execution_id: Optional[str], recipient: Optional[str]) -> int:
+        """Delete the "approved" notices this run sent ``recipient``.
+
+        Used when the approved status change was refused afterwards (e.g. by a
+        status gate): the requester then gets only the "not applied" notice
+        instead of two that contradict each other. Runs recorded before the
+        notification steps kept their notice ids have nothing to withdraw.
+        """
+        if not execution_id or not recipient:
+            return 0
+        from src.db_models.notifications import NotificationDb
+        from src.db_models.process_workflows import WorkflowStepExecutionDb
+
+        ids = []
+        runs = (
+            self._db.query(WorkflowStepExecutionDb)
+            .filter(WorkflowStepExecutionDb.execution_id == execution_id)
+            .filter(WorkflowStepExecutionDb.passed.is_(True))
+            .all()
+        )
+        for run in runs:
+            try:
+                data = json.loads(run.result_data) if isinstance(run.result_data, str) else run.result_data
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(data, dict) or data.get('template') not in self._APPROVAL_NOTICE_TEMPLATES:
+                continue
+            ids.extend(
+                notice.get('id') for notice in data.get('notices') or []
+                if isinstance(notice, dict) and notice.get('recipient') == recipient and notice.get('id')
+            )
+        if not ids:
+            return 0
+        removed = (
+            self._db.query(NotificationDb)
+            .filter(NotificationDb.id.in_(ids))
+            .delete(synchronize_session=False)
+        )
+        self._db.commit()
+        logger.info("Withdrew %d approval notice(s) of execution %s", removed, execution_id)
+        return removed
 
     @staticmethod
     def _coded_error_i18n(error: Optional[Exception]) -> Dict[str, Any]:
@@ -3315,6 +3425,7 @@ class WorkflowExecutor:
         succeeded: bool,
         responded_by: Optional[str] = None,
         approved: Optional[bool] = None,
+        execution_id: Optional[str] = None,
     ) -> None:
         """Handle entity status updates when a workflow completes.
         
@@ -3381,13 +3492,15 @@ class WorkflowExecutor:
                   and trigger_type in ('on_request_review', 'ON_REQUEST_REVIEW')
                   and approved is not None):
                 self._apply_contract_review_decision(
-                    trigger_context, entity_id, approved, responded_by
+                    trigger_context, entity_id, approved, responded_by,
+                    execution_id=execution_id,
                 )
                     
             # Handle data product activation completion
             elif entity_type == 'data_product' and trigger_type in ('on_request_review', 'ON_REQUEST_REVIEW'):
                 self._apply_product_review_outcome(
-                    trigger_context, entity_id, succeeded, responded_by
+                    trigger_context, entity_id, succeeded, responded_by,
+                    execution_id=execution_id,
                 )
 
             # Approved status change request: apply the requested transition,
@@ -3400,7 +3513,8 @@ class WorkflowExecutor:
                 ).get('target_status')
                 if approved_request and target_status:
                     self._apply_requested_status_change(
-                        trigger_context, entity_id, target_status, responded_by
+                        trigger_context, entity_id, target_status, responded_by,
+                        execution_id=execution_id,
                     )
                     
         except Exception as e:
@@ -3421,6 +3535,7 @@ class WorkflowExecutor:
         product_id: str,
         succeeded: bool,
         responded_by: Optional[str],
+        execution_id: Optional[str] = None,
     ) -> None:
         """Activate a reviewed data product, or return it to draft.
 
@@ -3473,7 +3588,10 @@ class WorkflowExecutor:
                 manager, trigger_context, product_id, steps, target_status, responded_by, applied,
             )
         except _ReviewStepRefused:
-            pass
+            # The requester was told the change wasn't applied; an "approved"
+            # notice of this run would contradict it, so it goes.
+            if succeeded:
+                self._withdraw_approval_notices(execution_id, trigger_context.user_email)
         except SQLAlchemyError:
             # The steps before the failed one are committed; the session must
             # be usable again to fire their trigger below
@@ -3536,6 +3654,7 @@ class WorkflowExecutor:
         product_id: str,
         target_status: str,
         responded_by: Optional[str],
+        execution_id: Optional[str] = None,
     ) -> None:
         """Apply an approved status change request to a data product.
 
@@ -3577,6 +3696,8 @@ class WorkflowExecutor:
                 "its status is now '%s'",
                 product_id, requested_from, target_status, current_status,
             )
+            # The "approved" notice of this run would contradict the one below
+            self._withdraw_approval_notices(execution_id, trigger_context.user_email)
             self._notify_status_change_not_applied(
                 trigger_context, product_id,
                 f"The request to change the status from '{requested_from}' to "
@@ -3605,6 +3726,7 @@ class WorkflowExecutor:
                 "Approved status change of data product %s to '%s' could not be applied: %s",
                 product_id, target_status, e,
             )
+            self._withdraw_approval_notices(execution_id, trigger_context.user_email)
             self._notify_status_change_not_applied(
                 trigger_context, product_id,
                 f"Your request to change the status to '{target_status}' was approved, "
@@ -3704,6 +3826,8 @@ class WorkflowExecutor:
             step_executions.append(WorkflowStepExecutionResult(
                 id=se.id,
                 step_id=se.step_id,
+                step_key=se.step_key,
+                step_name=se.step_name,
                 status=StepExecutionStatus(se.status),
                 passed=se.passed,
                 result_data=json.loads(se.result_data) if se.result_data else None,
