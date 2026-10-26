@@ -60,7 +60,11 @@
     "in_review": "En Revisión",
     "approved": "Aprobado",
     "rejected": "Rechazado",
-    "cancelled": "Cancelado"
+    "cancelled": "Cancelado",
+    "queued": "En cola",
+    "needs_review": "Necesita revisión",
+    "denied": "Denegada",
+    "needs_clarification": "Necesita aclaración"
   },
   "details": {
     "backToList": "Volver a Revisiones",
@@ -120,6 +124,8 @@
     "fqnLabel": "FQN:",
     "typeLabel": "Tipo:",
     "contentPreview": "Vista previa del contenido / Definición",
+    "openDataProduct": "Abrir producto de datos",
+    "openDataContract": "Abrir contrato de datos",
     "yourReview": "Tu revisión",
     "statusLabel": "Estado *",
     "statusPlaceholder": "Establecer estado",
@@ -135,6 +141,22 @@
     "modelLabel": "Modelo",
     "generatedLabel": "Generado",
     "modelReviewNotImplemented": "Los detalles de la revisión del modelo aún no están implementados.",
+    "metricView": {
+      "source": "Origen",
+      "filter": "Filtro",
+      "joins": "Uniones",
+      "dimensions": "Dimensiones",
+      "measures": "Medidas",
+      "name": "Nombre",
+      "expression": "Expresión",
+      "noDimensions": "No hay dimensiones definidas.",
+      "noMeasures": "No hay medidas definidas.",
+      "unparsed": "No se pudo leer la definición de la metric view; su YAML se muestra a continuación.",
+      "yaml": "Definición YAML",
+      "materialization": "Materialización",
+      "materializationSummary_one": "{{schedule}}, {{count}} vista materializada",
+      "materializationSummary_other": "{{schedule}}, {{count}} vistas materializadas"
+    },
     "noPreviewAvailable": "No hay vista previa ni definición disponible para este tipo de activo, o el contenido aún se está cargando.",
     "messages": {
       "reviewSaved": "Revisión de {{fqn}} guardada.",

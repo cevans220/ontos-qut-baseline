@@ -23,5 +23,6 @@
     "title": "Errore",
     "message": "Si è verificato un errore imprevisto.",
     "retry": "Riprova"
-  }
+  },
+  "internalError": "Si è verificato un errore imprevisto. I dettagli sono nel log del server (id dell'errore {{errorId}})."
 }

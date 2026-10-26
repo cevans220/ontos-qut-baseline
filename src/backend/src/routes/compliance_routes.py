@@ -210,6 +210,17 @@ async def delete_policy(
     return {"status": "success"}
 
 
+def _run_error_code(run) -> dict:
+    """The run's error code and parameters, which the UI translates."""
+    import json
+
+    try:
+        params = json.loads(run.error_params) if run.error_params else None
+    except (TypeError, ValueError):
+        params = None
+    return {'error_code': run.error_code, 'error_params': params}
+
+
 @router.post("/compliance/policies/{policy_id}/runs")
 async def run_policy(
     policy_id: str,
@@ -254,6 +265,7 @@ async def run_policy(
         'failure_count': run.failure_count,
         'score': run.score,
         'error_message': run.error_message,
+        **_run_error_code(run),
     }
 
 
@@ -278,6 +290,7 @@ async def list_runs(
             'failure_count': r.failure_count,
             'score': r.score,
             'error_message': r.error_message,
+            **_run_error_code(r),
         } for r in runs
     ]
 
@@ -304,6 +317,7 @@ async def get_run_results(
             'failure_count': run.failure_count,
             'score': run.score,
             'error_message': run.error_message,
+            **_run_error_code(run),
         },
         'results': [
             {

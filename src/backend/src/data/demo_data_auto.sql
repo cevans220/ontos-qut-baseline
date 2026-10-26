@@ -725,16 +725,22 @@ ON CONFLICT (id) DO NOTHING;
 -- ============================================================================
 
 INSERT INTO compliance_runs (id, policy_id, status, started_at, finished_at, success_count, failure_count, score) VALUES
-('01200101-0004-4000-8000-000000000001', '01100001-0004-4000-8000-000000000001', 'completed', NOW() - INTERVAL '6 days', NOW() - INTERVAL '6 days' + INTERVAL '11 minutes', 4, 1, 0.800),
-('01200102-0004-4000-8000-000000000002', '01100002-0004-4000-8000-000000000002', 'completed', NOW() - INTERVAL '3 days', NOW() - INTERVAL '3 days' + INTERVAL '9 minutes',  3, 0, 1.000),
-('01200103-0004-4000-8000-000000000003', '01100004-0004-4000-8000-000000000004', 'completed', NOW() - INTERVAL '1 days', NOW() - INTERVAL '1 days' + INTERVAL '5 minutes',  2, 1, 0.667)
-ON CONFLICT (id) DO NOTHING;
+('01200101-0004-4000-8000-000000000001', '01100001-0004-4000-8000-000000000001', 'succeeded', NOW() - INTERVAL '6 days', NOW() - INTERVAL '6 days' + INTERVAL '11 minutes', 1, 1, 50),
+('01200102-0004-4000-8000-000000000002', '01100002-0004-4000-8000-000000000002', 'succeeded', NOW() - INTERVAL '3 days', NOW() - INTERVAL '3 days' + INTERVAL '9 minutes', 1, 1, 50),
+('01200103-0004-4000-8000-000000000003', '01100004-0004-4000-8000-000000000004', 'succeeded', NOW() - INTERVAL '1 days', NOW() - INTERVAL '1 days' + INTERVAL '5 minutes', 1, 0, 100)
+ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, success_count = EXCLUDED.success_count,
+  failure_count = EXCLUDED.failure_count, score = EXCLUDED.score;
+
+-- Sample results of a real run of each policy above. A load replaces the ones an earlier
+-- version of this preset inserted for the same sample runs.
+DELETE FROM compliance_results WHERE run_id IN ('01200101-0004-4000-8000-000000000001', '01200102-0004-4000-8000-000000000002', '01200103-0004-4000-8000-000000000003');
 
 INSERT INTO compliance_results (id, run_id, object_type, object_id, object_name, passed, message, created_at) VALUES
-('01300101-0004-4000-8000-000000000001', '01200101-0004-4000-8000-000000000001', 'data_product', '00700001-0004-4000-8000-000000000001', 'Connected Vehicle Analytics v1', true,  'CSMS controls validated for telematics pipeline.', NOW() - INTERVAL '6 days'),
-('01300102-0004-4000-8000-000000000002', '01200101-0004-4000-8000-000000000001', 'data_product', '00700005-0004-4000-8000-000000000005', 'Vehicle Configuration Intelligence v1', false, 'Threat model for OTA backend not refreshed in last 12 months.', NOW() - INTERVAL '6 days'),
-('01300103-0004-4000-8000-000000000003', '01200102-0004-4000-8000-000000000002', 'data_product', '00700003-0004-4000-8000-000000000003', 'Supplier Quality Scorecard v1',         true,  'PPAP coverage at 100% for active production parts.', NOW() - INTERVAL '3 days'),
-('01300104-0004-4000-8000-000000000004', '01200103-0004-4000-8000-000000000003', 'data_product', '00700002-0004-4000-8000-000000000002', 'ADAS Training Data Pipeline v1',        false, 'One scenario subset lacks ASIL-D evidence package.', NOW() - INTERVAL '1 days')
+('01300101-0004-4000-8000-000000000001', '01200101-0004-4000-8000-000000000001', 'data_product', '00700002-0004-4000-8000-000000000002', 'ADAS Training Data Pipeline v1', false, 'Assertion failed for data_product ADAS Training Data Pipeline v1', NOW() - INTERVAL '6 days'),
+('01300102-0004-4000-8000-000000000002', '01200101-0004-4000-8000-000000000001', 'data_product', '00700001-0004-4000-8000-000000000001', 'Connected Vehicle Analytics v1', true, NULL, NOW() - INTERVAL '6 days'),
+('01300103-0004-4000-8000-000000000003', '01200102-0004-4000-8000-000000000002', 'data_contract', '00400003-0004-4000-8000-000000000003', 'Supplier Quality Contract', true, NULL, NOW() - INTERVAL '3 days'),
+('01300104-0004-4000-8000-000000000004', '01200102-0004-4000-8000-000000000002', 'data_contract', '00400005-0004-4000-8000-000000000005', 'Vehicle Configuration & BOM Contract', false, 'Assertion failed for data_contract Vehicle Configuration & BOM Contract', NOW() - INTERVAL '3 days'),
+('01300105-0004-4000-8000-000000000005', '01200103-0004-4000-8000-000000000003', 'data_product', '00700002-0004-4000-8000-000000000002', 'ADAS Training Data Pipeline v1', true, NULL, NOW() - INTERVAL '1 days')
 ON CONFLICT (id) DO NOTHING;
 
 

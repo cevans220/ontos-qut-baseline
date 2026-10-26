@@ -19,7 +19,7 @@ import WorkflowApprovalResponseDialog, {
 import { useNotificationsStore } from '@/stores/notifications-store';
 import { Notification, NotificationType } from '@/types/notification';
 import { getEntityDetailPathFromPayload } from '@/lib/entity-detail-path';
-import { notificationDescription, notificationTitle } from '@/lib/notification-text';
+import { approvalActionPayload, notificationDescription, notificationTitle } from '@/lib/notification-text';
 
 /** Only actionable rows should keep the dropdown open on select (Radix default). */
 function shouldPreventMenuCloseOnSelect(notification: Notification): boolean {
@@ -376,7 +376,7 @@ export default function NotificationBell() {
                         className="mt-2 h-7 px-2 text-xs gap-1"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleOpenWorkflowApprovalDialog(notification.action_payload ?? undefined, notification.id);
+                          handleOpenWorkflowApprovalDialog(approvalActionPayload(notification, t), notification.id);
                         }}
                       >
                         <CheckSquare className="h-3.5 w-3.5" />

@@ -749,5 +749,11 @@
     "tabMemberships": "Lidmaatschappen",
     "detailsFailed": "Ophalen van gebruikersdetails mislukt",
     "loadFailed": "Laden van profielgegevens mislukt"
+  },
+  "importSummary": {
+    "created": "Aangemaakt: {{created}}.",
+    "createdSkipped": "Aangemaakt: {{created}}, overgeslagen: {{skipped}}.",
+    "createdFailed": "Aangemaakt: {{created}}, mislukt: {{failed}}.",
+    "createdSkippedFailed": "Aangemaakt: {{created}}, overgeslagen: {{skipped}}, mislukt: {{failed}}."
   }
 }

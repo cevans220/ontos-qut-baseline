@@ -305,9 +305,9 @@ class TestTeamsRoutes:
         response = client.get("/api/teams/standalone")
         assert response.status_code == 200
 
-        data = response.json()
-        assert len(data) > 0
-        assert data[0]["name"] == "Standalone Team"
+        # The app's startup also creates the (standalone) Admin Team.
+        names = [team["name"] for team in response.json()]
+        assert "Standalone Team" in names
 
     def test_get_teams_filtered_by_domain(self, client: TestClient, db_session: Session):
         """Test getting teams filtered by domain ID."""

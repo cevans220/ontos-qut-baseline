@@ -920,7 +920,7 @@ export default function ApprovalWizardDialog({
                 disabled={loading}
                 onClick={() => startSession(wf.id)}
               >
-                <span>{wf.name}</span>
+                <span>{defaultText(wf.name)}</span>
                 <ChevronRight className="h-4 w-4" />
               </Button>
             ))}

@@ -104,4 +104,5 @@ def test_the_unavailable_client_error_carries_a_code_for_the_ui(client):
         ComplianceManager()._workspace_client_for(['table'], policy)
 
     assert e.value.error_code == 'workspace_client_unavailable'
-    assert e.value.error_params['detail']
+    # The exception text is not a parameter: the UI never shows it
+    assert e.value.error_params == {}

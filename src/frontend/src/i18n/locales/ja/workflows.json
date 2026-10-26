@@ -31,6 +31,8 @@
       "special": "特別",
       "requesterOriginalUser": "リクエスト者（元のユーザー）",
       "ownerEntityOwner": "所有者（エンティティ所有者）",
+      "domainOwners": "ドメインオーナー",
+      "contractApprovers": "契約承認者",
       "appRoles": "アプリロール",
       "businessRoles": "ビジネスロール",
       "noGroups": "グループがありません"
@@ -43,7 +45,8 @@
       "createdSuccess": "ワークフローを正常に作成しました",
       "updatedSuccess": "ワークフローを正常に更新しました",
       "createFailed": "ワークフローの作成に失敗しました: {{error}}",
-      "updateFailed": "ワークフローの更新に失敗しました: {{error}}"
+      "updateFailed": "ワークフローの更新に失敗しました: {{error}}",
+      "stepConfigInvalid": "ステップ \"{{step}}\": {{issue}}"
     },
     "badges": {
       "default": "デフォルト",
@@ -101,7 +104,25 @@
       "fromStatusPlaceholder": "例: draft",
       "toStatus": "変更先ステータス",
       "toStatusPlaceholder": "例: active",
-      "descriptionPlaceholder": "ワークフローの説明"
+      "descriptionPlaceholder": "ワークフローの説明",
+      "failClosed": "このゲートを評価できない場合は遷移を拒否する",
+      "failClosedHint": "Fail closed: このゲートの評価でエラーが発生した場合（通常の失敗ではない場合）、ステータス変更は拒否されます。オフ（fail open）の場合、変更は実行され、エラーはログと監査に記録されます。",
+      "disabledFor": {
+        "title": "無効にする対象",
+        "hint": "このゲートは、ここに挙げたドメイン、データプロダクト、データコントラクトでは実行されません（ドメインはその配下のプロダクトとコントラクトを含みます）。スキップはすべてログと監査に記録されます。",
+        "domains": "ドメイン",
+        "dataProducts": "データプロダクト",
+        "dataContracts": "データコントラクト",
+        "none": "なし",
+        "selectedCount_one": "{{count}} 件選択",
+        "selectedCount_other": "{{count}} 件選択",
+        "search": "検索...",
+        "noResults": "見つかりません。",
+        "remove": "{{name}} を削除",
+        "notFound": "{{id}}（存在しません）",
+        "missingOnSave_one": "このゲートは、存在しなくなった{{count}}件の項目に対してオフになっています。削除してから再度保存してください。",
+        "missingOnSave_other": "このゲートは、存在しなくなった{{count}}件の項目に対してオフになっています。削除してから再度保存してください。"
+      }
     },
     "stepConfig": {
       "title": "ステップ設定",
@@ -241,6 +262,58 @@
       "timeoutSeconds": "タイムアウト（秒）",
       "retryCount": "リトライ回数",
       "retryHelp": "失敗時のリトライ回数（0～5）。"
+    },
+    "conditional": {
+      "condition": "条件",
+      "placeholder": "obj.status = 'active' AND NOT HAS_TAG('pii')",
+      "branchHelp": "条件が true のときワークフローは Pass の分岐に、false のときは Fail の分岐に進みます。",
+      "fieldsHelp": "MATCH や ASSERT を含まない Compliance DSL の式を書きます。エンティティのフィールドは obj.<field> で参照し、比較には == ではなく = を使います。",
+      "examplesTitle": "例",
+      "errors": {
+        "condition_required": "条件を入力してください。",
+        "condition_syntax_error": "条件を解析できません（{{line}} 行 {{column}} 列）。",
+        "condition_trailing_input": "条件の後に予期しない \"{{token}}\" があります（{{line}} 行 {{column}} 列）。条件は AND または OR でつなぎます。",
+        "condition_too_long": "条件が {{maximum}} 文字を超えています。短くするか、複数のステップに分けてください。",
+        "condition_too_complex": "条件の入れ子が深すぎるためチェックできません。括弧を減らすか、複数のステップに分けてください。"
+      }
+    },
+    "script": {
+      "language": "言語",
+      "languages": {
+        "python": "Python",
+        "sql": "SQL"
+      },
+      "code": "コード",
+      "pythonPlaceholder": "if not entity.get('description'):\n    result = {'passed': False, 'message': 'Missing description'}",
+      "sqlPlaceholder": "SELECT COUNT(*) FROM ${entity_id}",
+      "timeout": "タイムアウト（秒）",
+      "timeoutHelp": "スクリプトの実行がこれより長くなるとステップは失敗します。",
+      "variablesTitle": "使用できる変数",
+      "pythonVariables": {
+        "entity": "エンティティのデータ（辞書）",
+        "entity_type": "エンティティの種類",
+        "entity_id": "エンティティの ID",
+        "entity_name": "エンティティの名前",
+        "user_email": "ワークフローを起動したユーザーのメール",
+        "step_results": "実行済みのステップの結果（ステップ ID ごと）"
+      },
+      "pythonResultHelp": "result を設定して分岐を選びます。result = {'passed': False, 'message': '...'} は Fail の分岐に進み、result がなければステップは成功します。使えるのは基本的な組み込み関数だけで、import、ファイル、ネットワークは使えません。",
+      "sqlHelp": "設定で指定した SQL ウェアハウスで実行されます。${variable} のプレースホルダーは実行前に置き換えられ、ステートメントが成功するとステップは成功します。ステートメントの待機は最大 50 秒です。",
+      "errors": {
+        "script_code_required": "スクリプトのコードを入力してください。",
+        "script_timeout_invalid": "{{minimum}} 以上の整数（秒）を入力してください。",
+        "script_language_unsupported": "言語 \"{{language}}\" はサポートされていません。サポート対象: {{supported}}。"
+      }
+    },
+    "validationIssues": {
+      "stepsRequired": "ワークフローには少なくとも1つのステップが必要です。",
+      "duplicateStepIds": "2つのステップのIDが同じです。",
+      "stepUnknownReference": "ステップ「{{step}}」の{{branch}}の分岐先「{{target}}」はワークフロー内にありません。",
+      "stepConfigMissing": "ステップ「{{step}}」に必須の設定がありません: {{fields}}。",
+      "branch": {
+        "on_pass": "成功時",
+        "on_fail": "失敗時"
+      }
     }
   },
   "approvalResponse": {
@@ -274,6 +347,45 @@
     },
     "errors": {
       "own_owner_approval": "この承認は所有者が行います。ご自身のリクエストは承認できません。"
+    },
+    "entityTypes": {
+      "entity": "エンティティ",
+      "data_product": "データ製品",
+      "data_contract": "データ契約",
+      "data_domain": "データドメイン",
+      "data_asset_review": "データ資産レビュー",
+      "access_grant": "アクセス付与",
+      "asset": "資産"
+    },
+    "fields": {
+      "product_id": "製品 ID",
+      "product_name": "製品名",
+      "contract_id": "契約 ID",
+      "contract_name": "契約名",
+      "status": "ステータス",
+      "from_status": "変更前のステータス",
+      "to_status": "変更後のステータス",
+      "target_status": "リクエストされたステータス",
+      "current_status": "現在のステータス",
+      "justification": "正当な理由",
+      "sunset_date": "提供終了日",
+      "replacement_id": "後継の ID",
+      "replacement_name": "後継",
+      "requested_scope": "リクエストされた範囲",
+      "publication_scope": "公開範囲",
+      "requester": "リクエスト者",
+      "requester_message": "リクエスト者のメッセージ",
+      "reviewer_email": "レビュー担当者",
+      "requested_certification_level": "リクエストされた認定レベル",
+      "certification_level": "認定レベル",
+      "certification_notes": "認定メモ",
+      "asset_count": "資産の数",
+      "asset_fqns": "資産",
+      "domain_id": "ドメイン ID",
+      "project_id": "プロジェクト ID",
+      "project_name": "プロジェクト",
+      "name": "名前",
+      "notes": "メモ"
     }
   },
   "approvalWizard": {
@@ -363,11 +475,17 @@
     "titleFallback": "ワークフロー実行",
     "executionId": "実行 ID: {{id}}...",
     "stepsProgress": "{{done}}/{{total}} ステップ",
+    "stepsProgressWithRemoved_one": "{{done}}/{{total}} ステップ（削除済み +{{count}}）",
+    "stepsProgressWithRemoved_other": "{{done}}/{{total}} ステップ（削除済み +{{count}}）",
     "triggeredBy": "トリガー者: {{user}}",
     "workflowSteps": "ワークフローステップ",
     "loadDefinitionFailed": "ワークフロー定義の読み込みに失敗しました",
+    "removedSteps": "削除されたステップ",
+    "removedStepsHint": "これらのステップはこの実行で実行され、その後ワークフローから削除されました。",
     "stepErrors": {
-      "rule_entity_load_failed": "ルールを評価するために {{entityType}} {{entityId}} を読み込めませんでした"
+      "approval_rejected": "リクエストが却下されました",
+      "rule_entity_load_failed": "ルールを評価するために {{entityType}} {{entityId}} を読み込めませんでした",
+      "rule_entity_not_found": "{{entityType}} {{entityId}} が見つからないため、ルールを評価できません"
     },
     "states": {
       "pending": "保留中",
@@ -444,6 +562,25 @@
     "endpointPlaceholder": "/api/workspace/groups",
     "endpointHint": "JSON を返すバックエンドエンドポイント",
     "addField": "フィールドを追加"
+  },
+  "runDialog": {
+    "menuLabel": "実行",
+    "title": "「{{name}}」を実行",
+    "description": "この手動ワークフローをエンティティに対して開始します。今すぐ、あなたとして実行されます。",
+    "entityType": "エンティティタイプ",
+    "entity": "エンティティ",
+    "selectEntity": "エンティティを選択",
+    "loading": "読み込み中...",
+    "noEntities": "選択できる項目がありません。",
+    "listFailed": "一覧を読み込めませんでした。IDを入力してください。",
+    "entityId": "エンティティID",
+    "entityIdPlaceholder": "例: main.sales.orders",
+    "entityIdHelp": "ワークフローを実行する対象エンティティのIDまたは完全名。",
+    "run": "実行",
+    "failed": "ワークフローを開始できませんでした。",
+    "resultStatus": "結果",
+    "viewExecution": "実行を表示",
+    "resultEntity": "{{type}}: {{name}}"
   },
   "templateVars": {
     "copiedToClipboard": "{{placeholder}} をクリップボードにコピーしました。",

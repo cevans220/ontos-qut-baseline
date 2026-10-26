@@ -140,6 +140,19 @@
         "placeholder": "app_files"
       }
     },
+    "instanceIdentity": {
+      "title": "Instantie-identiteit",
+      "id": {
+        "label": "Instantie-ID",
+        "help": "Vaste identifier van deze Ontos-instantie, die wordt opgenomen in geëxporteerde entiteiten. Standaard: {{default}}. Maak het veld leeg om de standaardwaarde te herstellen.",
+        "invalid": "Gebruik 1-128 letters, cijfers, \".\", \"_\", \":\" of \"-\", en begin met een letter of cijfer."
+      },
+      "name": {
+        "label": "Instantienaam",
+        "help": "Leesbare naam van deze instantie. Standaard: {{default}}. Maak het veld leeg om de standaardwaarde te herstellen.",
+        "invalid": "Gebruik maximaal 128 tekens, zonder besturingstekens."
+      }
+    },
     "auditLog": {
       "label": "Auditlog Directory",
       "placeholder": "audit_logs",
@@ -210,7 +223,8 @@
       "repoUrl": "https://github.com/jouw-org/jouw-repo.git",
       "branch": "main",
       "token": "ghp_... of vergelijkbaar",
-      "username": "x-access-token"
+      "username": "x-access-token",
+      "tokenSaved": "Opgeslagen. Laat leeg om het te behouden."
     },
     "cloneButton": "Repository Klonen",
     "currentCommit": "Commit",
@@ -235,7 +249,8 @@
       "pushError": "Kon wijzigingen niet pushen",
       "pushSuccess": "Wijzigingen succesvol gepusht",
       "saveError": "Kon Git-instellingen niet opslaan",
-      "saveSuccess": "Git-instellingen opgeslagen"
+      "saveSuccess": "Git-instellingen opgeslagen",
+      "tokenRemoved": "Opgeslagen token verwijderd"
     },
     "pendingChanges": "Openstaande Wijzigingen",
     "pullButton": "Pullen",
@@ -250,7 +265,15 @@
       "notConfigured": "Niet Geconfigureerd"
     },
     "viewChangesButton": "Wijzigingen Bekijken",
-    "volumePath": "Volumepad"
+    "volumePath": "Volumepad",
+    "workingCopy": "Werkkopie",
+    "workingCopyNote": "Het volume is hier niet gekoppeld. De werkkopie staat daarom op de lokale schijf van de app en elk geëxporteerd bestand wordt ook naar het volume geschreven. Kloon de repository opnieuw nadat de app opnieuw is gestart: gepushte commits blijven in de remote bewaard.",
+    "volumeSyncWarningTitle": "Export niet naar het volume geschreven",
+    "errors": {
+      "git_volume_invalid": "De volume-instelling \"{{value}}\" verwijst niet naar een Unity Catalog-volume. Gebruik /Volumes/<catalog>/<schema>/<volume>, <catalog>.<schema>.<volume> of een volumenaam met de catalogus en het schema uit de algemene instellingen.",
+      "git_volume_sync_failed": "{{path}} kon niet naar het volume worden geschreven. De wijziging staat in de repository en wordt zoals gewoonlijk gepusht; controleer of de app naar het volume mag schrijven (WRITE VOLUME)."
+    },
+    "removeTokenButton": "Opgeslagen token verwijderen"
   },
   "nav": {
     "groups": {

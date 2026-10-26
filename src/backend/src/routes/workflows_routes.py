@@ -7,7 +7,7 @@ Provides CRUD operations for workflow definitions and execution management.
 import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
-from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Query
 from sqlalchemy.orm import Session
 
 from src.common.database import get_db
@@ -288,6 +288,31 @@ async def get_template_vars(
     return manager.get_template_vars(trigger, entity_type)
 
 
+def _execution_error_code(error_message: Optional[str], step_runs) -> Dict[str, Any]:
+    """The code of an execution's error, when it is a failed step's coded error.
+
+    The execution keeps only the English text; the failed step run with the
+    same text that carries ``error_code`` / ``error_params`` in its result data
+    gives the code, so the UI can show the error in the user's language.
+    """
+    if not error_message:
+        return {}
+    for run in reversed(list(step_runs or [])):
+        if run.passed or run.error_message != error_message or not run.result_data:
+            continue
+        try:
+            data = run.result_data
+            if isinstance(data, str):
+                data = json.loads(data)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        code = data.get('error_code') if isinstance(data, dict) else None
+        if isinstance(code, str):
+            params = data.get('error_params')
+            return {'error_code': code, 'error_params': params if isinstance(params, dict) else {}}
+    return {}
+
+
 @router.get("/executions", response_model=WorkflowExecutionListResponse)
 async def list_executions(
     request: Request,
@@ -349,6 +374,8 @@ async def list_executions(
             success_count=exe.success_count,
             failure_count=exe.failure_count,
             error_message=exe.error_message,
+            # step_executions are loaded with the executions
+            **_execution_error_code(exe.error_message, exe.step_executions),
             started_at=exe.started_at,
             finished_at=exe.finished_at,
             triggered_by=exe.triggered_by,
@@ -695,6 +722,20 @@ async def get_workflow(
     return workflow
 
 
+def _invalid_workflow_detail(validation: WorkflowValidationResult) -> dict:
+    """400 detail of a workflow that failed validation.
+
+    ``errors`` keeps the English list older clients read; ``code`` and
+    ``params.issues`` let the designer show each error in the user's language.
+    """
+    return {
+        "code": "workflow_invalid",
+        "message": "; ".join(validation.errors),
+        "errors": validation.errors,
+        "params": {"issues": [issue.model_dump() for issue in validation.issues]},
+    }
+
+
 @router.post("", response_model=ProcessWorkflow)
 async def create_workflow(
     request: Request,
@@ -711,7 +752,7 @@ async def create_workflow(
     # Validate workflow
     validation = manager.validate_workflow(workflow)
     if not validation.valid:
-        raise HTTPException(status_code=400, detail={"errors": validation.errors})
+        raise HTTPException(status_code=400, detail=_invalid_workflow_detail(validation))
     
     result = manager.create_workflow(workflow, created_by=user_email)
     
@@ -759,7 +800,7 @@ async def update_workflow(
         )
         validation = manager.validate_workflow(full_workflow)
         if not validation.valid:
-            raise HTTPException(status_code=400, detail={"errors": validation.errors})
+            raise HTTPException(status_code=400, detail=_invalid_workflow_detail(validation))
     
     result = manager.update_workflow(workflow_id, workflow, updated_by=user_email)
     if not result:
@@ -942,6 +983,26 @@ async def validate_workflow(
 ) -> WorkflowValidationResult:
     """Validate a workflow definition."""
     return manager.validate_workflow(workflow)
+
+
+@router.post("/check-condition")
+async def check_condition(
+    request: Request,
+    body: Dict[str, Any] = Body(...),
+    _: bool = Depends(PermissionChecker('settings-workflows', FeatureAccessLevel.READ_ONLY)),
+) -> Dict[str, Any]:
+    """Check that a Conditional step's condition parses (used by the designer).
+
+    Returns ``{valid, code, params, message}``; ``code`` and ``params`` are for
+    the UI to translate, ``message`` is the English text.
+    """
+    from src.common.workflow_step_config import check_condition as _check_condition
+
+    condition = body.get('condition')
+    issue = _check_condition(condition if isinstance(condition, str) else None)
+    if issue is None:
+        return {'valid': True, 'code': None, 'params': {}, 'message': None}
+    return {'valid': False, **issue}
 
 
 @router.post("/load-defaults")
@@ -1676,11 +1737,14 @@ async def delete_executions_bulk(
 async def get_execution(
     execution_id: str,
     db: DBSessionDep,
-    _: bool = Depends(PermissionChecker('process-workflows', FeatureAccessLevel.READ_ONLY)),
+    _: bool = Depends(PermissionChecker('settings-workflows', FeatureAccessLevel.READ_ONLY)),
 ) -> Dict[str, Any]:
     """Get detailed information about a workflow execution.
     
-    Returns the execution with all step execution details.
+    Returns the execution with all step execution details. Gated like the
+    executions list (the Workflows settings page, its only caller): the
+    details carry the trigger context and the steps' raw errors, which every
+    role's ``process-workflows`` read access must not open.
     """
     execution = workflow_execution_repo.get(db, execution_id)
     if not execution:
@@ -1711,6 +1775,8 @@ async def get_execution(
         step_executions.append({
             'id': se.id,
             'step_id': se.step_id,
+            'step_key': se.step_key,
+            'step_name': se.step_name,
             'status': se.status,
             'passed': se.passed,
             'result_data': json.loads(se.result_data) if se.result_data else None,
@@ -1730,6 +1796,7 @@ async def get_execution(
         'success_count': execution.success_count,
         'failure_count': execution.failure_count,
         'error_message': execution.error_message,
+        **_execution_error_code(execution.error_message, execution.step_executions),
         'triggered_by': execution.triggered_by,
         'started_at': execution.started_at.isoformat() if execution.started_at else None,
         'finished_at': execution.finished_at.isoformat() if execution.finished_at else None,

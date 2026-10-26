@@ -34,6 +34,8 @@ describe('translateDefaultText', () => {
     expect(translateDefaultText(i18n.t, i18n, '')).toBe('');
   });
 
+  // On purpose: whitespace around a text doesn't change what the user reads,
+  // so it isn't treated as an admin's edit.
   it('finds the key of a shipped text, ignoring surrounding spaces', () => {
     expect(defaultTextKey(i18n, '  Request access ')).toBe('requestAccess.title');
     expect(defaultTextKey(i18n, 'Something else')).toBeUndefined();
@@ -52,5 +54,18 @@ describe('translateDefaultText', () => {
     const other = i18next.createInstance();
     await other.init({ lng: 'xx', fallbackLng: false, resources: { en: { workflowDefaults: en } } });
     expect(translateDefaultText(other.t, other, 'Request review')).toBe('Request review');
+  });
+});
+
+describe('default workflow names', () => {
+  it('translates the name of a shipped default workflow', () => {
+    expect(translateDefaultText(i18n.t, i18n, 'Status Change Request')).toBe('Solicitação de mudança de status');
+    expect(translateDefaultText(i18n.t, i18n, 'Data Product Publish Approval')).toBe(
+      'Aprovação de publicação de produto de dados',
+    );
+  });
+
+  it('shows a workflow an admin renamed as named', () => {
+    expect(translateDefaultText(i18n.t, i18n, 'Status Change Request (EU)')).toBe('Status Change Request (EU)');
   });
 });

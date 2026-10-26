@@ -7,9 +7,11 @@ import json
 import re
 
 import yaml
-from pydantic import AliasChoices, Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .api_errors import CodedValueError
+from .instance_identity import resolve_instance_identity
 from .logging import get_logger
 
 logger = get_logger(__name__)
@@ -61,6 +63,18 @@ class Settings(BaseSettings):
     )  # Local dev: name of profile in ~/.databrickscfg (OAuth U2M with auto-refresh)
     DATABRICKS_HTTP_PATH: Optional[str] = None # Will be computed by validator
     DATABRICKS_APP_NAME: str = Field("ontos", env='DATABRICKS_APP_NAME')  # Name of the Databricks App
+    # Injected by Databricks Apps; absent in local dev
+    DATABRICKS_WORKSPACE_ID: Optional[str] = Field(None, env='DATABRICKS_WORKSPACE_ID')
+
+    # Instance identity (federation / Estate Manager). When unset, both values are derived
+    # from DATABRICKS_WORKSPACE_ID + DATABRICKS_APP_NAME (see compute_instance_identity).
+    # Admins can override them at runtime via General Settings (persisted in app_settings
+    # as ONTOS_INSTANCE_ID / ONTOS_INSTANCE_NAME), which wins over env and derived values.
+    ONTOS_INSTANCE_ID: Optional[str] = Field(None, env='ONTOS_INSTANCE_ID')
+    ONTOS_INSTANCE_NAME: Optional[str] = Field(None, env='ONTOS_INSTANCE_NAME')
+    # Values in effect before any admin override (env value if set, else derived)
+    _instance_id_default: str = PrivateAttr(default="")
+    _instance_name_default: str = PrivateAttr(default="")
 
     # Environment
     ENV: str = "PROD"  # LOCAL, DEV, PROD
@@ -79,6 +93,10 @@ class Settings(BaseSettings):
     GIT_BRANCH: str = Field('main', env='GIT_BRANCH')
     GIT_USERNAME: Optional[str] = Field(None, env='GIT_USERNAME')
     GIT_PASSWORD: Optional[str] = Field(None, env='GIT_PASSWORD')
+    # Local directory for the Git working copy when DATABRICKS_VOLUME is a Unity
+    # Catalog volume that isn't mounted on this machine (Databricks Apps). The
+    # exported files are also written to {volume}/git-export/ through the Files API.
+    GIT_WORK_DIR: Optional[str] = Field(None, env='GIT_WORK_DIR')
 
     # Job settings
     # Track the Databricks job cluster ID (string). Do not scan clusters.
@@ -209,6 +227,43 @@ class Settings(BaseSettings):
             self.DATABRICKS_HTTP_PATH = f"/sql/1.0/warehouses/{self.DATABRICKS_WAREHOUSE_ID}"
         return self
 
+    @property
+    def instance_id_default(self) -> str:
+        """Instance id in effect before any admin override (env value, else derived)."""
+        return self._instance_id_default
+
+    @property
+    def instance_name_default(self) -> str:
+        """Instance name in effect before any admin override (env value, else derived)."""
+        return self._instance_name_default
+
+    @model_validator(mode='after')
+    def compute_instance_identity(self) -> 'Settings':
+        """Fill ONTOS_INSTANCE_ID / ONTOS_INSTANCE_NAME from env or derived defaults.
+
+        The id is "<workspace_id>-<app_name>" (just "<app_name>" without a workspace id,
+        "ontos" without both) and the name is the app name, so a deployment keeps its
+        identity across restarts. Every candidate, the environment values included, goes
+        through the same validator as the Settings PUT; an invalid one stops the app at
+        startup (like any other invalid setting) instead of becoming the identity.
+
+        Raises:
+            InstanceIdInvalidError: (a ``ValueError``, so pydantic reports it as a
+                ``ValidationError``) If the id from the environment or the derived one is invalid
+            InstanceNameInvalidError: Same, for the name
+        """
+        try:
+            self._instance_id_default, self._instance_name_default = resolve_instance_identity(
+                self.ONTOS_INSTANCE_ID, self.ONTOS_INSTANCE_NAME,
+                self.DATABRICKS_WORKSPACE_ID, self.DATABRICKS_APP_NAME,
+            )
+        except CodedValueError as e:
+            logger.critical(f"Invalid instance identity, refusing to start: {e}")
+            raise
+        self.ONTOS_INSTANCE_ID = self._instance_id_default
+        self.ONTOS_INSTANCE_NAME = self._instance_name_default
+        return self
+
     @model_validator(mode='after')
     def warn_test_token_in_prod(self) -> 'Settings':
         """Warn loudly if TEST_USER_TOKEN is set in a production environment.
@@ -312,6 +367,12 @@ class ConfigManager:
 _settings: Optional[Settings] = None
 _config_manager: Optional[ConfigManager] = None
 
+class VolumeInvalidError(CodedValueError):
+    """The volume setting, or the catalog/schema it falls back to, can't name a volume."""
+
+    code = 'volume_invalid'
+
+
 def resolve_volume(settings: Settings) -> Optional[Tuple[str, str, str]]:
     """(catalog, schema, volume) for ``DATABRICKS_VOLUME``, or None when it isn't set.
 
@@ -321,7 +382,8 @@ def resolve_volume(settings: Settings) -> Optional[Tuple[str, str, str]]:
     ``DATABRICKS_CATALOG`` / ``DATABRICKS_SCHEMA`` (what the bundle passes).
 
     Raises:
-        ValueError: If the value has none of these forms
+        VolumeInvalidError: (a ``ValueError``) If the value has none of these forms, or a
+            bare volume name has no usable ``DATABRICKS_CATALOG`` / ``DATABRICKS_SCHEMA``
     """
     raw = (settings.DATABRICKS_VOLUME or '').strip()
     if not raw:
@@ -340,10 +402,19 @@ def resolve_volume(settings: Settings) -> Optional[Tuple[str, str, str]]:
         if len(parts) == 3 and valid(*parts):
             return parts[0], parts[1], parts[2]
         if len(parts) == 1 and valid(raw):
-            return settings.DATABRICKS_CATALOG, settings.DATABRICKS_SCHEMA, raw
-    raise ValueError(
+            catalog, schema = settings.DATABRICKS_CATALOG, settings.DATABRICKS_SCHEMA
+            if not valid(catalog or '', schema or ''):
+                raise VolumeInvalidError(
+                    f"The volume name {raw!r} needs DATABRICKS_CATALOG and DATABRICKS_SCHEMA "
+                    "to be set to plain Unity Catalog names (no periods, slashes or "
+                    f"whitespace); got catalog {catalog!r} and schema {schema!r}",
+                    value=raw, catalog=catalog or '', schema=schema or '',
+                )
+            return catalog, schema, raw
+    raise VolumeInvalidError(
         "DATABRICKS_VOLUME must be /Volumes/<catalog>/<schema>/<volume>, "
-        f"<catalog>.<schema>.<volume> or a volume name, got {raw!r}"
+        f"<catalog>.<schema>.<volume> or a volume name, got {raw!r}",
+        value=raw, catalog='', schema='',
     )
 
 

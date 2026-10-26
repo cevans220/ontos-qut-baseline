@@ -93,5 +93,38 @@
     "publicationRequestReview": {
       "end": "De publicatieworkflow is mislukt"
     }
+  },
+  "workflowNames": {
+    "naming-convention-check": "Validatie van naamgevingsconventies",
+    "data-product-approval": "Goedkeuring voor publicatie van dataproduct",
+    "data-contract-validation": "Schemavalidatie van datacontract",
+    "pii-detection": "PII-detectie en -classificatie",
+    "pre-creation-compliance": "Compliancevalidatie vóór aanmaak",
+    "table-pre-creation": "Tabelvalidatie vóór aanmaak",
+    "contract-review-request": "Beoordelingsverzoek voor datacontract",
+    "contract-deploy-request": "Implementatieverzoek voor datacontract",
+    "product-review-request": "Beoordelingsverzoek voor dataproduct",
+    "access-grant-request": "Verzoek om toegang",
+    "status-change-request": "Verzoek om statuswijziging",
+    "data-asset-review-request": "Beoordelingsverzoek voor data-asset",
+    "project-access-request": "Verzoek om projecttoegang",
+    "role-access-request": "Verzoek om roltoegang",
+    "job-failure-notification": "Melding van mislukte taak",
+    "job-success-notification": "Melding van geslaagde taak",
+    "access-expiring-warning": "Waarschuwing voor verlopende toegang",
+    "access-revoked-notification": "Melding van ingetrokken toegang",
+    "approval-response": "Goedkeuringsantwoord",
+    "subscription": "Abonnementsovereenkomst",
+    "request-review": "Beoordeling aanvragen",
+    "request-access": "Toegang aanvragen",
+    "request-publish": "Publicatie aanvragen",
+    "request-status-change": "Statuswijziging aanvragen",
+    "before-status-change-default": "Poort voor statuswijziging (standaard)",
+    "on-publish-notification": "Melding van publicatie",
+    "on-unpublish-notification": "Melding van intrekking van publicatie",
+    "certification-request-review": "Beoordeling van certificeringsverzoeken",
+    "publication-request-review": "Beoordeling van publicatieverzoeken",
+    "first-access-welcome": "Welkom: gebruiksvoorwaarden",
+    "on-request-access-grant-permissions-reference": "Referentie: UC SELECT toekennen aan de aanvrager (on_request_access)"
   }
 }

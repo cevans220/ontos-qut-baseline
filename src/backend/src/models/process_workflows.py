@@ -7,7 +7,7 @@ Defines the API request/response schemas for workflow definitions, steps, and ex
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 import uuid
 
 from src.common.logging import get_logger
@@ -154,18 +154,57 @@ class StepExecutionStatus(str, Enum):
 
 # --- Trigger Configuration ---
 
+class GateErrorMode(str, Enum):
+    """What a ``before_status_change`` gate does when evaluating it raises."""
+    FAIL_OPEN = "fail_open"  # The transition proceeds (the error is logged and audited)
+    FAIL_CLOSED = "fail_closed"  # The transition is refused
+
+
+class GateExemptions(BaseModel):
+    """Entities a ``before_status_change`` gate is switched off for.
+
+    The gate is skipped for an entity listed here, and for a product or
+    contract assigned to one of the listed domains (any of its domains). An
+    exemption can't be overridden at a lower level: the lists only switch the
+    gate off.
+    """
+    domains: List[str] = Field(default_factory=list, description="Domain ids: the gate is off for their products and contracts")
+    data_products: List[str] = Field(default_factory=list, description="Data product ids the gate is off for")
+    data_contracts: List[str] = Field(default_factory=list, description="Data contract ids the gate is off for")
+
+    def is_empty(self) -> bool:
+        return not (self.domains or self.data_products or self.data_contracts)
+
+
 class WorkflowTrigger(BaseModel):
     """Trigger configuration for a workflow."""
     type: TriggerType = Field(..., description="Type of trigger")
     entity_types: List[EntityType] = Field(default_factory=list, description="Entity types that trigger this workflow")
-    
+
     # For on_status_change
     from_status: Optional[str] = Field(None, description="Status to transition from (for status change triggers)")
     to_status: Optional[str] = Field(None, description="Status to transition to (for status change triggers)")
-    
+
     # For scheduled
     schedule: Optional[str] = Field(None, description="Cron expression for scheduled triggers")
-    
+
+    # For before_status_change
+    on_error: GateErrorMode = Field(
+        GateErrorMode.FAIL_OPEN,
+        description=(
+            "before_status_change only: what happens when evaluating this gate raises. "
+            "fail_open lets the transition proceed, fail_closed refuses it. "
+            "A gate that fails normally blocks in both modes."
+        ),
+    )
+    disabled_for: GateExemptions = Field(
+        default_factory=GateExemptions,
+        description=(
+            "before_status_change only: domains, data products and data contracts "
+            "this gate is switched off for. Skips are logged and audited."
+        ),
+    )
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -443,7 +482,7 @@ class ScriptStepConfig(BaseModel):
         json_schema_extra = {
             "example": {
                 "language": "python",
-                "code": "return {'status': 'ok'}",
+                "code": "result = {'passed': True, 'data': {'status': 'ok'}}",
                 "timeout_seconds": 30
             }
         }
@@ -641,7 +680,11 @@ class TriggerContext(BaseModel):
 class WorkflowStepExecutionResult(BaseModel):
     """Result of a step execution."""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    step_id: str
+    # The step's row id; None once the step was removed from the workflow
+    step_id: Optional[str] = None
+    # The step's step_id and name when it ran, kept if the step is removed
+    step_key: Optional[str] = None
+    step_name: Optional[str] = None
     status: StepExecutionStatus
     passed: Optional[bool] = None
     result_data: Optional[Dict[str, Any]] = None
@@ -674,6 +717,11 @@ class WorkflowExecution(WorkflowExecutionBase):
     success_count: int = Field(default=0)
     failure_count: int = Field(default=0)
     error_message: Optional[str] = None
+    error_code: Optional[str] = Field(
+        None,
+        description="Code of error_message when it is a failed step's coded error",
+    )
+    error_params: Optional[Dict[str, Any]] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     triggered_by: Optional[str] = None
@@ -816,9 +864,49 @@ class WorkflowExecutionListResponse(BaseModel):
     total: int
 
 
+class CodedMessage(str):
+    """An English validation message that also carries a code and params.
+
+    It is a ``str``, so lists of messages keep working; WorkflowValidationResult
+    turns the codes into ``issues``. A plain string gets the generic code
+    ``workflow_validation_error``.
+    """
+    code: str
+    params: Dict[str, Any]
+
+    def __new__(cls, message: str, code: str, **params: Any) -> 'CodedMessage':
+        obj = super().__new__(cls, message)
+        obj.code = code
+        obj.params = params
+        return obj
+
+
+class WorkflowValidationIssue(BaseModel):
+    """One validation error with a stable code and its parameters, for translation."""
+    code: str
+    message: str
+    params: Dict[str, Any] = Field(default_factory=dict)
+
+
 class WorkflowValidationResult(BaseModel):
     """Result of workflow validation."""
     valid: bool
     errors: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+    # Same errors as ``errors``, with a code and parameters each.
+    issues: List[WorkflowValidationIssue] = Field(default_factory=list)
+
+    @model_validator(mode='before')
+    @classmethod
+    def _issues_from_errors(cls, data: Any) -> Any:
+        if isinstance(data, dict) and 'issues' not in data:
+            data = {**data, 'issues': [
+                {
+                    'code': getattr(error, 'code', 'workflow_validation_error'),
+                    'message': str(error),
+                    'params': dict(getattr(error, 'params', {}) or {}),
+                }
+                for error in data.get('errors') or []
+            ]}
+        return data
 

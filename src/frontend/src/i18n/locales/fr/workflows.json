@@ -31,6 +31,8 @@
       "special": "Spécial",
       "requesterOriginalUser": "Demandeur (utilisateur d'origine)",
       "ownerEntityOwner": "Propriétaire (propriétaire de l'entité)",
+      "domainOwners": "Responsables du domaine",
+      "contractApprovers": "Approbateurs du contrat",
       "appRoles": "Rôles d'application",
       "businessRoles": "Rôles métier",
       "noGroups": "Aucun groupe"
@@ -43,7 +45,8 @@
       "createdSuccess": "Workflow créé avec succès",
       "updatedSuccess": "Workflow mis à jour avec succès",
       "createFailed": "Échec de la création du workflow : {{error}}",
-      "updateFailed": "Échec de la mise à jour du workflow : {{error}}"
+      "updateFailed": "Échec de la mise à jour du workflow : {{error}}",
+      "stepConfigInvalid": "Étape \"{{step}}\" : {{issue}}"
     },
     "badges": {
       "default": "Par défaut",
@@ -101,7 +104,25 @@
       "fromStatusPlaceholder": "par ex. brouillon",
       "toStatus": "Vers le statut",
       "toStatusPlaceholder": "par ex. actif",
-      "descriptionPlaceholder": "Description du workflow"
+      "descriptionPlaceholder": "Description du workflow",
+      "failClosed": "Refuser la transition si cette porte ne peut pas être évaluée",
+      "failClosedHint": "Fail closed : si l'évaluation de cette porte lève une erreur (et non un échec normal), le changement de statut est refusé. Désactivé (fail open), le changement a lieu et l'erreur est journalisée et auditée.",
+      "disabledFor": {
+        "title": "Désactivé pour",
+        "hint": "Cette porte ne s'exécute pas pour les domaines, produits de données et contrats de données listés ici (un domaine couvre ses produits et contrats). Chaque contournement est journalisé et audité.",
+        "domains": "Domaines",
+        "dataProducts": "Produits de données",
+        "dataContracts": "Contrats de données",
+        "none": "Aucun",
+        "selectedCount_one": "{{count}} sélectionné",
+        "selectedCount_other": "{{count}} sélectionnés",
+        "search": "Rechercher...",
+        "noResults": "Aucun résultat.",
+        "remove": "Retirer {{name}}",
+        "notFound": "{{id}} (n'existe plus)",
+        "missingOnSave_one": "Le gate est désactivé pour {{count}} élément qui n'existe plus. Retirez-le et enregistrez à nouveau.",
+        "missingOnSave_other": "Le gate est désactivé pour {{count}} éléments qui n'existent plus. Retirez-les et enregistrez à nouveau."
+      }
     },
     "stepConfig": {
       "title": "Configuration de l'étape",
@@ -241,6 +262,58 @@
       "timeoutSeconds": "Délai d'expiration (secondes)",
       "retryCount": "Nombre de nouvelles tentatives",
       "retryHelp": "Nombre de nouvelles tentatives en cas d'échec (0-5)."
+    },
+    "conditional": {
+      "condition": "Condition",
+      "placeholder": "obj.status = 'active' AND NOT HAS_TAG('pii')",
+      "branchHelp": "Quand la condition est vraie, le workflow suit la branche Pass ; quand elle est fausse, la branche Fail.",
+      "fieldsHelp": "Écrivez une expression de la Compliance DSL sans MATCH ni ASSERT. Les champs de l'entité se lisent obj.<champ> ; comparez avec =, pas ==.",
+      "examplesTitle": "Exemples",
+      "errors": {
+        "condition_required": "Saisissez une condition.",
+        "condition_syntax_error": "La condition ne peut pas être analysée (ligne {{line}}, colonne {{column}}).",
+        "condition_trailing_input": "\"{{token}}\" inattendu après la condition (ligne {{line}}, colonne {{column}}). Reliez les conditions avec AND ou OR.",
+        "condition_too_long": "La condition dépasse {{maximum}} caractères. Raccourcissez-la ou répartissez-la sur plusieurs étapes.",
+        "condition_too_complex": "La condition est trop imbriquée pour être vérifiée. Retirez des parenthèses ou répartissez-la sur plusieurs étapes."
+      }
+    },
+    "script": {
+      "language": "Langage",
+      "languages": {
+        "python": "Python",
+        "sql": "SQL"
+      },
+      "code": "Code",
+      "pythonPlaceholder": "if not entity.get('description'):\n    result = {'passed': False, 'message': 'Missing description'}",
+      "sqlPlaceholder": "SELECT COUNT(*) FROM ${entity_id}",
+      "timeout": "Délai maximal (secondes)",
+      "timeoutHelp": "L'étape échoue quand le script dure plus longtemps.",
+      "variablesTitle": "Variables disponibles",
+      "pythonVariables": {
+        "entity": "Les données de l'entité (un dictionnaire)",
+        "entity_type": "Le type de l'entité",
+        "entity_id": "L'ID de l'entité",
+        "entity_name": "Le nom de l'entité",
+        "user_email": "E-mail de l'utilisateur qui a déclenché le workflow",
+        "step_results": "Résultats des étapes déjà exécutées, par ID d'étape"
+      },
+      "pythonResultHelp": "Définissez result pour choisir la branche : result = {'passed': False, 'message': '...'} suit la branche Fail ; sans result l'étape réussit. Seuls les built-ins de base sont disponibles : pas d'imports, de fichiers ni de réseau.",
+      "sqlHelp": "S'exécute sur le SQL warehouse défini dans les Paramètres. Les marqueurs ${variable} sont remplacés avant l'exécution ; l'étape réussit quand l'instruction réussit. L'instruction attend jusqu'à 50 secondes.",
+      "errors": {
+        "script_code_required": "Saisissez le code du script.",
+        "script_timeout_invalid": "Saisissez un nombre entier de secondes, au moins {{minimum}}.",
+        "script_language_unsupported": "Le langage \"{{language}}\" n'est pas pris en charge. Pris en charge : {{supported}}."
+      }
+    },
+    "validationIssues": {
+      "stepsRequired": "Un workflow a besoin d'au moins une étape.",
+      "duplicateStepIds": "Deux étapes ont le même ID.",
+      "stepUnknownReference": "L'étape « {{step}} » dirige sa branche {{branch}} vers « {{target}} », qui n'est pas dans le workflow.",
+      "stepConfigMissing": "Il manque des paramètres obligatoires à l'étape « {{step}} » : {{fields}}.",
+      "branch": {
+        "on_pass": "de réussite",
+        "on_fail": "d'échec"
+      }
     }
   },
   "approvalResponse": {
@@ -274,6 +347,45 @@
     },
     "errors": {
       "own_owner_approval": "Cette approbation revient aux propriétaires ; vous ne pouvez pas approuver votre propre demande."
+    },
+    "entityTypes": {
+      "entity": "Entité",
+      "data_product": "Produit de données",
+      "data_contract": "Contrat de données",
+      "data_domain": "Domaine de données",
+      "data_asset_review": "Revue des actifs de données",
+      "access_grant": "Octroi d'accès",
+      "asset": "Actif"
+    },
+    "fields": {
+      "product_id": "ID du produit",
+      "product_name": "Nom du produit",
+      "contract_id": "ID du contrat",
+      "contract_name": "Nom du contrat",
+      "status": "Statut",
+      "from_status": "Statut d'origine",
+      "to_status": "Statut cible",
+      "target_status": "Statut demandé",
+      "current_status": "Statut actuel",
+      "justification": "Justification",
+      "sunset_date": "Date de fin",
+      "replacement_id": "ID du remplacement",
+      "replacement_name": "Remplacement",
+      "requested_scope": "Portée demandée",
+      "publication_scope": "Portée de publication",
+      "requester": "Demandeur",
+      "requester_message": "Message du demandeur",
+      "reviewer_email": "Réviseur",
+      "requested_certification_level": "Niveau de certification demandé",
+      "certification_level": "Niveau de certification",
+      "certification_notes": "Notes de certification",
+      "asset_count": "Nombre d'actifs",
+      "asset_fqns": "Actifs",
+      "domain_id": "ID du domaine",
+      "project_id": "ID du projet",
+      "project_name": "Projet",
+      "name": "Nom",
+      "notes": "Notes"
     }
   },
   "approvalWizard": {
@@ -363,11 +475,17 @@
     "titleFallback": "Exécution du workflow",
     "executionId": "ID d'exécution : {{id}}...",
     "stepsProgress": "{{done}}/{{total}} étapes",
+    "stepsProgressWithRemoved_one": "{{done}}/{{total}} étapes (+{{count}} supprimée)",
+    "stepsProgressWithRemoved_other": "{{done}}/{{total}} étapes (+{{count}} supprimées)",
     "triggeredBy": "Déclenché par : {{user}}",
     "workflowSteps": "Étapes du workflow",
     "loadDefinitionFailed": "Échec du chargement de la définition du workflow",
+    "removedSteps": "Étapes supprimées",
+    "removedStepsHint": "Ces étapes ont été exécutées dans cette exécution, puis supprimées du workflow.",
     "stepErrors": {
-      "rule_entity_load_failed": "Impossible de charger {{entityType}} {{entityId}} pour évaluer la règle"
+      "approval_rejected": "Demande refusée",
+      "rule_entity_load_failed": "Impossible de charger {{entityType}} {{entityId}} pour évaluer la règle",
+      "rule_entity_not_found": "{{entityType}} {{entityId}} est introuvable, la règle ne peut pas être évaluée"
     },
     "states": {
       "pending": "En attente",
@@ -444,6 +562,25 @@
     "endpointPlaceholder": "/api/workspace/groups",
     "endpointHint": "Point de terminaison backend renvoyant du JSON",
     "addField": "Ajouter un champ"
+  },
+  "runDialog": {
+    "menuLabel": "Exécuter",
+    "title": "Exécuter « {{name}} »",
+    "description": "Démarre ce workflow manuel pour une entité. Il s'exécute maintenant, en votre nom.",
+    "entityType": "Type d'entité",
+    "entity": "Entité",
+    "selectEntity": "Sélectionnez une entité",
+    "loading": "Chargement...",
+    "noEntities": "Rien à sélectionner.",
+    "listFailed": "Impossible de charger la liste ; saisissez l'identifiant.",
+    "entityId": "Identifiant de l'entité",
+    "entityIdPlaceholder": "par ex. main.sales.orders",
+    "entityIdHelp": "L'identifiant ou le nom complet de l'entité pour laquelle exécuter le workflow.",
+    "run": "Exécuter",
+    "failed": "Le workflow n'a pas pu être démarré.",
+    "resultStatus": "Résultat",
+    "viewExecution": "Voir l'exécution",
+    "resultEntity": "{{type}} : {{name}}"
   },
   "templateVars": {
     "copiedToClipboard": "{{placeholder}} copié dans le presse-papiers.",

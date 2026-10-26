@@ -15,6 +15,11 @@ admin decides what to do with them.
 Only the foreign keys known to point at a part of the referenced row
 (``PART_OF``), or a link whose other end is demo data too (``LINKS``), lead to
 deletes. Every other reference to a demo row blocks the clear.
+
+Some tables refer to an entity by ``entity_type`` / ``entity_id`` instead of a
+foreign key (comments, documentation, subscriptions, semantic links, ...).
+``POLYMORPHIC`` says, per table, whether a row about a demo entity is part of
+it, blocks the clear, or (history such as the change log) is left alone.
 """
 from __future__ import annotations
 
@@ -113,6 +118,43 @@ LINKS: Dict[Tuple[str, str], Tuple[str, ...]] = {
     ('asset_relationships', 'target_asset_id'): ('source_asset_id',),
     ('project_teams', 'team_id'): ('project_id',),
 }
+
+# Tables that refer to an entity by id without a foreign key, matched on the
+# demo row ids (their entity_type spelling varies: data_product, DataProduct,
+# Dataset, ...). The tables not listed are history that stays with its entity
+# gone: entity_change_log, audit_log, notifications, workflow executions.
+# table -> (action, id columns); for "link" the row goes when every end that
+# is set is demo data, and blocks otherwise.
+POLYMORPHIC: Dict[str, Tuple[str, Tuple[str, ...]]] = {
+    # Content about the entity, meaningless without it
+    'comments': ('part', ('entity_id',)),
+    'rich_text_metadata': ('part', ('entity_id',)),
+    'link_metadata': ('part', ('entity_id',)),
+    'document_metadata': ('part', ('entity_id',)),
+    'metadata_attachments': ('part', ('entity_id',)),
+    'entity_semantic_links': ('part', ('entity_id',)),
+    'cost_items': ('part', ('entity_id',)),
+    'quality_items': ('part', ('entity_id',)),
+    'maturity_snapshots': ('part', ('entity_id',)),
+    'term_mapping_suggestions': ('part', ('source_entity_id',)),
+    # The entity's side of an assignment: the tag or domain stays
+    'entity_tag_associations': ('part', ('entity_id',)),
+    'entity_domain_associations': ('part', ('entity_id',)),
+    # A user's interest in or unfinished request on the entity
+    'entity_subscriptions': ('part', ('entity_id',)),
+    'agreement_wizard_sessions': ('part', ('entity_id',)),
+    # Records with effect outside Ontos or legal weight: an access grant may
+    # have been delivered to the platform, an agreement was signed
+    'access_grant_requests': ('block', ('entity_id',)),
+    'access_grants': ('block', ('entity_id',)),
+    'agreements': ('block', ('entity_id',)),
+    # A relationship goes when its other end is demo data too
+    'entity_relationships': ('link', ('source_id', 'target_id')),
+}
+
+# Columns whose ids name a part of a demo contract as "{contractId}#..."
+# (semantic links on a contract's schema or property)
+_PREFIXED_IDS = {('entity_semantic_links', 'entity_id'): 'data_contracts'}
 
 RowKey = Tuple[str, ...]
 _MAX_DEPTH = 20
@@ -285,12 +327,63 @@ def plan_demo_clear(db: Session, demo: List[Tuple[str, str, List[str]]]) -> Demo
             if new_keys and len(pk) == 1:
                 queue.append((child.name, pk[0].name, [k[0] for k in new_keys], depth + 1))
 
+    _plan_polymorphic(db, plan, demo_rows, candidates)
+
     for (table_name, column, referenced), keys in candidates.items():
         # A row that is also part of a demo row (through another foreign key) goes anyway
         left = sorted("/".join(k) for k in keys if k not in plan.dependents.get(table_name, {}))
         if left:
             plan.blocking[(table_name, column, referenced)] = left
     return plan
+
+
+def _plan_polymorphic(
+    db: Session,
+    plan: DemoClearPlan,
+    demo_rows: Dict[str, Tuple[str, Set[str]]],
+    candidates: Dict[Tuple[str, str, str], Set[RowKey]],
+) -> None:
+    """Rows of ``POLYMORPHIC`` tables about a demo row: parts go with it, the
+    others block the clear (as ``candidates``)."""
+    tables = Base.metadata.tables
+    # demo row id -> its table, for the blocking report
+    table_of: Dict[str, str] = {}
+    for table_name, (_column, ids) in demo_rows.items():
+        for value in ids:
+            table_of.setdefault(value, table_name)
+    if not table_of:
+        return
+    demo_ids = list(table_of)
+    for table_name, (action, columns) in POLYMORPHIC.items():
+        table = tables.get(table_name)
+        if table is None:
+            continue
+        pk = list(table.primary_key.columns)
+        id_columns = [table.c[name] for name in columns]
+        demo_column, demo_values = demo_rows.get(table_name, (None, set()))
+        marker = [table.c[demo_column]] if demo_column else []
+        conditions = []
+        for column in id_columns:
+            conditions.append(column.in_(_typed(column, demo_ids)))
+            prefixed = _PREFIXED_IDS.get((table_name, column.name))
+            if prefixed and prefixed in demo_rows:
+                conditions.extend(column.startswith(f"{i}#") for i in sorted(demo_rows[prefixed][1]))
+        for row in db.execute(select(*pk, *marker, *id_columns).where(or_(*conditions))):
+            key = tuple(_key(v) for v in row[:len(pk)])
+            if marker and _key(row[len(pk)]) in demo_values:
+                continue  # a demo row itself, deleted with the demo rows
+            # (column, id of the demo row it names) for the ends that are set
+            ends = [
+                (name, _key(value).split('#', 1)[0])
+                for name, value in zip(columns, row[len(pk) + len(marker):])
+                if value is not None
+            ]
+            on_demo = [(name, value) for name, value in ends if value in table_of]
+            if action == 'part' or (action == 'link' and len(on_demo) == len(ends)):
+                plan.dependents.setdefault(table_name, {}).setdefault(key, 1)
+            else:
+                column_name, value = on_demo[0]
+                candidates[(table_name, column_name, table_of[value])].add(key)
 
 
 def run_demo_clear(db: Session, plan: DemoClearPlan) -> Dict[str, int]:
