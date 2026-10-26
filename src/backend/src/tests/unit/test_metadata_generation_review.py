@@ -367,3 +367,35 @@ def test_review_summary_counts_unsubmitted_and_lists_reviews(db_session, manager
     unsubmitted, reviews = manager.review_summary(db_session, run.id)
     assert unsubmitted == 1
     assert reviews == [first.review_request_id]
+
+
+def _steward_role(db_session, members):
+    """A 'Data Steward' app role whose group has ``members`` (user id -> email)."""
+    import uuid
+    from src.db_models.settings import AppRoleDb
+
+    db_session.add(AppRoleDb(id=str(uuid.uuid4()), name="Data Steward", assigned_groups='["data-stewards"]'))
+    db_session.flush()
+    group = SimpleNamespace(members=[SimpleNamespace(value=uid) for uid in members])
+    return SimpleNamespace(
+        groups=SimpleNamespace(list=lambda **_: [group]),
+        users=SimpleNamespace(get=lambda uid: SimpleNamespace(user_name=members[uid])),
+    )
+
+
+def test_resolve_reviewer_email_picks_a_steward_other_than_the_requester(db_session):
+    from unittest.mock import patch
+    from src.common.workflow_executor import resolve_reviewer_email
+
+    ws = _steward_role(db_session, {"u1": REQUESTER, "u2": REVIEWER})
+    with patch("src.common.workspace_client.get_workspace_client", return_value=ws):
+        assert resolve_reviewer_email(db_session, "DataSteward", REQUESTER) == REVIEWER
+
+
+def test_resolve_reviewer_email_is_none_when_only_the_requester_could_review(db_session):
+    from unittest.mock import patch
+    from src.common.workflow_executor import resolve_reviewer_email
+
+    ws = _steward_role(db_session, {"u1": REQUESTER})
+    with patch("src.common.workspace_client.get_workspace_client", return_value=ws):
+        assert resolve_reviewer_email(db_session, "DataSteward", REQUESTER) is None
