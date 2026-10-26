@@ -32,6 +32,12 @@ class SyncExecutor:
 
 
 @pytest.fixture(autouse=True)
+def all_tables_writable(monkeypatch):
+    """The pre-flight writability check is covered in test_metadata_generation_settings.py."""
+    monkeypatch.setattr(MetadataGenerationManager, "_unwritable_tables", lambda self, fqns, **kwargs: {})
+
+
+@pytest.fixture(autouse=True)
 def rollback_keeps_fixture_data(db_session, monkeypatch):
     """A real Session.rollback() would discard the harness's outer transaction."""
     rollback = MagicMock()

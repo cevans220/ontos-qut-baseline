@@ -69,9 +69,16 @@ def _manager(jobs=None, ws=None):
     return MetadataGenerationManager(
         settings=_settings(),
         jobs_manager=jobs or _jobs(),
-        workspace_client_factory=(lambda: ws) if ws else None,
+        # A bare mock lists no tables, so the table limit passes
+        workspace_client_factory=lambda: ws if ws is not None else MagicMock(),
         ingest_executor=SyncExecutor(),
     )
+
+
+@pytest.fixture(autouse=True)
+def all_tables_writable(monkeypatch):
+    """The pre-flight writability check is covered in test_metadata_generation_settings.py."""
+    monkeypatch.setattr(MetadataGenerationManager, "_unwritable_tables", lambda self, fqns, **kwargs: {})
 
 
 @pytest.fixture(autouse=True)

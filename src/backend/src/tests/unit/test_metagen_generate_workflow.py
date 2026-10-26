@@ -217,6 +217,7 @@ def test_main_generates_only_for_undescribed_objects_and_writes_normalized_rows(
     assert (kwargs["catalog_name"], kwargs["schema_name"]) == ("app", "ontos")
     assert kwargs["model"] == "endpoint-x"
     assert kwargs["apply_ddl"] == "false" and kwargs["allow_data"] == "false"
+    assert kwargs["add_metadata"] is True
     assert any(q.startswith("DELETE") and RUN_ID in q for q in spark.queries)
 
     rows = spark.written[-1]
@@ -230,6 +231,24 @@ def test_main_generates_only_for_undescribed_objects_and_writes_normalized_rows(
 def test_main_regenerate_existing_includes_described_tables(job, monkeypatch):
     calls = _run_main(job, monkeypatch, _main_spark(), "--regenerate_existing", "true")
     assert calls[0]["table_names"] == "main.sales.orders,main.sales.customers,main.sales.revenue"
+
+
+def test_main_passes_sampling_and_metadata_switches(job, monkeypatch):
+    calls = _run_main(
+        job, monkeypatch, _main_spark(),
+        "--allow_data", "true", "--sample_size", "7", "--add_metadata", "false",
+    )
+    kwargs = calls[0]
+    assert (kwargs["allow_data"], kwargs["sample_size"]) == ("true", "7")
+    # A real bool: dbxmetagen doesn't parse add_metadata, so "false" would be truthy
+    assert kwargs["add_metadata"] is False
+
+
+def test_main_fails_when_the_selection_exceeds_the_table_limit(job, monkeypatch):
+    spark = _main_spark()
+    with pytest.raises(SystemExit):
+        _run_main(job, monkeypatch, spark, "--max_tables", "2")
+    assert not spark.written  # nothing generated or written
 
 
 def test_main_rejects_a_non_uuid_run_id(job, monkeypatch):
