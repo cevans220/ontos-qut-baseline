@@ -61,7 +61,7 @@ def _uc(*, tables=None, schemas=None, rows=None, owners=None, views=(), privileg
     ws.schemas.list.side_effect = lambda catalog_name: [
         SimpleNamespace(name=s) for s in (schemas or {}).get(catalog_name, [])
     ]
-    ws.tables.list.side_effect = lambda catalog_name, schema_name, **kw: [
+    ws.tables.list.side_effect = lambda catalog_name, schema_name: [
         SimpleNamespace(name=t) for t in tables.get(f"{catalog_name}.{schema_name}", [])
     ]
     ws.tables.get.side_effect = lambda full_name: SimpleNamespace(

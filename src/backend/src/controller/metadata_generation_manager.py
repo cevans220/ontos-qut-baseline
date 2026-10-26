@@ -430,7 +430,8 @@ class MetadataGenerationManager:
         for catalog, schema in schemas:
             if len(seen) > stop_after:
                 break
-            for table in ws.tables.list(catalog_name=catalog, schema_name=schema, omit_columns=True, omit_properties=True):
+            # Only these two arguments: the app's CachingWorkspaceClient wraps tables.list
+            for table in ws.tables.list(catalog_name=catalog, schema_name=schema):
                 seen.add(f"{catalog}.{schema}.{table.name}".lower())
                 if len(seen) > stop_after:
                     break

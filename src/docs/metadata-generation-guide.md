@@ -8,7 +8,7 @@ Open it from **Build → Metadata Generation**.
 
 An administrator has to:
 
-1. Enable the **Metadata Generation** background job under **Settings → Jobs**. After an Ontos upgrade, update the job there as well.
+1. Enable the **Metadata Generation** background job under **Settings → Jobs**. An installed job keeps its definition: after an Ontos upgrade, turn it off and on again there to deploy the new one.
 2. Grant the app's service principal access in Unity Catalog. It reads the objects you describe and writes the descriptions back. See [UC grants for the app service principal](https://github.com/databrickslabs/ontos/blob/main/docs/decisions/uc-grants-for-app-sp.md#metadata-generation) for the full list. In short:
    - `SELECT` on what you describe.
    - `MODIFY` on tables, and ownership of views, whose descriptions should be applied.
