@@ -84,7 +84,8 @@
   "confirm": {
     "cancel": "Cancelar esta execução de geração?",
     "delete": "Excluir esta execução de geração e suas sugestões?",
-    "forceApply": "Substituir as descrições alteradas no Unity Catalog de {{count}} conflitos?"
+    "forceApply_one": "Substituir a descrição alterada no Unity Catalog de {{count}} conflito?",
+    "forceApply_other": "Substituir as descrições alteradas no Unity Catalog de {{count}} conflitos?"
   },
   "toast": {
     "cancelFailed": "Falha ao cancelar a execução",
@@ -133,10 +134,12 @@
   },
   "apply": {
     "button": "Aplicar {{count}} aprovadas",
-    "forceButton": "Forçar {{count}} conflitos",
-    "done": "{{count}} descrições aplicadas no Unity Catalog",
-    "summary": "{{conflict}} conflitos, {{notApplicable}} não aplicáveis, {{failed}} com falha",
+    "summary": "Conflitos: {{conflict}} · Não aplicáveis: {{notApplicable}} · Com falha: {{failed}}",
     "failed": "Não foi possível aplicar as descrições",
-    "appliedBy": "Aplicada por {{user}}"
+    "appliedBy": "Aplicada por {{user}}",
+    "forceButton_one": "Forçar {{count}} conflito",
+    "forceButton_other": "Forçar {{count}} conflitos",
+    "done_one": "{{count}} descrição aplicada no Unity Catalog",
+    "done_other": "{{count}} descrições aplicadas no Unity Catalog"
   }
 }

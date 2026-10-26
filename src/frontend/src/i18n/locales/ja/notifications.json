@@ -220,7 +220,7 @@
     },
     "applied": {
       "title": "生成された説明を適用しました",
-      "description": "{{selection}} の {{applied}} 件の説明を Unity Catalog に書き込みました。競合 {{conflict}} 件、適用不可 {{not_applicable}} 件、失敗 {{failed}} 件。"
+      "description": "{{selection}} について Unity Catalog に書き込み: {{applied}} 件。競合: {{conflict}} 件、適用不可: {{not_applicable}} 件、失敗: {{failed}} 件。"
     }
   }
 }

@@ -220,7 +220,7 @@
     },
     "applied": {
       "title": "Generated descriptions applied",
-      "description": "{{applied}} descriptions for {{selection}} were written to Unity Catalog; {{conflict}} conflicts, {{not_applicable}} not applicable, {{failed}} failed."
+      "description": "Written to Unity Catalog for {{selection}}: {{applied}}. Conflicts: {{conflict}}, not applicable: {{not_applicable}}, failed: {{failed}}."
     }
   }
 }

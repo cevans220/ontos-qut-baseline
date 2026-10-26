@@ -84,7 +84,8 @@
   "confirm": {
     "cancel": "Diesen Generierungslauf abbrechen?",
     "delete": "Diesen Generierungslauf und seine Vorschläge löschen?",
-    "forceApply": "Die in Unity Catalog geänderten Beschreibungen von {{count}} Konflikten überschreiben?"
+    "forceApply_one": "Die in Unity Catalog geänderte Beschreibung von {{count}} Konflikt überschreiben?",
+    "forceApply_other": "Die in Unity Catalog geänderten Beschreibungen von {{count}} Konflikten überschreiben?"
   },
   "toast": {
     "cancelFailed": "Der Lauf konnte nicht abgebrochen werden",
@@ -133,10 +134,12 @@
   },
   "apply": {
     "button": "{{count}} genehmigte anwenden",
-    "forceButton": "{{count}} Konflikte erzwingen",
-    "done": "{{count}} Beschreibungen in Unity Catalog übernommen",
-    "summary": "{{conflict}} Konflikte, {{notApplicable}} nicht anwendbar, {{failed}} fehlgeschlagen",
+    "summary": "Konflikte: {{conflict}} · Nicht anwendbar: {{notApplicable}} · Fehlgeschlagen: {{failed}}",
     "failed": "Die Beschreibungen konnten nicht angewendet werden",
-    "appliedBy": "Angewendet von {{user}}"
+    "appliedBy": "Angewendet von {{user}}",
+    "forceButton_one": "{{count}} Konflikt erzwingen",
+    "forceButton_other": "{{count}} Konflikte erzwingen",
+    "done_one": "{{count}} Beschreibung in Unity Catalog übernommen",
+    "done_other": "{{count}} Beschreibungen in Unity Catalog übernommen"
   }
 }

@@ -229,8 +229,8 @@ describe('MetadataGenerationRunDetails apply', () => {
   const conflict = { ...SUGGESTIONS[1], status: 'conflict', error: 'The description in Unity Catalog changed since it was generated' };
 
   it('applies the approved suggestions and shows the outcome per suggestion', async () => {
-    let state = { ...run('completed'), counts: { accepted: 2 }, applicable: 2 };
-    let suggestions = SUGGESTIONS.map((s) => ({ ...s, status: 'accepted' }));
+    let state: Record<string, unknown> = { ...run('completed'), counts: { accepted: 2 }, applicable: 2 };
+    let suggestions: Record<string, unknown>[] = SUGGESTIONS.map((s) => ({ ...s, status: 'accepted' }));
     api.get.mockImplementation(async (url: string) =>
       url.includes('/suggestions') ? { data: { suggestions, total: 2 } } : { data: state },
     );
@@ -259,7 +259,7 @@ describe('MetadataGenerationRunDetails apply', () => {
     api.post.mockResolvedValue({ data: { applied: 1, conflict: 0, not_applicable: 0, failed: 0, errors: [] } });
     renderPage();
 
-    await userEvent.click(await screen.findByRole('button', { name: /Force-apply 1 conflicts/ }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Force-apply 1 conflict' }));
 
     expect(window.confirm).toHaveBeenCalled();
     expect(api.post).toHaveBeenCalledWith('/api/metadata-generation/runs/run-1/apply', { force: true });

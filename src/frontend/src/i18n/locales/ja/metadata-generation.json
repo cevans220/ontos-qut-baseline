@@ -84,7 +84,8 @@
   "confirm": {
     "cancel": "この生成実行をキャンセルしますか？",
     "delete": "この生成実行とその提案を削除しますか？",
-    "forceApply": "競合 {{count}} 件について、Unity Catalog で変更された説明を上書きしますか？"
+    "forceApply_one": "競合 {{count}} 件について、Unity Catalog で変更された説明を上書きしますか？",
+    "forceApply_other": "競合 {{count}} 件について、Unity Catalog で変更された説明を上書きしますか？"
   },
   "toast": {
     "cancelFailed": "実行をキャンセルできませんでした",
@@ -133,10 +134,12 @@
   },
   "apply": {
     "button": "承認済み {{count}} 件を適用",
-    "forceButton": "競合 {{count}} 件を強制適用",
-    "done": "{{count}} 件の説明を Unity Catalog に適用しました",
-    "summary": "競合 {{conflict}} 件、適用不可 {{notApplicable}} 件、失敗 {{failed}} 件",
+    "summary": "競合: {{conflict}} · 適用不可: {{notApplicable}} · 失敗: {{failed}}",
     "failed": "説明を適用できませんでした",
-    "appliedBy": "{{user}} が適用"
+    "appliedBy": "{{user}} が適用",
+    "forceButton_one": "競合 {{count}} 件を強制適用",
+    "forceButton_other": "競合 {{count}} 件を強制適用",
+    "done_one": "{{count}} 件の説明を Unity Catalog に適用しました",
+    "done_other": "{{count}} 件の説明を Unity Catalog に適用しました"
   }
 }

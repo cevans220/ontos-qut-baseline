@@ -2281,8 +2281,12 @@ class EntityActionStepHandler(StepHandler):
         if run is None or not review_request_id:
             return StepResult(passed=False, error=f"Generation Run {entity_id} or its review not found")
         result = manager.apply_review(self._db, run, review_request_id, applied_by=context.user_email)
+        # Failed writes stay accepted for a retry from the run page: take the
+        # failure path so the requester is told. Conflicts and not applicable
+        # targets are outcomes, not failures (the summary notification lists them).
         return StepResult(
-            passed=True,
+            passed=result.failed == 0,
+            error=None if result.failed == 0 else f"{result.failed} descriptions could not be applied",
             message=(
                 f"Applied {result.applied} descriptions ({result.conflict} conflicts, "
                 f"{result.not_applicable} not applicable, {result.failed} failed)"

@@ -84,7 +84,8 @@
   "confirm": {
     "cancel": "Annuler cette exécution de génération ?",
     "delete": "Supprimer cette exécution de génération et ses suggestions ?",
-    "forceApply": "Écraser les descriptions modifiées dans Unity Catalog pour {{count}} conflits ?"
+    "forceApply_one": "Écraser la description modifiée dans Unity Catalog pour {{count}} conflit ?",
+    "forceApply_other": "Écraser les descriptions modifiées dans Unity Catalog pour {{count}} conflits ?"
   },
   "toast": {
     "cancelFailed": "Échec de l'annulation de l'exécution",
@@ -133,10 +134,12 @@
   },
   "apply": {
     "button": "Appliquer {{count}} approuvées",
-    "forceButton": "Forcer {{count}} conflits",
-    "done": "{{count}} descriptions appliquées dans Unity Catalog",
-    "summary": "{{conflict}} conflits, {{notApplicable}} non applicables, {{failed}} en échec",
+    "summary": "Conflits : {{conflict}} · Non applicables : {{notApplicable}} · En échec : {{failed}}",
     "failed": "Impossible d'appliquer les descriptions",
-    "appliedBy": "Appliquée par {{user}}"
+    "appliedBy": "Appliquée par {{user}}",
+    "forceButton_one": "Forcer {{count}} conflit",
+    "forceButton_other": "Forcer {{count}} conflits",
+    "done_one": "{{count}} description appliquée dans Unity Catalog",
+    "done_other": "{{count}} descriptions appliquées dans Unity Catalog"
   }
 }

@@ -220,7 +220,7 @@
     },
     "applied": {
       "title": "Gegenereerde beschrijvingen toegepast",
-      "description": "{{applied}} beschrijvingen voor {{selection}} zijn naar Unity Catalog geschreven; {{conflict}} conflicten, {{not_applicable}} niet van toepassing, {{failed}} mislukt."
+      "description": "Naar Unity Catalog geschreven voor {{selection}}: {{applied}}. Conflicten: {{conflict}}, niet van toepassing: {{not_applicable}}, mislukt: {{failed}}."
     }
   }
 }

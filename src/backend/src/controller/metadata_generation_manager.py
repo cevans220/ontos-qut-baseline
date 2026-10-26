@@ -1224,8 +1224,8 @@ class MetadataGenerationManager:
                     type=NotificationType.SUCCESS if clean else NotificationType.WARNING,
                     title="Generated descriptions applied",
                     description=(
-                        f"{result.applied} descriptions for {selection} were written to Unity Catalog; "
-                        f"{result.conflict} conflicts, {result.not_applicable} not applicable, {result.failed} failed."
+                        f"Written to Unity Catalog for {selection}: {result.applied}. Conflicts: {result.conflict}, "
+                        f"not applicable: {result.not_applicable}, failed: {result.failed}."
                     ),
                     link=f"/metadata-generation/runs/{run.id}",
                     created_at=_now(),

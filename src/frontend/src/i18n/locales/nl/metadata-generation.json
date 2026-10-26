@@ -84,7 +84,8 @@
   "confirm": {
     "cancel": "Deze generatierun annuleren?",
     "delete": "Deze generatierun en de bijbehorende suggesties verwijderen?",
-    "forceApply": "De in Unity Catalog gewijzigde beschrijvingen van {{count}} conflicten overschrijven?"
+    "forceApply_one": "De in Unity Catalog gewijzigde beschrijving van {{count}} conflict overschrijven?",
+    "forceApply_other": "De in Unity Catalog gewijzigde beschrijvingen van {{count}} conflicten overschrijven?"
   },
   "toast": {
     "cancelFailed": "De run kon niet worden geannuleerd",
@@ -133,10 +134,12 @@
   },
   "apply": {
     "button": "{{count}} goedgekeurde toepassen",
-    "forceButton": "{{count}} conflicten forceren",
-    "done": "{{count}} beschrijvingen toegepast in Unity Catalog",
-    "summary": "{{conflict}} conflicten, {{notApplicable}} niet van toepassing, {{failed}} mislukt",
+    "summary": "Conflicten: {{conflict}} · Niet van toepassing: {{notApplicable}} · Mislukt: {{failed}}",
     "failed": "De beschrijvingen konden niet worden toegepast",
-    "appliedBy": "Toegepast door {{user}}"
+    "appliedBy": "Toegepast door {{user}}",
+    "forceButton_one": "{{count}} conflict forceren",
+    "forceButton_other": "{{count}} conflicten forceren",
+    "done_one": "{{count}} beschrijving toegepast in Unity Catalog",
+    "done_other": "{{count}} beschrijvingen toegepast in Unity Catalog"
   }
 }

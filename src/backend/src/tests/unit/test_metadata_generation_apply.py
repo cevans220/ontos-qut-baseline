@@ -308,6 +308,57 @@ def test_a_failed_write_stays_accepted_and_is_retried(db_session, manager, uc):
     assert _apply(manager, db_session, run).applied == 1
 
 
+def test_unreadable_tables_and_bad_names_are_classified(db_session, manager, uc):
+    from databricks.sdk.errors import PermissionDenied
+
+    def get(full_name):
+        if full_name == "main.sales.secret":
+            raise PermissionDenied("no access")
+        if full_name == "main.sales.flaky":
+            raise RuntimeError("UC unavailable")
+        return FakeUC._get(uc, full_name)
+
+    uc.tables = SimpleNamespace(get=get)
+    run = _run(db_session)
+    secret = _suggestion(db_session, run, "id", table="main.sales.secret")
+    flaky = _suggestion(db_session, run, "id", table="main.sales.flaky")
+    bad_name = _suggestion(db_session, run, "id", table="main.orders")
+    review = manager.create_review_for_run(db_session, run, requester_email=REQUESTER, reviewer_email=REVIEWER)
+    manager.decide(
+        db_session, run,
+        SuggestionDecisionBatch(decisions=[SuggestionDecision(id=s.id, decision="accept") for s in (secret, flaky, bad_name)]),
+        decided_by=REVIEWER,
+    )
+    manager.close_review(db_session, review.review_request_id, approved=True)
+
+    result = _apply(manager, db_session, run)
+
+    assert (result.not_applicable, result.failed, result.applied) == (2, 1, 0)
+    for s in (secret, flaky, bad_name):
+        db_session.refresh(s)
+    assert secret.status == "not_applicable"
+    assert bad_name.status == "not_applicable"
+    # A transient read failure stays retryable
+    assert flaky.status == "accepted" and flaky.error == "Failed to read the current description"
+    assert uc.statements == []
+
+
+def test_a_failing_change_log_keeps_the_suggestion_applied(db_session, manager, uc, monkeypatch):
+    run, (s,), _ = _reviewed(db_session, manager, [("id", None)])
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("change log down")
+
+    monkeypatch.setattr("src.controller.change_log_manager.change_log_manager.log_change_with_details", boom)
+
+    result = _apply(manager, db_session, run)
+
+    assert result.applied == 1
+    db_session.refresh(s)
+    assert s.status == "applied"
+    db_session.rollback.assert_called()
+
+
 # ----------------------------------------------------------------------
 # Mirror, change log, notification
 # ----------------------------------------------------------------------
@@ -422,6 +473,23 @@ def test_workflow_apply_step_approves_the_review_and_applies(db_session, manager
     assert (s.status, s.applied_by) == ("applied", REVIEWER)
     manager._audit.log_action.assert_called_once()
     assert manager._audit.log_action.call_args.kwargs["details"]["source"] == "workflow"
+
+
+def test_workflow_apply_step_fails_when_writes_failed(db_session, manager, uc, monkeypatch):
+    from src.common.workflow_executor import EntityActionStepHandler
+
+    monkeypatch.setattr("src.common.app_state._managers_registry", {"metadata_generation_manager": manager})
+    uc.write_result = lambda statement: _failed("warehouse is stopped")
+    run, (s,), review_id = _reviewed(db_session, manager, [("id", None)], approve=False)
+
+    step = {"action": "apply_metadata_suggestions"}
+    result = EntityActionStepHandler(db_session, step).execute(_step_context(run, review_id))
+
+    # The workflow takes its failure path, which points the requester to the retry
+    assert not result.passed
+    assert result.data["failed"] == 1
+    db_session.refresh(s)
+    assert s.status == "accepted"
 
 
 def test_workflow_apply_step_fails_without_its_review(db_session, manager, monkeypatch):
