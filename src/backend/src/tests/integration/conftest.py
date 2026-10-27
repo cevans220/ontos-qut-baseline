@@ -33,10 +33,6 @@ _SQLITE_UUID = (
     'SQLite only: a UUID value is bound to a String column or a str to a Uuid '
     'column (Postgres accepts both)'
 )
-_ODCS_OWNER = (
-    'test expectation outdated: ODCS v3 has no root `owner` (the team carries it), '
-    'so the export does not emit it'
-)
 # Candidate app bugs: the test asserts the intended behaviour and fails on it.
 _NO_GROUPS = (
     'app: get_user_groups() returns [] outside LOCAL/mock mode, so an admin '
@@ -66,8 +62,6 @@ QUARANTINE = {
     'test_update_domain_circular_reference_prevention': _SQLITE_UUID,
     'test_metadata_routes.py::TestMetadataRoutes::test_delete_metadata': _SQLITE_UUID,
     'test_metadata_routes.py::TestMetadataRoutes::test_update_rich_text': _SQLITE_UUID,
-    'test_odcs_export_validation.py::TestODCSExportValidation::'
-    'test_odcs_export_has_all_required_root_fields': _ODCS_OWNER,
     'test_odcs_roundtrip.py::test_odcs_upload_then_export_roundtrip': _ODCS_DOMAIN,
     'test_pr_i_partial_put.py::TestPartialPutPreservesUnmodifiedFields': _SQLITE_UUID,
 }
