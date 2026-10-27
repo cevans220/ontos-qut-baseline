@@ -42,10 +42,6 @@ _ODCS_DOMAIN = (
     'app (candidate): an imported `domain` that matches no native domain is kept only as '
     'the ontosOriginalDomain custom property; the export omits the root `domain`'
 )
-_DP_ALIASES = (
-    'app (candidate): POST/PUT /api/data-products answer with the snake_case aliases '
-    '(output_ports, ...) while GET and the test use camelCase (outputPorts)'
-)
 _DOMAIN_NO_PARENT = (
     'app: POST /api/data-domains with a parent that does not exist answers 500, not 404'
 )
@@ -62,7 +58,6 @@ QUARANTINE = {
     'test_data_domains_routes.py::TestDataDomainsRoutes::'
     'test_update_domain_circular_reference_prevention': _DOMAIN_CYCLE,
     'test_odcs_roundtrip.py::test_odcs_upload_then_export_roundtrip': _ODCS_DOMAIN,
-    'test_pr_i_partial_put.py::TestPartialPutPreservesUnmodifiedFields': _DP_ALIASES,
 }
 
 
