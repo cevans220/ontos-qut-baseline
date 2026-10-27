@@ -37,23 +37,13 @@ _ODCS_OWNER = (
     'test expectation outdated: ODCS v3 has no root `owner` (the team carries it), '
     'so the export does not emit it'
 )
-# Candidate app bugs: the test asserts the intended behaviour and fails on it.
-_NO_GROUPS = (
-    'app: get_user_groups() returns [] outside LOCAL/mock mode, so an admin '
-    'gets 403 creating a global comment'
-)
-_AUDIT_UUID = (
-    'app: the create route puts the new id (a UUID) in the audit details, '
-    'which are not JSON serialisable, so no audit entry is written'
-)
+# Candidate app bug: the test asserts the intended behaviour and fails on it.
 _ODCS_DOMAIN = (
     'app (candidate): an imported `domain` that matches no native domain is kept only as '
     'the ontosOriginalDomain custom property; the export omits the root `domain`'
 )
 
 QUARANTINE = {
-    'test_comments_routes.py::TestCommentsRoutes::test_create_comment': _NO_GROUPS,
-    'test_costs_routes.py::TestCostsRoutes::test_create_cost_item_is_audited': _AUDIT_UUID,
     'test_costs_routes.py::TestCostsRoutes::test_delete_cost_item': _SQLITE_UUID,
     'test_costs_routes.py::TestCostsRoutes::test_update_cost_item': _SQLITE_UUID,
     'test_data_domains_routes.py::TestDataDomainsRoutes::'
