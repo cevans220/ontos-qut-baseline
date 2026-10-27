@@ -71,6 +71,7 @@ class TestPartialPutPreservesUnmodifiedFields:
             "name": "Renamed PR I Product",
             "version": "1.0.0",
             "productType": "sourceAligned",
+            "status": "draft",
             "owner": "test@example.com",
         }
         resp = client.put(f"/api/data-products/{product_id}", json=partial)
@@ -106,6 +107,7 @@ class TestPartialPutPreservesUnmodifiedFields:
             "name": "PR I Test Product",
             "version": "1.0.0",
             "productType": "sourceAligned",
+            "status": "draft",
             "owner": "test@example.com",
             "outputPorts": [
                 {
@@ -146,6 +148,7 @@ class TestPartialPutPreservesUnmodifiedFields:
             "name": created["name"],
             "version": created["version"],
             "productType": created.get("productType", "sourceAligned"),
+            "status": created["status"],
             "owner": created.get("owner"),
             "description": {"purpose": "updated purpose only"},
         }

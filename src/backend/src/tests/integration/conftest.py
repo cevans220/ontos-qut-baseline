@@ -46,24 +46,20 @@ _ODCS_DOMAIN = (
     'app (candidate): an imported `domain` that matches no native domain is kept only as '
     'the ontosOriginalDomain custom property; the export omits the root `domain`'
 )
+_DP_ALIASES = (
+    'app (candidate): POST/PUT /api/data-products answer with the snake_case aliases '
+    '(output_ports, ...) while GET and the test use camelCase (outputPorts)'
+)
 
 QUARANTINE = {
     'test_comments_routes.py::TestCommentsRoutes::test_create_comment': _NO_GROUPS,
     'test_costs_routes.py::TestCostsRoutes::test_create_cost_item_is_audited': _AUDIT_UUID,
-    'test_costs_routes.py::TestCostsRoutes::test_delete_cost_item': _SQLITE_UUID,
-    'test_costs_routes.py::TestCostsRoutes::test_update_cost_item': _SQLITE_UUID,
     'test_data_domains_routes.py::TestDataDomainsRoutes::'
     'test_create_domain_with_nonexistent_parent_fails': _SQLITE_UUID,
-    'test_data_domains_routes.py::TestDataDomainsRoutes::test_create_domain_with_parent': (
-        _SQLITE_UUID),
-    'test_data_domains_routes.py::TestDataDomainsRoutes::test_update_domain_change_parent': (
-        _SQLITE_UUID),
     'test_data_domains_routes.py::TestDataDomainsRoutes::'
     'test_update_domain_circular_reference_prevention': _SQLITE_UUID,
-    'test_metadata_routes.py::TestMetadataRoutes::test_delete_metadata': _SQLITE_UUID,
-    'test_metadata_routes.py::TestMetadataRoutes::test_update_rich_text': _SQLITE_UUID,
     'test_odcs_roundtrip.py::test_odcs_upload_then_export_roundtrip': _ODCS_DOMAIN,
-    'test_pr_i_partial_put.py::TestPartialPutPreservesUnmodifiedFields': _SQLITE_UUID,
+    'test_pr_i_partial_put.py::TestPartialPutPreservesUnmodifiedFields': _DP_ALIASES,
 }
 
 
