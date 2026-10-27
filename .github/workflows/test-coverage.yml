@@ -155,8 +155,15 @@ jobs:
     permissions:
       contents: read
       id-token: write # JFrog OIDC
-    # E2E tests temporarily disabled on all branches
-    if: false
+    # Playwright E2E: pushes to main and pull requests targeting development.
+    # Not run for merge_group, so it is not part of the merge-queue checks.
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request' && github.base_ref == 'development')
+    # A new push to the same pull request cancels the run still in progress
+    concurrency:
+      group: e2e-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
     services:
       postgres:
