@@ -1448,7 +1448,8 @@ When making breaking changes:
 
 **What's Preserved**:
 - Schema structure
-- Semantic links (authoritative definitions)
+- Semantic links: `authoritativeDefinitions` with type `http://databricks.com/ontology/uc/semanticAssignment` become semantic links on import and are written back the same way on export. The IRI is kept; the label is rebuilt from the IRI's trailing segment on import.
+- Quality rules: All rules are treated as enabled; the ODCS document does not store or support rule enablement states.
 - SLOs and terms
 - Metadata and descriptions
 

@@ -182,3 +182,55 @@ def test_operators_export_with_the_odcs_names_and_their_types():
     assert odcs_operators(check) == {
         'mustBeGreaterThan': 0, 'mustBeLessOrEqualTo': 5.5, 'mustNotBeBetween': ['a', 'b'],
     }
+
+
+def test_semantic_links_export_as_authoritative_definitions_roundtrip(
+    db_session: Session,
+):
+    """Property-level semanticAssignment authoritativeDefinitions are imported
+    as semantic links and exported back with label rebuilt from IRI tail.
+    No schema property dict has a semanticConcepts key in export.
+    """
+    from src.controller.semantic_links_manager import SemanticLinksManager
+
+    manager = _manager()
+    semantic_assignment_type = 'http://databricks.com/ontology/uc/semanticAssignment'
+
+    # Create ODCS with semanticAssignment authoritativeDefinition on a property
+    odcs = _odcs()
+    property_url = 'http://example.com/concepts/order_status'
+    odcs['schema'][0]['properties'][0]['authoritativeDefinitions'] = [
+        {'url': property_url, 'type': semantic_assignment_type}
+    ]
+
+    # Import contract
+    contract = manager.create_from_upload(db_session, odcs, current_user='alice')
+    db_session.commit()
+    db_session.refresh(contract)
+
+    # Verify semantic link was created for the property with label rebuilt from IRI
+    semantic_links_manager = SemanticLinksManager(db_session)
+    property_entity_id = f"{contract.id}#orders#order_id"
+    links = semantic_links_manager.list_for_entity(
+        entity_id=property_entity_id,
+        entity_type='data_contract_property'
+    )
+    assert len(links) > 0, f"No semantic links found for {property_entity_id}"
+    link = links[0]
+    assert link.iri == property_url
+    assert link.label == 'order status', f"Expected 'order status', got '{link.label}'"
+
+    # Export and verify
+    doc = manager.build_odcs_from_db(contract, db_session)
+    property_in_export = _column(doc, 'order_id')
+
+    # Verify semanticAssignment authoritativeDefinition is preserved
+    assert 'authoritativeDefinitions' in property_in_export
+    auth_defs = property_in_export['authoritativeDefinitions']
+    assert any(d['type'] == semantic_assignment_type and d['url'] == property_url
+               for d in auth_defs)
+
+    # Verify no semanticConcepts in any schema property
+    for schema_obj in doc.get('schema', []):
+        for prop_dict in schema_obj.get('properties', []):
+            assert 'semanticConcepts' not in prop_dict

@@ -61,7 +61,11 @@ class ColumnProperty(BaseModel):
     maxItems: Optional[int] = None
 
     # Semantic concepts for business glossary integration
-    semanticConcepts: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
+    semanticConcepts: Optional[List[Dict[str, Any]]] = Field(
+        default_factory=list,
+        description="Accepted for the editors but not stored; concepts are "
+        "stored and exported as authoritativeDefinitions of type semanticAssignment."
+    )
     authoritativeDefinitions: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
     # ODCS customProperties of the column: the ODCS list form on input, or the
     # {name: value} form the schema property editor sends; returned as a dict
@@ -129,7 +133,10 @@ class QualityRule(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     level: Optional[str] = None  # 'object' or 'property'
-    enabled: bool = True
+    enabled: bool = Field(
+        default=True,
+        description="Not stored or used. All quality rules are treated as enabled."
+    )
 
     # ODCS quality framework fields
     dimension: Optional[str] = None  # accuracy, completeness, conformity, consistency, coverage, timeliness, uniqueness
