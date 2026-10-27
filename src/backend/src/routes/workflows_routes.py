@@ -32,6 +32,7 @@ from src.models.process_workflows import (
     ProcessWorkflow,
     ProcessWorkflowCreate,
     ProcessWorkflowUpdate,
+    WorkflowScope,
     WorkflowExecution,
     WorkflowListResponse,
     WorkflowExecutionListResponse,
@@ -783,6 +784,16 @@ def _invalid_workflow_detail(validation: WorkflowValidationResult) -> dict:
     }
 
 
+def _activation_overlap_detail(conflicts: list[dict]) -> dict:
+    return {
+        'code': 'workflow_activation_overlap',
+        'message': 'Another active workflow can match the same event.',
+        'params': {'conflicts': conflicts},
+        # Keep the top-level field for clients of the original toggle endpoint.
+        'conflicts': conflicts,
+    }
+
+
 @router.post("", response_model=ProcessWorkflow)
 async def create_workflow(
     request: Request,
@@ -790,6 +801,7 @@ async def create_workflow(
     db: DBSessionDep,
     audit_manager: AuditManagerDep,
     current_user: AuditCurrentUserDep,
+    confirm_overlap: bool = Query(False, description="Confirm creation despite overlaps"),
     manager: WorkflowsManager = Depends(get_workflows_manager),
     _: bool = Depends(PermissionChecker('settings-workflows', FeatureAccessLevel.READ_WRITE)),
 ) -> ProcessWorkflow:
@@ -800,6 +812,12 @@ async def create_workflow(
     validation = manager.validate_workflow(workflow)
     if not validation.valid:
         raise HTTPException(status_code=400, detail=_invalid_workflow_detail(validation))
+
+    conflicts = manager.activation_conflicts_for(
+        workflow.trigger, workflow.scope or WorkflowScope(type='all'),
+    ) if workflow.is_active else []
+    if conflicts and not confirm_overlap:
+        raise HTTPException(status_code=409, detail=_activation_overlap_detail(conflicts))
     
     result = manager.create_workflow(workflow, created_by=user_email)
     
@@ -810,7 +828,12 @@ async def create_workflow(
         feature='process-workflows',
         action='CREATE',
         success=True,
-        details={'workflow_id': result.id, 'workflow_name': result.name}
+        details={
+            'workflow_id': result.id,
+            'workflow_name': result.name,
+            'overlap_confirmed': bool(conflicts and confirm_overlap),
+            'conflicting_workflow_ids': [item['id'] for item in conflicts],
+        }
     )
     
     return result
@@ -824,19 +847,19 @@ async def update_workflow(
     db: DBSessionDep,
     audit_manager: AuditManagerDep,
     current_user: AuditCurrentUserDep,
+    confirm_overlap: bool = Query(False, description="Confirm update despite overlaps"),
     manager: WorkflowsManager = Depends(get_workflows_manager),
     _: bool = Depends(PermissionChecker('settings-workflows', FeatureAccessLevel.READ_WRITE)),
 ) -> ProcessWorkflow:
     """Update an existing workflow."""
     user_email = current_user.email if current_user else None
+    existing = manager.get_workflow(workflow_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Workflow not found")
     
     # Validate if steps are being updated
     if workflow.steps is not None:
         # Create a full workflow for validation
-        existing = manager.get_workflow(workflow_id)
-        if not existing:
-            raise HTTPException(status_code=404, detail="Workflow not found")
-        
         full_workflow = ProcessWorkflowCreate(
             name=workflow.name or existing.name,
             description=workflow.description or existing.description,
@@ -848,6 +871,23 @@ async def update_workflow(
         validation = manager.validate_workflow(full_workflow)
         if not validation.valid:
             raise HTTPException(status_code=400, detail=_invalid_workflow_detail(validation))
+
+    resulting_active = workflow.is_active if workflow.is_active is not None else existing.is_active
+    resulting_trigger = workflow.trigger or existing.trigger
+    resulting_scope = workflow.scope or existing.scope or WorkflowScope(type='all')
+    trigger_changed = workflow.trigger is not None and workflow.trigger != existing.trigger
+    scope_was_sent = 'scope' in workflow.model_fields_set
+    scope_changed = scope_was_sent and (
+        (workflow.scope or WorkflowScope(type='all'))
+        != (existing.scope or WorkflowScope(type='all'))
+    )
+    becoming_active = resulting_active and not existing.is_active
+    check_overlap = resulting_active and (becoming_active or trigger_changed or scope_changed)
+    conflicts = manager.activation_conflicts_for(
+        resulting_trigger, resulting_scope, exclude_workflow_id=workflow_id,
+    ) if check_overlap else []
+    if conflicts and not confirm_overlap:
+        raise HTTPException(status_code=409, detail=_activation_overlap_detail(conflicts))
     
     result = manager.update_workflow(workflow_id, workflow, updated_by=user_email)
     if not result:
@@ -860,7 +900,12 @@ async def update_workflow(
         feature='process-workflows',
         action='UPDATE',
         success=True,
-        details={'workflow_id': workflow_id, 'workflow_name': result.name}
+        details={
+            'workflow_id': workflow_id,
+            'workflow_name': result.name,
+            'overlap_confirmed': bool(conflicts and confirm_overlap),
+            'conflicting_workflow_ids': [item['id'] for item in conflicts],
+        }
     )
     
     return result
@@ -914,11 +959,19 @@ async def toggle_workflow_active(
     audit_manager: AuditManagerDep,
     current_user: AuditCurrentUserDep,
     is_active: bool = Query(..., description="New active status"),
+    confirm_overlap: bool = Query(False, description="Confirm activation despite overlaps"),
     manager: WorkflowsManager = Depends(get_workflows_manager),
     _: bool = Depends(PermissionChecker('settings-workflows', FeatureAccessLevel.READ_WRITE)),
 ) -> ProcessWorkflow:
     """Toggle workflow active status."""
     user_email = current_user.email if current_user else None
+
+    existing = manager.get_workflow(workflow_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    conflicts = manager.activation_conflicts(workflow_id) if is_active and not existing.is_active else []
+    if conflicts and not confirm_overlap:
+        raise HTTPException(status_code=409, detail=_activation_overlap_detail(conflicts))
     
     result = manager.toggle_active(workflow_id, is_active, updated_by=user_email)
     if not result:
@@ -931,7 +984,12 @@ async def toggle_workflow_active(
         feature='process-workflows',
         action='TOGGLE_ACTIVE',
         success=True,
-        details={'workflow_id': workflow_id, 'is_active': is_active}
+        details={
+            'workflow_id': workflow_id,
+            'is_active': is_active,
+            'overlap_confirmed': bool(conflicts and confirm_overlap),
+            'conflicting_workflow_ids': [item['id'] for item in conflicts],
+        }
     )
     
     return result
