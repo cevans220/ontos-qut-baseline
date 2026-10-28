@@ -36,6 +36,19 @@ test.beforeAll(async ({ request }) => {
   // The publish request wizard (for_request_publish) is a default workflow
   const resp = await request.post(`${BACKEND_URL}/api/workflows/load-defaults?update_existing=false`)
   expect(resp.ok()).toBeTruthy()
+  // Default workflows are created inactive; the dialog only runs the wizard
+  // when it is active
+  const list = await (await request.get(`${BACKEND_URL}/api/workflows`)).json()
+  const workflows: { id: string; is_active: boolean; trigger?: { type?: string } }[] =
+    Array.isArray(list) ? list : list.workflows ?? []
+  const wizard = workflows.find((w) => w.trigger?.type === 'for_request_publish')
+  expect(wizard, 'the default publish request wizard').toBeTruthy()
+  if (!wizard!.is_active) {
+    const toggled = await request.post(
+      `${BACKEND_URL}/api/workflows/${wizard!.id}/toggle-active?is_active=true`,
+    )
+    expect(toggled.ok()).toBeTruthy()
+  }
 })
 
 test.describe('Approval wizard request submit', () => {
