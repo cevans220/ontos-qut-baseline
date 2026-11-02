@@ -15,30 +15,28 @@ env:
   - name: "FRONTEND_STATIC_DIR"
     value: "./static"
 
-  # Keep valueFrom to trigger database resource injection (PGHOST is also auto-injected with same value)
-  # - name: "PGHOST"
-  #   valueFrom: "database"
-  # PGDATABASE, PGPORT, PGUSER are auto-injected by Databricks Apps
-  # Keep schema (no PG* auto-injection):
-  - name: "PGSCHEMA"
+  # Lakebase PostgreSQL connection (POSTGRES_* names are what the app reads)
+  - name: "POSTGRES_HOST"
+    value: "ep-blue-morning-d6a688oy.database.ap-southeast-2.cloud.databricks.com"
+  - name: "POSTGRES_PORT"
+    value: "5432"
+  - name: "POSTGRES_DB"
     value: "app_ontos"
-  # Fallback for Lakebase when SDK < 0.95.0 can't read postgres app resource
-  - name: "LAKEBASE_INSTANCE_NAME"
-    value: "projects/ontos-db/branches/production"
-  
+  - name: "POSTGRES_DB_SCHEMA"
+    value: "public"
+  # POSTGRES_USER is intentionally omitted - auto-detected from service principal at runtime
+
   - name: "DATABRICKS_WAREHOUSE_ID"
-    valueFrom: "sql-warehouse"
-  - name: "DATABRICKS_VOLUME"
-    valueFrom: "volume"
+    value: "c683eb455ef5136f"
 
   - name: "APP_ADMIN_DEFAULT_GROUPS"
     value: '["admins"]'
   - name: "APP_AUDIT_LOG_DIR"
     value: "audit_logs"
-    #value: "/Volumes/${workspace.env.DATABRICKS_CATALOG}/${workspace.env.DATABRICKS_SCHEMA}/${workspace.env.DATABRICKS_VOLUME}/audit_logs"
 
   - name: "LLM_ENABLED"
-    value: "True"
-  - name: "LLM_ENDPOINT"
-    valueFrom: "serving-endpoint"
-  
+    value: "False"
+
+  # Tell the build script to use the pre-built frontend assets (avoids npm at deploy time)
+  - name: "SKIP_FRONTEND_BUILD"
+    value: "1"
